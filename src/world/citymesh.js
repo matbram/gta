@@ -4,6 +4,52 @@
 import * as THREE from 'three';
 import { buildFacadeMaterials, FACADE_TILE } from './textures.js';
 import { RNG } from '../core/rng.js';
+import { mergeGeometries as mergeBG } from '../../vendor/jsm/utils/BufferGeometryUtils.js';
+
+// Flatten a loaded GLB into per-material merged geometries, then instance it
+// at every entry of `list` ({x, z, rot, s}), scaled so its height ≈ targetH.
+function instancedFromModel(model, list, city, group, { targetH = null, targetW = null, yOffset = 0 } = {}) {
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  let s = 1;
+  if (targetH) s = targetH / Math.max(size.y, 0.01);
+  else if (targetW) s = targetW / Math.max(Math.max(size.x, size.z), 0.01);
+
+  // group world-baked geometries by material
+  const byMat = new Map();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry.clone();
+    g.applyMatrix4(o.matrixWorld);
+    if (!byMat.has(o.material)) byMat.set(o.material, []);
+    byMat.get(o.material).push(g);
+  });
+
+  const dummy = new THREE.Object3D();
+  const meshes = [];
+  for (const [mat, geos] of byMat) {
+    let merged;
+    try { merged = geos.length > 1 ? mergeBG(geos, false) : geos[0]; }
+    catch { merged = geos[0]; }
+    // ground the geometry at y=0 and centre x/z
+    merged.translate(-(box.min.x + size.x / 2), -box.min.y, -(box.min.z + size.z / 2));
+    const im = new THREE.InstancedMesh(merged, mat, list.length);
+    im.castShadow = true;
+    for (let k = 0; k < list.length; k++) {
+      const p = list[k];
+      dummy.position.set(p.x, city.groundHeight(p.x, p.z) + yOffset, p.z);
+      dummy.rotation.set(0, p.rot || 0, 0);
+      dummy.scale.setScalar(s * (p.s || 1));
+      dummy.updateMatrix();
+      im.setMatrixAt(k, dummy.matrix);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    group.add(im);
+    meshes.push(im);
+  }
+  return meshes;
+}
 
 const CHUNK_CELLS = 4;   // 4×4 cells per chunk
 
@@ -81,7 +127,7 @@ function translated(geo, x, y, z) {
 }
 
 // ---------------------------------------------------------------- city meshes
-export function buildCityMeshes(city, scene, seed = 1) {
+export function buildCityMeshes(city, scene, seed = 1, assets = null) {
   const { mats, setNight } = buildFacadeMaterials(seed);
   const rng = new RNG(seed + 31);
 
@@ -225,16 +271,21 @@ export function buildCityMeshes(city, scene, seed = 1) {
   const palmLeafMat = new THREE.MeshLambertMaterial({ color: 0x4f7a3a });
   const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6a48 });
 
-  // lamp: pole + arm
+  // lamp: GLB streetlight when fetched, procedural pole otherwise
   if (byKind.lamp?.length) {
-    const pole = new THREE.CylinderGeometry(0.09, 0.13, 7.2, 6);
-    pole.translate(0, 3.6, 0);
-    const arm = new THREE.BoxGeometry(1.4, 0.12, 0.12);
-    arm.translate(0.6, 7.05, 0);
-    instanced(mergeGeometries([pole.toNonIndexed ? pole : pole, arm].map(fixIndexed)), grey, byKind.lamp);
+    const lampModel = assets?.model('streetlight');
+    if (lampModel) {
+      instancedFromModel(lampModel, byKind.lamp, city, propGroup, { targetH: 6.8 });
+    } else {
+      const pole = new THREE.CylinderGeometry(0.09, 0.13, 7.2, 6);
+      pole.translate(0, 3.6, 0);
+      const arm = new THREE.BoxGeometry(1.4, 0.12, 0.12);
+      arm.translate(0.6, 7.05, 0);
+      instanced(mergeGeometries([pole, arm]), grey, byKind.lamp);
+    }
     // lamp heads (emissive at night)
     const headGeo = new THREE.BoxGeometry(0.55, 0.18, 0.3);
-    headGeo.translate(1.25, 7.0, 0);
+    headGeo.translate(lampModel ? 0.3 : 1.25, lampModel ? 6.5 : 7.0, 0);
     const headMat = new THREE.MeshLambertMaterial({ color: 0xccccbb, emissive: 0xffe9b0, emissiveIntensity: 0 });
     const heads = instanced(headGeo, headMat, byKind.lamp);
     propDefs.lampHeads = { mesh: heads, mat: headMat };
@@ -247,7 +298,7 @@ export function buildCityMeshes(city, scene, seed = 1) {
     const pools = new THREE.InstancedMesh(poolGeo, poolMat, byKind.lamp.length);
     for (let k = 0; k < byKind.lamp.length; k++) {
       const p = byKind.lamp[k];
-      dummy.position.set(p.x + 1.25, city.groundHeight(p.x, p.z) + 0.07, p.z);
+      dummy.position.set(p.x + (lampModel ? 0.3 : 1.25), city.groundHeight(p.x, p.z) + 0.07, p.z);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
@@ -260,15 +311,24 @@ export function buildCityMeshes(city, scene, seed = 1) {
 
   function fixIndexed(g) { return g.index ? g : g; }
 
-  // tree: trunk + blob
+  // tree: kenney tree cluster on grassy districts, procedural blob elsewhere
   if (byKind.tree?.length) {
-    const trunk = new THREE.CylinderGeometry(0.22, 0.3, 2.6, 6);
-    trunk.translate(0, 1.3, 0);
-    instanced(trunk, trunkMat, byKind.tree);
-    const blob = new THREE.IcosahedronGeometry(2.4, 1);
-    blob.translate(0, 4.1, 0);
-    blob.scale(1, 1.15, 1);
-    instanced(blob, leafMat, byKind.tree, () => 0, true);
+    const treeModel = assets?.model('grass-trees') || assets?.model('grass-trees-tall');
+    const grassy = [], other = [];
+    for (const p of byKind.tree) {
+      const d = city.districtAt(p.x, p.z);
+      (treeModel && (d === 'park' || d === 'suburbs' || d === 'heights') ? grassy : other).push(p);
+    }
+    if (grassy.length) instancedFromModel(treeModel, grassy, city, propGroup, { targetH: 4.6 });
+    if (other.length) {
+      const trunk = new THREE.CylinderGeometry(0.22, 0.3, 2.6, 6);
+      trunk.translate(0, 1.3, 0);
+      instanced(trunk, trunkMat, other);
+      const blob = new THREE.IcosahedronGeometry(2.4, 1);
+      blob.translate(0, 4.1, 0);
+      blob.scale(1, 1.15, 1);
+      instanced(blob, leafMat, other, () => 0, true);
+    }
   }
 
   // palm: lean trunk + fan of cones
@@ -302,11 +362,16 @@ export function buildCityMeshes(city, scene, seed = 1) {
   }
 
   if (byKind.bench?.length) {
-    const seat = new THREE.BoxGeometry(2.2, 0.1, 0.6); seat.translate(0, 0.55, 0);
-    const back = new THREE.BoxGeometry(2.2, 0.5, 0.08); back.translate(0, 0.9, -0.28);
-    const legA = new THREE.BoxGeometry(0.1, 0.55, 0.55); legA.translate(-0.9, 0.27, 0);
-    const legB = new THREE.BoxGeometry(0.1, 0.55, 0.55); legB.translate(0.9, 0.27, 0);
-    instanced(mergeGeometries([seat, back, legA, legB]), woodMat, byKind.bench);
+    const benchModel = assets?.model('bench');
+    if (benchModel) {
+      instancedFromModel(benchModel, byKind.bench, city, propGroup, { targetW: 2.0 });
+    } else {
+      const seat = new THREE.BoxGeometry(2.2, 0.1, 0.6); seat.translate(0, 0.55, 0);
+      const back = new THREE.BoxGeometry(2.2, 0.5, 0.08); back.translate(0, 0.9, -0.28);
+      const legA = new THREE.BoxGeometry(0.1, 0.55, 0.55); legA.translate(-0.9, 0.27, 0);
+      const legB = new THREE.BoxGeometry(0.1, 0.55, 0.55); legB.translate(0.9, 0.27, 0);
+      instanced(mergeGeometries([seat, back, legA, legB]), woodMat, byKind.bench);
+    }
   }
 
   if (byKind.hut?.length) {

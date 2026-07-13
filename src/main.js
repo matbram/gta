@@ -59,14 +59,30 @@ class Game {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     };
 
-    await prog(8, 'surveying the bay…');
+    await prog(5, 'unpacking the moving truck…');
+    const { Assets } = await import('./core/assets.js');
+    this.assets = new Assets();
+    await this.assets.load((f) => {
+      $('loadbar').firstElementChild.style.width = (5 + f * 18) + '%';
+    });
+
+    // HDRI environment lighting (day sky drives ambient/reflections; the
+    // day/night cycle scales its intensity)
+    const dayHdri = this.assets.hdri('day');
+    if (dayHdri) this.gfx.setEnvironmentFromEquirect(dayHdri);
+
+    // entities pull their models from the shared registry
+    const vehMod = await import('./entities/vehicle.js');
+    vehMod.setVehicleAssets(this.assets);
+
+    await prog(24, 'surveying the bay…');
     this.city = generateCity(SEED);
 
     await prog(28, 'paving 400 miles of road…');
-    this.terrain = buildTerrain(this.city, this.scene);
+    this.terrain = buildTerrain(this.city, this.scene, this.assets);
 
     await prog(55, 'raising the skyline…');
-    this.cityMeshes = buildCityMeshes(this.city, this.scene, SEED);
+    this.cityMeshes = buildCityMeshes(this.city, this.scene, SEED, this.assets);
 
     await prog(74, 'wiring the streetlights…');
     this.dayNight = new DayNight(this.scene, this.gfx);

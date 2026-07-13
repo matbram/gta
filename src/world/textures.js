@@ -151,11 +151,12 @@ export function buildFacadeMaterials(seed = 1) {
     const day = makeCanvas(size, size);
     const rects = paintWindowGrid(day.getContext('2d'), size, { ...opts, rng });
     const night = paintNightWindows(size, rects, litChance, rng, warm);
-    const m = new THREE.MeshLambertMaterial({
+    const m = new THREE.MeshStandardMaterial({
       map: tex(day),
       emissive: new THREE.Color(0xffffff),
       emissiveMap: tex(night),
       emissiveIntensity: 0,
+      roughness: 0.88, metalness: 0.02,
     });
     mats[key] = m;
     nightMats.push(m);
@@ -164,11 +165,12 @@ export function buildFacadeMaterials(seed = 1) {
   function glassStyle(key, tint, litChance) {
     const { canvas, rects } = paintGlassTower(size, tint, rng);
     const night = paintNightWindows(size, rects, litChance, rng, false);
-    const m = new THREE.MeshLambertMaterial({
+    const m = new THREE.MeshStandardMaterial({
       map: tex(canvas),
       emissive: new THREE.Color(0xffffff),
       emissiveMap: tex(night),
       emissiveIntensity: 0,
+      roughness: 0.35, metalness: 0.55,
     });
     mats[key] = m;
     nightMats.push(m);
@@ -201,7 +203,7 @@ export function buildFacadeMaterials(seed = 1) {
     const night = makeCanvas(size, size);
     const nctx = night.getContext('2d');
     nctx.fillStyle = '#000'; nctx.fillRect(0, 0, size, size);
-    const m = new THREE.MeshLambertMaterial({ map: tex(day), emissive: 0xffffff, emissiveMap: tex(night), emissiveIntensity: 0 });
+    const m = new THREE.MeshStandardMaterial({ map: tex(day), emissive: 0xffffff, emissiveMap: tex(night), emissiveIntensity: 0, roughness: 0.75, metalness: 0.25 });
     mats.metalA = m;
     const m2 = m.clone(); m2.color = new THREE.Color('#8a7a6a');
     mats.metalB = m2;
@@ -217,7 +219,7 @@ export function buildFacadeMaterials(seed = 1) {
     for (let x = 0; x < size; x += 16) { ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x, 0, 2, size); }
     ctx.strokeStyle = '#e8e0d0'; ctx.lineWidth = 6;
     ctx.strokeRect(6, 6, size - 12, size - 12);
-    const m = new THREE.MeshLambertMaterial({ map: tex(day) });
+    const m = new THREE.MeshStandardMaterial({ map: tex(day), roughness: 0.9 });
     mats.barnred = m;
   }
 
@@ -232,15 +234,15 @@ export function buildFacadeMaterials(seed = 1) {
       nctx.fillStyle = 'rgba(255,220,150,0.9)';
       nctx.fillRect(i * w + w * 0.08, 256 * 0.30, w * 0.62, 256 * 0.62);
     }
-    const m = new THREE.MeshLambertMaterial({ map: tex(canvas), emissive: 0xffffff, emissiveMap: tex(night), emissiveIntensity: 0 });
+    const m = new THREE.MeshStandardMaterial({ map: tex(canvas), emissive: 0xffffff, emissiveMap: tex(night), emissiveIntensity: 0, roughness: 0.8 });
     mats.shopfront = m;
     nightMats.push(m);
   }
 
   // roofs
-  mats.roof = new THREE.MeshLambertMaterial({ color: '#55524c' });
-  mats.roofShingle = new THREE.MeshLambertMaterial({ color: '#6a4438' });
-  mats.roofMetal = new THREE.MeshLambertMaterial({ color: '#66707a' });
+  mats.roof = new THREE.MeshStandardMaterial({ color: '#55524c', roughness: 0.95 });
+  mats.roofShingle = new THREE.MeshStandardMaterial({ color: '#6a4438', roughness: 0.9 });
+  mats.roofMetal = new THREE.MeshStandardMaterial({ color: '#66707a', roughness: 0.55, metalness: 0.5 });
 
   function setNight(intensity) {
     for (const m of nightMats) m.emissiveIntensity = intensity;

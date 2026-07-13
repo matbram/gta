@@ -23,6 +23,18 @@ const headlightOff = new THREE.Color(0xd8d8c8);
 
 let nextVehicleId = 1;
 
+// which fetched model each type uses (fallback: procedural boxes)
+const MODEL_FOR_TYPE = {
+  sedan: 'car_sedan', taxi: 'car_taxi', police: 'car_police',
+  pickup: 'vehicle-truck-red', moto: 'vehicle-motorcycle', sports: 'sports',
+};
+// civilian sedans get visual variety from sibling models
+const SEDAN_VARIANTS = ['car_sedan', 'car_hatchback', 'car_stationwagon'];
+
+// game-wide asset registry, set once at boot by main.js
+export let vehicleAssets = null;
+export function setVehicleAssets(a) { vehicleAssets = a; }
+
 export class Vehicle {
   constructor(typeKey, city, scene, colorOverride = null) {
     this.id = nextVehicleId++;
@@ -54,6 +66,124 @@ export class Vehicle {
   }
 
   buildMesh(colorOverride) {
+    if (this.buildFromAsset(colorOverride)) return;
+    this.buildProcedural(colorOverride);
+  }
+
+  // ---- GLB path -------------------------------------------------------
+  buildFromAsset(colorOverride) {
+    if (!vehicleAssets) return false;
+    let key = MODEL_FOR_TYPE[this.type];
+    if (this.type === 'sedan') {
+      const pool = SEDAN_VARIANTS.filter((k) => vehicleAssets.has(k));
+      if (pool.length) key = pool[Math.floor(Math.random() * pool.length)];
+    }
+    if (!key || !vehicleAssets.has(key)) return false;
+
+    const S = this.spec;
+    const model = vehicleAssets.model(key);
+    if (!model) return false;
+
+    // scale to spec length, sit wheels on y=0, face +z
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const modelLen = Math.max(size.x, size.z);
+    const s = S.l / modelLen;
+    model.scale.setScalar(s);
+    // kenney/kaykit vehicles face +z already; ferrari faces +z too
+    model.updateMatrixWorld(true);
+    const box2 = new THREE.Box3().setFromObject(model);
+    model.position.y = -box2.min.y;
+    if (size.x > size.z) model.rotation.y = Math.PI / 2;   // length was along x
+
+    const g = new THREE.Group();
+    g.add(model);
+
+    // clone materials so tint/damage don't leak across instances; find paint
+    const color = colorOverride ?? S.colors[Math.floor(Math.random() * S.colors.length)];
+    this.baseColor = new THREE.Color(color);
+    this.bodyMat = null;
+    const tintable = ['main', 'body', 'paint', 'colormap', 'citybits'];
+    let biggest = null, biggestCount = 0;
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      o.material = o.material.clone();
+      o.material.envMapIntensity = 0.45;    // keep windows from nuking to white
+      const n = (o.material.name || o.name || '').toLowerCase();
+      const count = o.geometry?.attributes?.position?.count ?? 0;
+      if (tintable.some((t) => n.includes(t)) && count > biggestCount) { biggest = o; biggestCount = count; }
+      else if (!biggest && count > biggestCount) { biggest = o; biggestCount = count; }
+    });
+    if (biggest) {
+      this.bodyMat = biggest.material;
+      // atlas-textured models tint multiplicatively — keep it gentle
+      if (this.type !== 'police' && this.type !== 'taxi' && colorOverride !== null) {
+        this.bodyMat.color = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45);
+      }
+    } else {
+      this.bodyMat = new THREE.MeshLambertMaterial({ color });
+    }
+
+    // wheels: nodes named *wheel*; front wheels get a steering pivot
+    this.wheels = [];
+    this.frontPivots = [];
+    const wheelNodes = [];
+    model.traverse((o) => { if (/wheel/i.test(o.name)) wheelNodes.push(o); });
+    this.wheelR = 0.34 * (S.l / 4.5);
+    for (const w of wheelNodes) {
+      const isFront = /front/i.test(w.name);
+      if (isFront) {
+        // wrap in a pivot group at the wheel's position for steering
+        const pivot = new THREE.Group();
+        w.parent.add(pivot);
+        pivot.position.copy(w.position);
+        w.position.set(0, 0, 0);
+        pivot.add(w);
+        this.frontPivots.push(pivot);
+      }
+      this.wheels.push(w);
+    }
+
+    // lights: emissive add-ons placed from the bounding box
+    const W = S.w, L2 = S.l;
+    this.headMat = new THREE.MeshLambertMaterial({ color: headlightOff, emissive: 0xfff2cc, emissiveIntensity: 0 });
+    this.tailMat = new THREE.MeshLambertMaterial({ color: 0x551512, emissive: 0xff2a1a, emissiveIntensity: 0 });
+    const ly = this.wheelR + S.h * 0.28;
+    for (const sx of [-1, 1]) {
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.05), this.headMat);
+      hl.position.set(sx * (W / 2 - 0.32), ly, L2 / 2 - 0.04);
+      g.add(hl);
+      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.05), this.tailMat);
+      tl.position.set(sx * (W / 2 - 0.32), ly, -L2 / 2 + 0.04);
+      g.add(tl);
+    }
+    if (this.type === 'taxi') {
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.28),
+        new THREE.MeshLambertMaterial({ color: 0xe8c84a, emissive: 0xe8c84a, emissiveIntensity: 0.25 }));
+      sign.position.set(0, S.h + 0.12, 0);
+      g.add(sign);
+    }
+    if (this.type === 'police') {
+      this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
+      this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x223377, emissive: 0x2244ff, emissiveIntensity: 0 });
+      const lb1 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.26), this.lightbarR);
+      lb1.position.set(-0.2, S.h + 0.06, -0.1);
+      g.add(lb1);
+      const lb2 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.26), this.lightbarB);
+      lb2.position.set(0.2, S.h + 0.06, -0.1);
+      g.add(lb2);
+    }
+
+    this.fromAsset = true;
+    this.group = g;
+    this.scene.add(g);
+    return true;
+  }
+
+  // ---- procedural fallback ---------------------------------------------
+  buildProcedural(colorOverride) {
     const S = this.spec;
     const g = new THREE.Group();
     const color = colorOverride ?? S.colors[Math.floor(Math.random() * S.colors.length)];
@@ -314,11 +444,16 @@ export class Vehicle {
 
     // wheels spin + front steer
     const spin = this.speed * dt / this.wheelR;
-    for (let i = 0; i < this.wheels.length; i++) {
-      const w = this.wheels[i];
-      w.rotation.x += spin;
-      if (this.type !== 'moto' && i < 2) w.rotation.y = this.steerVis * 0.45;
-      if (this.type === 'moto' && i === 0) w.rotation.y = this.steerVis * 0.5;
+    if (this.fromAsset) {
+      for (const w of this.wheels) w.rotation.x += spin;
+      for (const p of this.frontPivots) p.rotation.y = this.steerVis * 0.45;
+    } else {
+      for (let i = 0; i < this.wheels.length; i++) {
+        const w = this.wheels[i];
+        w.rotation.x += spin;
+        if (this.type !== 'moto' && i < 2) w.rotation.y = this.steerVis * 0.45;
+        if (this.type === 'moto' && i === 0) w.rotation.y = this.steerVis * 0.5;
+      }
     }
   }
 
@@ -337,10 +472,10 @@ export class Vehicle {
   }
 
   dispose() {
-    // geometries are built per vehicle — free them; shared materials stay
     this.group.traverse((o) => {
       if (o.isMesh) {
-        o.geometry?.dispose();
+        // asset clones share geometry with the cached original — never free those
+        if (!this.fromAsset) o.geometry?.dispose();
         if (o.material !== glassMatShared && o.material !== tireMatShared) o.material?.dispose();
       }
     });

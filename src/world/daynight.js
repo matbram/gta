@@ -110,7 +110,7 @@ export class DayNight {
         : lerp(0.95, 1.12, arc);
       this.gfx.setExposure(exposure);
       this.gfx.setBloomStrength(1 + night * 1.1);
-      this.gfx.setEnvironmentIntensity(lerp(1.0, 0.12, night));
+      this.gfx.setEnvironmentIntensity(lerp(0.5, 0.08, night));
     }
     return night;
   }

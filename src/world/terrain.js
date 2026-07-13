@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { makeGroundCanvas } from './textures.js';
 
-export function buildTerrain(city, scene) {
+export function buildTerrain(city, scene, assets = null) {
   const { SPAN, HALF, WATER_Y } = city;
 
   // ---- ground ----
@@ -22,7 +22,23 @@ export function buildTerrain(city, scene) {
   const groundTex = new THREE.CanvasTexture(groundCanvas);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = 8;
-  const mat = new THREE.MeshLambertMaterial({ map: groundTex });
+  // painted canvas stays the colour layer; a tiled asphalt normal map adds
+  // fine surface response to sun/headlights when assets are present
+  let mat;
+  const asphalt = assets?.textureSet('asphalt');
+  if (asphalt?.normalMap) {
+    const nrm = asphalt.normalMap.clone();
+    nrm.wrapS = nrm.wrapT = THREE.RepeatWrapping;
+    nrm.repeat.set(SPAN / 6, SPAN / 6);
+    nrm.needsUpdate = true;
+    mat = new THREE.MeshStandardMaterial({
+      map: groundTex, normalMap: nrm,
+      normalScale: new THREE.Vector2(0.12, 0.12),   // fine grain, not boulders
+      roughness: 0.94, metalness: 0,
+    });
+  } else {
+    mat = new THREE.MeshLambertMaterial({ map: groundTex });
+  }
   const ground = new THREE.Mesh(geo, mat);
   ground.receiveShadow = true;
   ground.name = 'terrain';
