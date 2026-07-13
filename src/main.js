@@ -209,6 +209,7 @@ class Game {
     // death / arrest hooks
     this.player.onDied = () => this.beginDeathFlow('wasted');
     this.player.onDamaged = () => this.hud.damageFlash();
+    this.player._audio = this.audio;
     this.deathFlow = null;
   }
 

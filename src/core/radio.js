@@ -52,6 +52,11 @@ export class Radio {
     lp.connect(this.audio.master);
   }
 
+  // named track per station when generated music is available
+  trackFor(i) {
+    return ['radio_neon', 'radio_costa', 'radio_slow'][i];
+  }
+
   cycle() {
     if (!this.audio.ctx) this.audio.init();
     if (!this.audio.ctx) return null;
@@ -61,8 +66,26 @@ export class Radio {
       this.stop();
       return 'RADIO OFF';
     }
+    // prefer the generated track for this station
+    const track = this.trackFor(this.station);
+    if (this.audio.buffers?.has(track)) {
+      this.playing = true;
+      this.stopSynth();
+      this.startTrack(track);
+      return STATIONS[this.station].name;
+    }
     this.start();
     return STATIONS[this.station].name;
+  }
+
+  startTrack(track) {
+    if (this._trackNode) { try { this._trackNode.src.stop(); } catch {} this._trackNode = null; }
+    const node = this.audio.playBuffer(track, { gain: 0.0001, loop: true });
+    if (node) { node.gain.gain.setTargetAtTime(0.3, this.audio.now(), 0.4); this._trackNode = node; this.usingTrack = true; }
+  }
+
+  stopSynth() {
+    if (this.bus) this.bus.gain.setTargetAtTime(0, this.audio.now(), 0.1);
   }
 
   start() {
@@ -78,6 +101,8 @@ export class Radio {
     if (this.bus && this.audio.ctx) {
       this.bus.gain.setTargetAtTime(0, this.audio.ctx.currentTime, 0.15);
     }
+    if (this._trackNode) { const n = this._trackNode; n.gain.gain.setTargetAtTime(0, this.audio.now(), 0.15); setTimeout(() => { try { n.src.stop(); } catch {} }, 400); this._trackNode = null; }
+    this.usingTrack = false;
   }
 
   setDucked(mult) {
@@ -142,6 +167,7 @@ export class Radio {
   // ---------------- sequencing ----------------
   update() {
     if (!this.playing || !this.audio.ctx) return;
+    if (this.usingTrack) return;       // sample track needs no sequencing
     const ctx = this.audio.ctx;
     const st = STATIONS[this.station];
     const stepDur = 60 / st.bpm / 4;      // 16th note

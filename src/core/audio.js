@@ -30,8 +30,57 @@ export class AudioEngine {
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
+      this.buffers = new Map();
+      this.loadManifest();
       this.onReady?.();
     } catch { this.enabled = false; }
+  }
+
+  // load the generated ElevenLabs clips (decoded once, played from buffers)
+  async loadManifest() {
+    try {
+      const res = await fetch('./assets/audio/manifest.json');
+      if (!res.ok) return;
+      const man = await res.json();
+      this.manifest = man;
+      const all = { ...man.sfx, ...man.voice, ...man.music };
+      for (const [name, url] of Object.entries(all)) {
+        fetch('./' + url).then((r) => r.arrayBuffer())
+          .then((ab) => this.ctx.decodeAudioData(ab))
+          .then((buf) => this.buffers.set(name, buf))
+          .catch(() => {});
+      }
+      this.hasFiles = true;
+    } catch {}
+  }
+
+  // play a decoded buffer with spatial gain + stereo pan from world position
+  playBuffer(name, { x, z, gain = 1, range = 90, rate = 1, loop = false } = {}) {
+    if (!this.ctx) return null;
+    const buf = this.buffers?.get(name);
+    if (!buf) return null;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    src.loop = loop;
+    const g = this.ctx.createGain();
+    let node = g;
+    let spatial = gain;
+    if (x !== undefined) {
+      spatial = this.spatialGain(x, z, gain, range);
+      if (spatial <= 0.005 && !loop) return null;
+      const pan = this.ctx.createStereoPanner?.();
+      if (pan) {
+        const p = this.game.player.pos;
+        const rel = Math.atan2(x - p.x, z - p.z) - (this.game.cameraRig?.yaw ?? 0);
+        pan.pan.value = clamp(Math.sin(rel), -0.9, 0.9);
+        g.connect(pan); pan.connect(this.master);
+      } else { g.connect(this.master); }
+    } else { g.connect(this.master); }
+    g.gain.value = spatial;
+    src.connect(g);
+    src.start();
+    return { src, gain: g };
   }
 
   // pause/resume everything (menus, map, shop) — suspends the whole context
@@ -98,6 +147,11 @@ export class AudioEngine {
   // ---------------- named SFX ----------------
   gunshot(kind = 'pistol', x, z) {
     if (!this.ctx) return;
+    // prefer the generated clip
+    if (this.buffers?.has('gun_' + kind)) {
+      this.playBuffer('gun_' + kind, x !== undefined ? { x, z, gain: 0.9, range: 170 } : { gain: 0.9 });
+      return;
+    }
     const g = x !== undefined ? this.spatialGain(x, z, 1, 160) : 1;
     if (g <= 0.01) return;
     switch (kind) {
@@ -127,41 +181,52 @@ export class AudioEngine {
     this.tone({ freq: 2400 + Math.random() * 1400, freqTo: 500, dur: 0.09, gain: 0.12 * g, type: 'triangle' });
   }
 
+  footstep(run = false) {
+    if (!this.ctx) return;
+    this.burst({ dur: run ? 0.08 : 0.06, gain: run ? 0.09 : 0.05, filterFrom: 900, filterTo: 200, q: 1.5 });
+  }
+
   punch() {
     if (!this.ctx) return;
+    if (this.buffers?.has('punch')) return void this.playBuffer('punch', { gain: 0.7 });
     this.burst({ dur: 0.08, gain: 0.5, filterFrom: 700, filterTo: 150 });
     this.tone({ freq: 120, freqTo: 60, dur: 0.08, gain: 0.35, type: 'sine' });
   }
 
   explosion(x, z) {
     if (!this.ctx) return;
+    if (this.buffers?.has('explosion')) return void this.playBuffer('explosion', x !== undefined ? { x, z, gain: 1, range: 300 } : { gain: 1 });
     const g = x !== undefined ? this.spatialGain(x, z, 1, 300) : 1;
     this.burst({ dur: 1.1, gain: 0.95 * g, filterFrom: 900, filterTo: 60 });
     this.tone({ freq: 70, freqTo: 28, dur: 0.9, gain: 0.7 * g, type: 'sine' });
   }
 
-  carDoor() { if (this.ctx) { this.tone({ freq: 220, freqTo: 120, dur: 0.07, gain: 0.3, type: 'square' }); this.burst({ dur: 0.05, gain: 0.2, filterFrom: 1200, filterTo: 300 }); } }
-  pickup() { if (this.ctx) { this.tone({ freq: 780, dur: 0.09, gain: 0.25, type: 'triangle' }); this.tone({ freq: 1170, dur: 0.12, gain: 0.25, type: 'triangle', delay: 0.08 }); } }
-  cash() { if (this.ctx) { this.tone({ freq: 1050, dur: 0.06, gain: 0.22, type: 'square' }); this.tone({ freq: 1560, dur: 0.09, gain: 0.2, type: 'square', delay: 0.06 }); } }
-  wantedUp() { if (this.ctx) { this.tone({ freq: 320, freqTo: 620, dur: 0.22, gain: 0.3, type: 'sawtooth' }); } }
+  carDoor() { if (this.buffers?.has('car_door')) return void this.playBuffer('car_door', { gain: 0.6 }); if (this.ctx) { this.tone({ freq: 220, freqTo: 120, dur: 0.07, gain: 0.3, type: 'square' }); this.burst({ dur: 0.05, gain: 0.2, filterFrom: 1200, filterTo: 300 }); } }
+  pickup() { if (this.buffers?.has('pickup')) return void this.playBuffer('pickup', { gain: 0.5 }); if (this.ctx) { this.tone({ freq: 780, dur: 0.09, gain: 0.25, type: 'triangle' }); this.tone({ freq: 1170, dur: 0.12, gain: 0.25, type: 'triangle', delay: 0.08 }); } }
+  cash() { if (this.buffers?.has('cash')) return void this.playBuffer('cash', { gain: 0.5 }); if (this.ctx) { this.tone({ freq: 1050, dur: 0.06, gain: 0.22, type: 'square' }); this.tone({ freq: 1560, dur: 0.09, gain: 0.2, type: 'square', delay: 0.06 }); } }
+  wantedUp() { if (this.buffers?.has('wanted_up')) return void this.playBuffer('wanted_up', { gain: 0.6 }); if (this.ctx) { this.tone({ freq: 320, freqTo: 620, dur: 0.22, gain: 0.3, type: 'sawtooth' }); } }
   missionPassed() {
     if (!this.ctx) return;
+    if (this.buffers?.has('mission_pass')) return void this.playBuffer('mission_pass', { gain: 0.7 });
     const notes = [523, 659, 784, 1046];
     notes.forEach((f, i) => this.tone({ freq: f, dur: 0.34, gain: 0.22, type: 'triangle', delay: i * 0.13 }));
   }
   missionFailed() {
     if (!this.ctx) return;
+    if (this.buffers?.has('mission_fail')) return void this.playBuffer('mission_fail', { gain: 0.7 });
     [392, 330, 262].forEach((f, i) => this.tone({ freq: f, dur: 0.4, gain: 0.22, type: 'triangle', delay: i * 0.16 }));
   }
-  splash(x, z) { if (this.ctx) this.burst({ dur: 0.45, gain: 0.5 * this.spatialGain(x, z, 1, 80), filterFrom: 1500, filterTo: 200 }); }
+  splash(x, z) { if (this.buffers?.has('splash')) return void this.playBuffer('splash', { x, z, gain: 0.7, range: 90 }); if (this.ctx) this.burst({ dur: 0.45, gain: 0.5 * this.spatialGain(x, z, 1, 80), filterFrom: 1500, filterTo: 200 }); }
   horn(x, z) {
     if (!this.ctx) return;
+    if (this.buffers?.has('car_horn')) return void this.playBuffer('car_horn', { x, z, gain: 0.6, range: 120 });
     const g = this.spatialGain(x, z, 0.6, 110);
     this.tone({ freq: 392, dur: 0.34, gain: 0.3 * g, type: 'sawtooth' });
     this.tone({ freq: 494, dur: 0.34, gain: 0.25 * g, type: 'sawtooth' });
   }
   screech(x, z, strength = 1) {
     if (!this.ctx) return;
+    if (this.buffers?.has('skid')) { if (this._lastScreech && this.now() - this._lastScreech < 0.3) return; this._lastScreech = this.now(); return void this.playBuffer('skid', { x, z, gain: 0.4 * strength, range: 90 }); }
     if (this._lastScreech && this.now() - this._lastScreech < 0.24) return;
     this._lastScreech = this.now();
     const g = this.spatialGain(x, z, 0.6, 80) * strength;
@@ -176,9 +241,43 @@ export class AudioEngine {
     this.tone({ freq: f, freqTo: f * 1.6, dur: 0.28, gain: 0.14 * g, type: 'sawtooth' });
   }
 
+  // ---------------- ped voice barks + ambient ----------------
+  bark(name, x, z) {
+    if (!this.ctx || !this.buffers?.has(name)) return;
+    if (this._lastBark && this.now() - this._lastBark < 0.6) return;   // don't overlap chatter
+    const g = this.spatialGain(x, z, 0.9, 55);
+    if (g < 0.08) return;
+    this._lastBark = this.now();
+    this.playBuffer(name, { x, z, gain: 0.9, range: 55 });
+  }
+
+  // looped ambient bed, crossfaded by district/time (one active at a time)
+  setAmbient(name) {
+    if (!this.ctx) return;
+    if (this._ambientName === name) return;
+    this._ambientName = name;
+    // fade out old
+    if (this._ambient) {
+      const old = this._ambient;
+      old.gain.gain.setTargetAtTime(0, this.now(), 0.6);
+      setTimeout(() => { try { old.src.stop(); } catch {} }, 1500);
+      this._ambient = null;
+    }
+    if (name && this.buffers?.has(name)) {
+      const node = this.playBuffer(name, { gain: 0.0001, loop: true });
+      if (node) { node.gain.gain.setTargetAtTime(0.28, this.now(), 0.8); this._ambient = node; }
+    }
+  }
+
   // ---------------- engine loop (player vehicle) ----------------
   startEngine() {
-    if (!this.ctx || this.engineNodes) return;
+    if (!this.ctx) return;
+    // sample-based engine: loop the idle clip and pitch-bend it by RPM
+    if (this.buffers?.has('engine_idle') && !this.engineSample) {
+      const node = this.playBuffer('engine_idle', { gain: 0.0001, loop: true });
+      if (node) { node.gain.gain.value = 0.12; this.engineSample = node; return; }
+    }
+    if (this.engineNodes) return;
     const osc = this.ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.value = 55;
@@ -195,6 +294,12 @@ export class AudioEngine {
   }
 
   stopEngine() {
+    if (this.engineSample) {
+      const s = this.engineSample;
+      s.gain.gain.setTargetAtTime(0, this.now(), 0.1);
+      setTimeout(() => { try { s.src.stop(); } catch {} }, 300);
+      this.engineSample = null;
+    }
     if (!this.engineNodes) return;
     const { osc, osc2, g } = this.engineNodes;
     g.gain.linearRampToValueAtTime(0, this.now() + 0.15);
@@ -203,6 +308,12 @@ export class AudioEngine {
   }
 
   setEngine(speedNorm, throttle) {
+    if (this.engineSample) {
+      // pitch + volume track rpm
+      this.engineSample.src.playbackRate.value = 0.7 + speedNorm * 1.8 + (throttle ? 0.15 : 0);
+      this.engineSample.gain.gain.value = 0.1 + speedNorm * 0.1 + (throttle ? 0.04 : 0);
+      return;
+    }
     if (!this.engineNodes) return;
     const { osc, osc2, f, g } = this.engineNodes;
     const rpm = 0.18 + speedNorm * 0.82;
@@ -215,6 +326,16 @@ export class AudioEngine {
   // ---------------- police siren loops ----------------
   startSiren(key, getPos) {
     if (!this.ctx || this.sirens.has(key) || this.sirens.size >= 2) return;
+    // sample-based siren loop
+    if (this.buffers?.has('siren')) {
+      const p = getPos();
+      const node = this.playBuffer('siren', { gain: 0.0001, loop: true });
+      if (node) {
+        node.gain.gain.value = this.spatialGain(p.x, p.z, 0.2, 260);
+        this.sirens.set(key, { sample: node, getPos });
+        return;
+      }
+    }
     const osc = this.ctx.createOscillator();
     osc.type = 'triangle';
     const lfo = this.ctx.createOscillator();
@@ -233,7 +354,7 @@ export class AudioEngine {
   stopSiren(key) {
     const s = this.sirens.get(key);
     if (!s) return;
-    try { s.osc.stop(); s.lfo.stop(); } catch {}
+    try { if (s.sample) s.sample.src.stop(); else { s.osc.stop(); s.lfo.stop(); } } catch {}
     this.sirens.delete(key);
   }
 
@@ -241,8 +362,28 @@ export class AudioEngine {
     if (!this.ctx) return;
     for (const [, s] of this.sirens) {
       const p = s.getPos();
-      s.g.gain.value = this.spatialGain(p.x, p.z, 0.14, 260);
+      const g = this.spatialGain(p.x, p.z, s.sample ? 0.22 : 0.14, 260);
+      if (s.sample) s.sample.gain.gain.value = g;
+      else s.g.gain.value = g;
     }
+    // ambient bed follows district / time / interior
+    this.updateAmbient();
     this.radio?.update?.(dt);
+  }
+
+  updateAmbient() {
+    const game = this.game;
+    if (!game.player || game.state.mode !== 'play') return;
+    let want = null;
+    if (game.interiors?.current === 'club') want = 'amb_club';
+    else if (game.player.vehicle) want = null;      // engine covers it
+    else {
+      const d = game.city.districtAt(game.player.pos.x, game.player.pos.z);
+      const night = game.dayNight?.nightIntensity > 0.5;
+      if (d === 'beach') want = 'amb_beach';
+      else if (d === 'park') want = 'amb_park';
+      else want = night ? 'amb_city_night' : 'amb_city_day';
+    }
+    this.setAmbient(want);
   }
 }

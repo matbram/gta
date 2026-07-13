@@ -130,12 +130,16 @@ export class Ped {
     this.panicked = true;
     this.stateT = 0;
     switch (reaction) {
-      case 'fight': this.state = 'fight'; break;
-      case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); break;
-      case 'film': this.state = 'film'; break;
-      case 'call': this.state = 'call'; this.callT = 0; break;
-      default: this.state = 'flee';
+      case 'fight': this.state = 'fight'; this.bark(game, 'bark_backoff'); break;
+      case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); this.bark(game, 'bark_help'); break;
+      case 'film': this.state = 'film'; this.bark(game, 'bark_photo'); break;
+      case 'call': this.state = 'call'; this.callT = 0; this.bark(game, 'bark_help'); break;
+      default: this.state = 'flee'; this.bark(game, Math.random() < 0.5 ? 'bark_run' : 'bark_help');
     }
+  }
+
+  bark(game, name) {
+    if (game && Math.random() < 0.6) game.audio?.bark(name, this.pos.x, this.pos.z);
   }
 
   damage(amount, game, source = 'player', impact = null) {

@@ -195,6 +195,15 @@ export class Player {
 
     this.rig.update(dt, this.speed2d);
     this.syncRig();
+
+    // footsteps synced to gait
+    if (this.grounded && this.speed2d > 1) {
+      this.stepPhase = (this.stepPhase || 0) + this.speed2d * dt * 0.9;
+      if (this.stepPhase >= 1) {
+        this.stepPhase -= 1;
+        this._audio?.footstep(this.speed2d > 4);
+      }
+    }
   }
 
   collide() {
