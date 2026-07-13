@@ -1,15 +1,16 @@
 {
-  "schema_version": 1,
-  "connector_version": 3,
-  "mode": "cloud_advisory",
-  "capture_prompts": false,
   "capture_assistant_messages": true,
-  "max_event_bytes": 65536,
+  "capture_prompts": false,
+  "connector_version": 4,
   "max_brief_chars": 8000,
+  "max_event_bytes": 65536,
+  "mode": "cloud_advisory",
+  "repository": "matbram/gta",
+  "schema_version": 1,
   "test": {
+    "command": null,
     "execution_mode": "claude",
-    "working_directory": ".",
     "setup_command": null,
-    "command": null
+    "working_directory": "."
   }
 }
