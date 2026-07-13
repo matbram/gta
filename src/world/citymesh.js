@@ -189,6 +189,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     arr.push(geo);
   }
 
+  const bandLists = [[], [], []];   // walk-in shopfront ground floors per variant
   const towerMats = ['glassA', 'glassB', 'office'];
   const blockMats = ['brick', 'stucco', 'office', 'concrete'];
   const houseMats = ['houseA', 'houseB', 'houseA', 'stucco'];
@@ -219,11 +220,21 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       }
       case 'block': {
         const mk = blockMats[b.style % blockMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
+        const sfv = Math.abs(Math.round(b.x * 7 + b.z * 3)) % 3;
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w, 0.45, b.d), b.x, baseY + H + 0.22, b.z));
-        // street-level shopfront band, slightly proud of the facade
-        const sf = facadeBox(b.w + 0.5, 3.2, b.d + 0.5, FACADE_TILE, 3.2);
-        push(ck, 'shopfront' + (Math.abs(Math.round(b.x * 7 + b.z * 3)) % 3), translated(sf, b.x, ground + 1.6, b.z));
+        if (b.hasDoor) {
+          // walk-in shopfront: the merged shell starts above the ground
+          // floor; the ground floor is a swappable instanced band that the
+          // interiors system hides when it hollows the building out
+          const upperH = Math.max(b.h - 3.2, 1);
+          push(ck, mk, translated(facadeBox(b.w, upperH, b.d), b.x, ground + 3.2 + upperH / 2, b.z));
+          bandLists[sfv].push(b);
+        } else {
+          push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
+          // street-level shopfront band, slightly proud of the facade
+          const sf = facadeBox(b.w + 0.5, 3.2, b.d + 0.5, FACADE_TILE, 3.2);
+          push(ck, 'shopfront' + sfv, translated(sf, b.x, ground + 1.6, b.z));
+        }
         break;
       }
       case 'house': {
@@ -274,6 +285,32 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     }
   }
   scene.add(cityGroup);
+
+  // swappable ground-floor bands for the walk-in shopfronts (one instanced
+  // mesh per shopfront variant; interiors zero a slot to hollow a building)
+  {
+    const dummy2 = new THREE.Object3D();
+    const bandGeo = facadeBox(12, 3.2, 12, FACADE_TILE, 3.2);
+    for (let v = 0; v < 3; v++) {
+      const list = bandLists[v];
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(bandGeo, mats['shopfront' + v], list.length);
+      im.castShadow = true;
+      im.receiveShadow = true;
+      for (let k = 0; k < list.length; k++) {
+        const b = list[k];
+        const g = city.groundHeight(b.x, b.z);
+        dummy2.position.set(b.x, g + 1.6, b.z);
+        dummy2.scale.set((b.w + 0.5) / 12, 1, (b.d + 0.5) / 12);
+        dummy2.updateMatrix();
+        im.setMatrixAt(k, dummy2.matrix);
+        b._bandSlot = { mesh: im, idx: k };
+      }
+      im.instanceMatrix.needsUpdate = true;
+      cityGroup.add(im);
+      drawCalls++;
+    }
+  }
 
   // ---------------------------------------------------------------- props (instanced)
   // All street furniture + vegetation are original generated meshes from

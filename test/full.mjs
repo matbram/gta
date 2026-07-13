@@ -27,9 +27,31 @@ await step('wanted', () => { if (window.__game.game.player.vehicle) window.__gam
 await step('combat', () => { const g = window.__game.game; g.combat.select('rifle'); g.input.mouseDown[2]=true; for(let i=0;i<5;i++){g.input.mousePressed[0]=true;window.__game.tick(0.15);} g.input.mouseDown[2]=false; });
 await step('firstperson', () => { const g = window.__game.game; for(let i=0;i<3;i++) g.cameraRig.cycleDistance(); window.__game.tick(0.5); g.cameraRig.cycleDistance(); });
 await step('respray-clear', () => { window.__game.game.wanted.clear(); window.__game.tick(1); });
-await step('interior', () => { const g = window.__game.game; g.interiors.enter('store', 0, {x:0,z:0,heading:0}); window.__game.tick(1); });
-await step('rob', () => { const g = window.__game.game; const t = g.interiors.templates.store; g.player.teleport(t.keeper.pos.x, t.keeper.pos.z+3); g.input.mouseDown[2]=true; window.__game.tick(4); g.input.mouseDown[2]=false; });
-await step('exit-interior', () => { const g = window.__game.game; g.interiors.exit(); window.__game.tick(1); });
+await step('interior', () => {
+  const g = window.__game.game;
+  const rec = g.interiors.recs.find((rr) => rr.template === 'store');
+  g.player.teleport(rec.door.x, rec.door.z + rec.door.face * 3);
+  window.__game.tick(1);
+  g.player.teleport(rec.b.x, rec.b.z);
+  window.__game.tick(1);
+  if (!g.interiors.playerInside) throw new Error('walk-in failed');
+});
+await step('rob', () => {
+  const g = window.__game.game;
+  const rec = g.interiors.playerInside;
+  const k = rec.keeper;
+  g.player.teleport(k.pos.x, k.pos.z + (rec.door.face > 0 ? 3 : -3));
+  g.input.mouseDown[2] = true;
+  window.__game.tick(4);
+  g.input.mouseDown[2] = false;
+});
+await step('exit-interior', () => {
+  const g = window.__game.game;
+  const rec = g.interiors.playerInside;
+  g.player.teleport(rec.door.x, rec.door.z + rec.door.face * 3.5);
+  window.__game.tick(1);
+  if (g.interiors.playerInside) throw new Error('still inside');
+});
 await step('radio', () => window.__game.game.audio.radio.cycle());
 await step('soak', () => window.__game.tick(30));
 

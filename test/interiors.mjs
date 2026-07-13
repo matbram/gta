@@ -1,6 +1,7 @@
-// G5 check: interiors — enter/exit, robbery, heat-on-exit, bed save, counter shop.
+// H6 checks: WALK-IN interiors — no fade, no teleport. Buildings hollow out
+// on approach, you walk through the door gap, rob the register, walk out,
+// sleep at the safehouse, buy at the gun counter.
 import { chromium } from 'playwright';
-
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--no-sandbox'],
@@ -12,105 +13,151 @@ page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 await page.goto('http://localhost:8080/?q=low', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => window.__game?.mode === 'menu', null, { timeout: 240000 });
 await page.evaluate(() => window.__game.newGame());
+await page.evaluate(() => window.__game.tick(0.5));
 
-// door count sanity
-const doors = await page.evaluate(() => window.__game.game.city.doors.length);
-console.log('doors:', doors, doors > 100 ? 'DOORS OK' : 'DOORS FAIL');
+// enterable doors registered (some are slope-skipped by design)
+{
+  const n = await page.evaluate(() => window.__game.game.interiors.recs.length);
+  console.log('doors:', n, n > 400 ? 'DOORS OK' : 'DOORS FAIL');
+}
 
-// walk into the nearest store door → interior
-await page.evaluate(() => {
-  const g = window.__game.game;
-  const d = g.city.doors[0];
-  g.player.teleport(d.x, d.z);
-  window.__game.tick(0.5);
-});
-const inside = await page.evaluate(() => ({
-  current: window.__game.game.interiors.current,
-  px: Math.round(window.__game.game.player.pos.x),
-  interiorY: window.__game.game.player.interiorY,
-}));
-console.log('inside:', JSON.stringify(inside),
-  inside.current && inside.px > 2000 && inside.interiorY === 0 ? 'ENTER OK' : 'ENTER FAIL');
+// 1) WALK into a store: approach → building hollows → step through the gap.
+//    Position is sampled every tick; any jump > 1.5 m would be a teleport.
+{
+  const r = await page.evaluate(() => {
+    const g = window.__game.game;
+    const rec = g.interiors.recs.find((rr) => rr.template === 'store');
+    if (!rec) return { fail: 'no store rec' };
+    const d = rec.door;
+    // stand just outside the door, facing the doorway
+    const outZ = d.z + d.face * 3.2;
+    g.player.teleport(d.x, outZ, d.face > 0 ? Math.PI : 0);
+    window.__game.tick(1);              // streamer hollows the building
+    const built = !!rec.built;
+    // walk forward (into the store), sampling per-tick displacement
+    const walkHeading = d.face > 0 ? Math.PI : 0;   // toward the building
+    g.cameraRig.snapBehind(walkHeading);
+    let maxStep = 0;
+    let prev = { x: g.player.pos.x, z: g.player.pos.z };
+    for (let i = 0; i < 60; i++) {
+      g.player.pos.x += Math.sin(walkHeading) * 0.12;
+      g.player.pos.z += Math.cos(walkHeading) * 0.12;
+      window.__game.tick(1 / 15);
+      const step = Math.hypot(g.player.pos.x - prev.x, g.player.pos.z - prev.z);
+      maxStep = Math.max(maxStep, step);
+      prev = { x: g.player.pos.x, z: g.player.pos.z };
+      if (g.interiors.playerInside) break;
+    }
+    const rec2 = g.interiors.playerInside;
+    return {
+      built,
+      inside: !!rec2, current: g.interiors.current,
+      maxStep: +maxStep.toFixed(2),
+      inFootprint: rec2 ? Math.abs(g.player.pos.x - rec2.b.x) < rec2.b.w / 2 + 1 &&
+        Math.abs(g.player.pos.z - rec2.b.z) < rec2.b.d / 2 + 1 : false,
+      interiorY: g.player.interiorY,
+      camUnderCeil: g.camera.position.y < (rec2 ? rec2.built.gy + 3.2 : 99),
+    };
+  });
+  console.log('walk-in:', JSON.stringify(r),
+    r.built && r.inside && r.current === 'store' && r.maxStep < 1.5 && r.inFootprint && r.camUnderCeil
+      ? 'WALKIN OK' : 'WALKIN FAIL');
+}
 
-// rob the keeper: aim a pistol nearby
-const rob = await page.evaluate(async () => {
-  const g = window.__game.game;
-  g.combat.give('pistol', 30);
-  const tpl = g.interiors.templates[g.interiors.current];
-  // stand near the keeper and hold aim
-  g.player.teleport(tpl.keeper.pos.x, tpl.keeper.pos.z + 3);
-  g.input.mouseDown[2] = true;
-  window.__game.tick(4);
-  g.input.mouseDown[2] = false;
-  return {
-    drops: g.interiors.robDrops,
-    pendingHeat: g.interiors.pendingHeat,
-    keeperAnim: tpl.keeper.rig.anim ?? 'n/a',
-    cash: g.worldlife.pickups.filter((p) => p.kind === 'cash').length,
-  };
-});
-console.log('robbery:', JSON.stringify(rob),
-  rob.drops > 0 && rob.pendingHeat > 0 ? 'ROB OK' : 'ROB FAIL');
+// 2) robbery: hold a gun on the keeper → register spits cash → heat banked
+{
+  const r = await page.evaluate(() => {
+    const g = window.__game.game;
+    const rec = g.interiors.playerInside;
+    if (!rec) return { fail: 'not inside' };
+    window.__game.giveWeapon('pistol', 60);
+    g.combat.current = 'pistol';
+    window.__game.tick(0.5);   // furnish tick (keeper spawns < 45 m)
+    const keeper = rec.keeper;
+    if (!keeper) return { fail: 'no keeper' };
+    g.player.teleport(keeper.pos.x, keeper.pos.z + (rec.door.face > 0 ? 3 : -3));
+    g.input.mouseDown[2] = true;
+    window.__game.tick(6);
+    g.input.mouseDown[2] = false;
+    return {
+      drops: g.interiors.robDrops,
+      pendingHeat: g.interiors.pendingHeat,
+      keeperAnim: keeper.rig.anim,
+    };
+  });
+  console.log('robbery:', JSON.stringify(r),
+    r.drops >= 3 && r.pendingHeat >= 95 ? 'ROB OK' : 'ROB FAIL');
+}
 
-// exit → heat applies
-await page.evaluate(() => {
-  const g = window.__game.game;
-  const tpl = g.interiors.templates[g.interiors.current];
-  // walk deeper in first (arms the exit), then step onto the doorway
-  g.player.teleport(tpl.spawn.x, tpl.spawn.z - 3);
-  window.__game.tick(0.3);
-  g.interiors.exitArmed = true;
-  g.player.pos.set(tpl.spawn.x, 0, tpl.exitZ);
-  window.__game.tick(1.5);
-});
-const outside = await page.evaluate(() => ({
-  current: window.__game.game.interiors.current,
-  stars: window.__game.wanted(),
-  interiorY: window.__game.game.player.interiorY,
-}));
-console.log('after exit:', JSON.stringify(outside),
-  !outside.current && outside.stars >= 2 && outside.interiorY === null ? 'EXIT+HEAT OK' : 'EXIT FAIL');
+// 3) walk out: heat lands, interiorY clears, still no teleport
+{
+  const r = await page.evaluate(() => {
+    const g = window.__game.game;
+    const rec = g.interiors.playerInside;
+    if (!rec) return { fail: 'not inside' };
+    const d = rec.door;
+    const outHeading = d.face > 0 ? 0 : Math.PI;   // out through the doorway
+    g.player.teleport(d.x, d.z - d.face * 1.2);    // step to just inside the gap
+    let maxStep = 0;
+    let prev = { x: g.player.pos.x, z: g.player.pos.z };
+    for (let i = 0; i < 40 && g.interiors.playerInside; i++) {
+      g.player.pos.x += Math.sin(outHeading) * 0.12;
+      g.player.pos.z += Math.cos(outHeading) * 0.12;
+      window.__game.tick(1 / 15);
+      const step = Math.hypot(g.player.pos.x - prev.x, g.player.pos.z - prev.z);
+      maxStep = Math.max(maxStep, step);
+      prev = { x: g.player.pos.x, z: g.player.pos.z };
+    }
+    return {
+      outside: !g.interiors.playerInside,
+      stars: g.state.wanted.stars,
+      interiorY: g.player.interiorY,
+      maxStep: +maxStep.toFixed(2),
+    };
+  });
+  console.log('walk-out:', JSON.stringify(r),
+    r.outside && r.stars >= 2 && r.interiorY === null && r.maxStep < 1.5 ? 'EXIT+HEAT OK' : 'EXIT+HEAT FAIL');
+}
 
-// safehouse: bed save
-const bed = await page.evaluate(() => {
-  const g = window.__game.game;
-  g.wanted.clear();
-  const p = g.city.pois.safehouse;
-  g.player.teleport(p.x, p.z);
-  window.__game.tick(1.5);
-  return true;
-});
-const bedSave = await page.evaluate(() => {
-  const g = window.__game.game;
-  const tpl = g.interiors.templates.safehouse;
-  const t0 = g.dayNight.minutes;
-  g.player.teleport(tpl.bed.x, tpl.bed.z);
-  window.__game.tick(1);
-  return {
-    current: g.interiors.current,
-    slept: ((g.dayNight.minutes - t0) + 1440) % 1440 >= 359,
-    hasSave: g.save.hasSave(),
-  };
-});
-console.log('bed save:', JSON.stringify(bedSave),
-  bedSave.current === 'safehouse' && bedSave.slept && bedSave.hasSave ? 'BED OK' : 'BED FAIL');
-
-// gun shop counter opens the buy menu (fresh entry)
-const shopFinal = await page.evaluate(() => {
-  const g = window.__game.game;
-  if (g.interiors.current) { g.interiors.exit(); window.__game.tick(1.5); }
-  const p = g.city.pois.gunShop;
-  g.player.teleport(p.x, p.z);
-  window.__game.tick(1.5);
-  const tpl = g.interiors.templates.gunshop;
-  if (g.interiors.current === 'gunshop') {
-    g.player.pos.set(tpl.register.x, 0, tpl.register.z + 1.5);
+// 4) safehouse bed save (teleport setup is fine — walk-in already proven)
+{
+  const r = await page.evaluate(() => {
+    const g = window.__game.game;
+    g.wanted.clear?.();
+    window.__game.setWanted(0);
+    const rec = g.interiors.recs.find((rr) => rr.template === 'safehouse');
+    if (!rec) return { fail: 'no safehouse' };
+    g.player.teleport(rec.door.x, rec.door.z + rec.door.face * 3);
     window.__game.tick(1);
-  }
-  return { current: g.interiors.current, mode: g.state.mode };
-});
-console.log('gun counter:', JSON.stringify(shopFinal),
-  shopFinal.current === 'gunshop' && shopFinal.mode === 'shop' ? 'COUNTER OK' : 'COUNTER FAIL');
+    if (!rec.built) return { fail: 'not built' };
+    g.player.teleport(rec.bed.x + 0.5, rec.bed.z);
+    window.__game.tick(1.5);
+    return {
+      current: g.interiors.current,
+      slept: !!g.interiors.bedCooldown,
+      hasSave: !!localStorage.getItem('bayvale-save-v1'),
+    };
+  });
+  console.log('bed save:', JSON.stringify(r),
+    r.current === 'safehouse' && r.slept && r.hasSave ? 'BED OK' : 'BED FAIL');
+}
 
-console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 10).join('\n') : 'NO CONSOLE ERRORS');
+// 5) gun-shop counter opens the buy menu
+{
+  const r = await page.evaluate(() => {
+    const g = window.__game.game;
+    const rec = g.interiors.recs.find((rr) => rr.template === 'gunshop');
+    if (!rec) return { fail: 'no gunshop' };
+    g.player.teleport(rec.door.x, rec.door.z + rec.door.face * 3);
+    window.__game.tick(1);
+    if (!rec.built || !rec.register) return { fail: 'not built', built: !!rec.built };
+    g.player.teleport(rec.register.x, rec.register.z + (rec.door.face > 0 ? 1.4 : -1.4));
+    window.__game.tick(1);
+    return { current: g.interiors.current, mode: g.state.mode };
+  });
+  console.log('gun counter:', JSON.stringify(r),
+    r.current === 'gunshop' && r.mode === 'shop' ? 'COUNTER OK' : 'COUNTER FAIL');
+}
+
+console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 8).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();

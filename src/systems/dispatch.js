@@ -94,7 +94,7 @@ export class Dispatch {
     // guarantee arrival: if the direct route wedged the truck somewhere,
     // it "finds a way through" — snap to the nearest road point to the scene
     unit.driveT = (unit.driveT ?? 0) + dt;
-    if (unit.driveT > 45) {
+    if (unit.driveT > 25) {
       const ep = this.game.city.nearestEdgePoint(tx, tz);
       if (ep) {
         v.pos.set(ep.x, this.game.city.groundHeight(ep.x, ep.z), ep.z);

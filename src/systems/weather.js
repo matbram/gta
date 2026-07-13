@@ -74,8 +74,8 @@ export class Weather {
     game.terrain?.setCloudCover?.(this.cloud, this.rain);
     game.terrain?.setWet?.(this.rain);
 
-    // rain volume follows the camera
-    const raining = this.rain > 0.06;
+    // rain volume follows the camera (hidden while inside a building)
+    const raining = this.rain > 0.06 && !game.interiors?.playerInside;
     this.rainMesh.visible = raining;
     if (raining) {
       const c = game.camera.position;

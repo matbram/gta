@@ -49,7 +49,7 @@ export class CameraRig {
 
   // target: Vector3 (feet), targetHeight: metres above feet to look at
   update(dt, target, targetHeight = 1.55, opts = {}) {
-    const { driving = false, speed = 0, aimMode = false } = opts;
+    const { driving = false, speed = 0, aimMode = false, ceilY = null } = opts;
     this.aim = aimMode;
 
     // ---- first-person ----
@@ -87,6 +87,7 @@ export class CameraRig {
     }
 
     let wantDist = aimMode ? 3.0 : (driving ? this.dist + 1.6 : this.dist);
+    if (ceilY !== null) wantDist = Math.min(wantDist, 3.4);   // rooms are tight
     this.curDist = damp(this.curDist, wantDist, 6, dt);
 
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
@@ -129,6 +130,8 @@ export class CameraRig {
     // stay above terrain
     const g = this.city.groundHeight(px, pz);
     if (py < g + 0.45) py = g + 0.45;
+    // …and under the ceiling while indoors
+    if (ceilY !== null && py > ceilY) py = ceilY;
 
     // shake
     if (this.shakeAmp > 0.001) {

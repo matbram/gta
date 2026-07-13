@@ -128,12 +128,14 @@ export class WantedSystem {
     const resp = RESPONSE[stars];
 
     // ---- evasion / decay ----
+    // ducking into a store breaks line of sight: hiding indoors works
+    const indoors = !!game.interiors?.playerInside;
     let seen = false;
-    for (const c of this.footCops) {
+    if (!indoors) for (const c of this.footCops) {
       if (!c.dead && distSq2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z) < 70 * 70 &&
           this.lineOfSight(c.pos.x, c.pos.y + 1.5, c.pos.z, player.pos.x, player.pos.y + 1, player.pos.z)) { seen = true; break; }
     }
-    if (!seen) for (const cr of this.cruisers) {
+    if (!seen && !indoors) for (const cr of this.cruisers) {
       const v = cr.vehicle;
       if (v.dead) continue;
       const d2 = distSq2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);

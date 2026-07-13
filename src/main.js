@@ -189,7 +189,11 @@ class Game {
 
   newGame() {
     const sp = this.city.pois.safehouse;
-    this.player.teleport(sp ? sp.x : 0, sp ? sp.z - 3 : 0, Math.PI);
+    const face = sp?.face ?? -1;
+    // spawn on the sidewalk outside the safehouse door, facing it
+    // (sp sits 5 m out from the door; step 2 m back toward it, clear of the
+    // parking lane)
+    this.player.teleport(sp ? sp.x : 0, sp ? sp.z - face * 2 : 0, face > 0 ? Math.PI : 0);
     this.cameraRig.snapBehind(this.player.heading);
     this.player.health = 100;
     this.state.money = 250;
@@ -396,8 +400,10 @@ class Game {
     const veh = this.player.vehicle;
     const camTarget = veh ? veh.pos : this.player.pos;
     const speed = veh ? veh.speed : this.player.speed2d;
+    const insideRec = this.interiors?.playerInside;
     this.cameraRig.update(dt, camTarget, veh ? 2.1 : 1.55, {
       driving: !!veh, speed, aimMode: aiming,
+      ceilY: insideRec ? insideRec.built.gy + 2.95 : null,   // stay under the room ceiling
     });
     // hide the player body in on-foot first-person so it doesn't clip the camera
     if (!veh && !this.player.dead) {

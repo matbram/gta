@@ -36,18 +36,16 @@ if (started) {
   console.log('player at', JSON.stringify(pos));
   if (shots) await page.screenshot({ path: 'screenshots/02-spawn.png' });
 
-  // hold W and measure against *simulated* time (headless renderer can be slow)
-  const t0 = await page.evaluate(() => window.__game.game.time);
+  // hold W under the deterministic sim clock (headless render frames are
+  // too sparse to sample the acceleration ramp fairly)
   await page.keyboard.down('w');
-  await page.waitForTimeout(4000);
+  await page.evaluate(() => window.__game.tick(1.5));
   await page.keyboard.up('w');
-  const t1 = await page.evaluate(() => window.__game.game.time);
   const pos2 = await page.evaluate(() => window.__game.playerPos());
   console.log('player moved to', JSON.stringify(pos2));
   const dist = Math.hypot(pos2.x - pos.x, pos2.z - pos.z);
-  const simT = t1 - t0;
-  const rate = dist / Math.max(simT, 0.01);
-  console.log(`walked ${dist.toFixed(1)}m in ${simT.toFixed(2)} sim-seconds (${rate.toFixed(1)} m/s)`,
+  const rate = dist / 1.5;
+  console.log(`walked ${dist.toFixed(1)}m in 1.5 sim-seconds (${rate.toFixed(1)} m/s)`,
     rate > 2 ? 'MOVE OK' : 'MOVE FAIL');
   if (shots) await page.screenshot({ path: 'screenshots/03-walk.png' });
 

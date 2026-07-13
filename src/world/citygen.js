@@ -319,17 +319,28 @@ export function generateCity(seed = 1337) {
           rows.push({ x: x + w / 2, w });
           x += w + r.float(0.5, 2);
         }
+        // door helper: only flat footprints get a walk-in interior, and the
+        // door remembers which building it belongs to
+        const addDoor = (b, x, z, face) => {
+          const g00 = groundHeight(b.x - b.w / 2, b.z - b.d / 2);
+          const g11 = groundHeight(b.x + b.w / 2, b.z + b.d / 2);
+          const gd = groundHeight(x, z);
+          if (Math.abs(g00 - gd) > 0.5 || Math.abs(g11 - gd) > 0.5) return;
+          b.doorId = doors.length;
+          b.hasDoor = true;
+          doors.push({ id: doors.length, x, z, face, b: buildings.length - 1 });
+        };
         for (const seg of rows) {
           const d = r.float(12, Math.min(20, ld * 0.42));
           const h = r.float(8, c.district === 'oldtown' ? 17 : 24);
           // north strip — enterable store door on the street face
-          addBuilding('block', r.int(0, 3), seg.x, lot.z0 + d / 2, seg.w, d, h, c.district);
-          if (c.rN) doors.push({ id: doors.length, x: seg.x, z: lot.z0 - 0.6, face: -1 });
+          const bN = addBuilding('block', r.int(0, 3), seg.x, lot.z0 + d / 2, seg.w, d, h, c.district);
+          if (c.rN) addDoor(bN, seg.x, lot.z0 - 0.6, -1);
           // south strip (sometimes)
           if (ld > 34 && r.chance(0.85)) {
             const d2 = r.float(12, Math.min(20, ld * 0.42));
-            addBuilding('block', r.int(0, 3), seg.x, lot.z1 - d2 / 2, seg.w, d2, r.float(8, 20), c.district);
-            if (c.rS) doors.push({ id: doors.length, x: seg.x, z: lot.z1 + 0.6, face: 1 });
+            const bS = addBuilding('block', r.int(0, 3), seg.x, lot.z1 - d2 / 2, seg.w, d2, r.float(8, 20), c.district);
+            if (c.rS) addDoor(bS, seg.x, lot.z1 + 0.6, 1);
           }
         }
         if (r.chance(0.4)) props.push({ kind: 'tree', x: cx, z: cz, rot: r.float(0, 6.28), s: r.float(0.8, 1.2) });
