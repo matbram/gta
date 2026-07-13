@@ -155,6 +155,39 @@ function tex(canvas, repeat = true) {
   return t;
 }
 
+
+// derive a tangent-space normal map from a canvas's luminance so window
+// frames/ledges read as real relief under sun + headlights
+function normalFromCanvas(canvas, strength = 1.6) {
+  const s = canvas.width;
+  const src = canvas.getContext('2d').getImageData(0, 0, s, s).data;
+  const lum = new Float32Array(s * s);
+  for (let i = 0; i < s * s; i++) {
+    lum[i] = (src[i * 4] * 0.3 + src[i * 4 + 1] * 0.59 + src[i * 4 + 2] * 0.11) / 255;
+  }
+  const cb = (v) => Math.max(-127, Math.min(127, v));
+  const out = document.createElement('canvas');
+  out.width = out.height = s;
+  const octx = out.getContext('2d');
+  const img = octx.createImageData(s, s);
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const i = y * s + x;
+      const xl = lum[y * s + ((x - 1 + s) % s)], xr = lum[y * s + ((x + 1) % s)];
+      const yu = lum[((y - 1 + s) % s) * s + x], yd = lum[((y + 1) % s) * s + x];
+      img.data[i * 4] = 128 + cb((xl - xr) * 127 * strength);
+      img.data[i * 4 + 1] = 128 + cb((yd - yu) * 127 * strength);
+      img.data[i * 4 + 2] = 255;
+      img.data[i * 4 + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(out);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
 // ------------------------------------------------------------------ facade set
 export function buildFacadeMaterials(seed = 1) {
   const rng = new RNG(seed * 7 + 5);
@@ -168,6 +201,8 @@ export function buildFacadeMaterials(seed = 1) {
     const night = paintNightWindows(size, rects, litChance, rng, warm);
     const m = new THREE.MeshStandardMaterial({
       map: tex(day),
+      normalMap: normalFromCanvas(day),
+      normalScale: new THREE.Vector2(0.55, 0.55),
       emissive: new THREE.Color(0xffffff),
       emissiveMap: tex(night),
       emissiveIntensity: 0,

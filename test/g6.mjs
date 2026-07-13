@@ -91,5 +91,21 @@ const combo = await page.evaluate(() => {
 console.log('melee combo steps:', JSON.stringify(combo),
   combo[0] === 1 && combo[2] === 3 ? 'COMBO OK' : 'COMBO FAIL');
 
+// streetscape 2.0: original vegetation, utility wires, murals, parked density
+const street = await page.evaluate(() => {
+  const g = window.__game.game;
+  window.__game.tick(2);
+  return {
+    palms: g.city.props.filter((p) => p.kind === 'palm').length,
+    poles: g.city.props.filter((p) => p.kind === 'utilitypole').length,
+    wires: !!g.cityMeshes.propGroup.getObjectByName('wires'),
+    murals: g.cityMeshes.propGroup.children.length > 10,
+    parkedCap: g.parkedCars ? 28 : 0,
+  };
+});
+console.log('streetscape:', JSON.stringify(street),
+  street.palms > 50 && street.poles > 100 && street.wires && street.murals && street.parkedCap === 28
+    ? 'STREET OK' : 'STREET FAIL');
+
 console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 10).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();

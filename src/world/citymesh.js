@@ -3,54 +3,10 @@
 
 import * as THREE from 'three';
 import { buildFacadeMaterials, FACADE_TILE } from './textures.js';
+import { buildVegetation } from './vegetation.js';
+import { buildPropLibrary } from './props.js';
 import { RNG } from '../core/rng.js';
 import { mergeGeometries as mergeBG } from '../../vendor/jsm/utils/BufferGeometryUtils.js';
-
-// Flatten a loaded GLB into per-material merged geometries, then instance it
-// at every entry of `list` ({x, z, rot, s}), scaled so its height ≈ targetH.
-function instancedFromModel(model, list, city, group, { targetH = null, targetW = null, yOffset = 0 } = {}) {
-  model.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
-  let s = 1;
-  if (targetH) s = targetH / Math.max(size.y, 0.01);
-  else if (targetW) s = targetW / Math.max(Math.max(size.x, size.z), 0.01);
-
-  // group world-baked geometries by material
-  const byMat = new Map();
-  model.traverse((o) => {
-    if (!o.isMesh) return;
-    const g = o.geometry.clone();
-    g.applyMatrix4(o.matrixWorld);
-    if (!byMat.has(o.material)) byMat.set(o.material, []);
-    byMat.get(o.material).push(g);
-  });
-
-  const dummy = new THREE.Object3D();
-  const meshes = [];
-  for (const [mat, geos] of byMat) {
-    let merged;
-    try { merged = geos.length > 1 ? mergeBG(geos, false) : geos[0]; }
-    catch { merged = geos[0]; }
-    // ground the geometry at y=0 and centre x/z
-    merged.translate(-(box.min.x + size.x / 2), -box.min.y, -(box.min.z + size.z / 2));
-    const im = new THREE.InstancedMesh(merged, mat, list.length);
-    im.castShadow = true;
-    for (let k = 0; k < list.length; k++) {
-      const p = list[k];
-      dummy.position.set(p.x, city.groundHeight(p.x, p.z) + yOffset, p.z);
-      dummy.rotation.set(0, p.rot || 0, 0);
-      dummy.scale.setScalar(s * (p.s || 1));
-      dummy.updateMatrix();
-      im.setMatrixAt(k, dummy.matrix);
-      (p._slots = p._slots || []).push({ mesh: im, idx: k });
-    }
-    im.instanceMatrix.needsUpdate = true;
-    group.add(im);
-    meshes.push(im);
-  }
-  return meshes;
-}
 
 const CHUNK_CELLS = 4;   // 4×4 cells per chunk
 
@@ -125,6 +81,90 @@ function translated(geo, x, y, z) {
   const g = geo.clone();
   g.translate(x, y, z);
   return g;
+}
+
+
+// bold spray-art canvases for the side-wall murals (6 distinct styles)
+function buildMuralTextures(seed) {
+  const rng = new RNG(seed + 71);
+  const palettes = [
+    ['#e8623c', '#f7b32b', '#2d3047', '#e8e4da'],
+    ['#4ecdc4', '#1a535c', '#ff6b6b', '#f7fff7'],
+    ['#9b5de5', '#f15bb5', '#fee440', '#00bbf9'],
+    ['#264653', '#2a9d8f', '#e9c46a', '#e76f51'],
+  ];
+  const styles = [];
+  for (let sI = 0; sI < 6; sI++) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 192;
+    const x = c.getContext('2d');
+    const pal = palettes[sI % palettes.length];
+    x.fillStyle = pal[0];
+    x.fillRect(0, 0, 256, 192);
+    switch (sI % 6) {
+      case 0: {   // sunset bands + rising sun
+        for (let i = 0; i < 5; i++) { x.fillStyle = i % 2 ? pal[1] : pal[3]; x.fillRect(0, 96 + i * 20, 256, 12); }
+        x.fillStyle = pal[1];
+        x.beginPath(); x.arc(128, 96, 46, Math.PI, 0); x.fill();
+        break;
+      }
+      case 1: {   // wave + sun
+        x.fillStyle = pal[3]; x.fillRect(0, 0, 256, 192);
+        x.fillStyle = pal[0];
+        x.beginPath(); x.moveTo(0, 150);
+        for (let i = 0; i < 8; i++) x.quadraticCurveTo(i * 32 + 16, 150 - (i % 2 ? 70 : 20), (i + 1) * 32, 150);
+        x.lineTo(256, 192); x.lineTo(0, 192); x.closePath(); x.fill();
+        x.fillStyle = pal[2];
+        x.beginPath(); x.arc(200, 52, 28, 0, 7); x.fill();
+        break;
+      }
+      case 2: {   // triangles
+        for (let i = 0; i < 14; i++) {
+          x.fillStyle = pal[1 + (i % 3)];
+          const px = rng.float(0, 256), py = rng.float(0, 192), r = rng.float(14, 42);
+          x.beginPath(); x.moveTo(px, py - r); x.lineTo(px + r, py + r); x.lineTo(px - r, py + r); x.closePath(); x.fill();
+        }
+        break;
+      }
+      case 3: {   // lettering
+        x.fillStyle = pal[3];
+        x.font = 'bold 54px Impact, sans-serif';
+        x.textAlign = 'center';
+        x.save(); x.translate(128, 108); x.rotate(-0.05);
+        x.strokeStyle = pal[1]; x.lineWidth = 10; x.strokeText('BAYVALE', 0, 0);
+        x.fillText('BAYVALE', 0, 0);
+        x.restore();
+        x.fillStyle = pal[1];
+        x.font = 'bold 22px monospace';
+        x.fillText('OLD CORONET', 128, 152);
+        break;
+      }
+      case 4: {   // overlapping circles
+        x.globalAlpha = 0.85;
+        for (let i = 0; i < 9; i++) {
+          x.fillStyle = pal[1 + (i % 3)];
+          x.beginPath(); x.arc(rng.float(20, 236), rng.float(20, 172), rng.float(12, 44), 0, 7); x.fill();
+        }
+        x.globalAlpha = 1;
+        break;
+      }
+      default: {  // skyline silhouette
+        x.fillStyle = pal[1]; x.fillRect(0, 0, 256, 120);
+        x.fillStyle = pal[0];
+        let bx = 0;
+        while (bx < 250) { const w = rng.float(18, 40), h = rng.float(40, 100); x.fillRect(bx, 120 - h, w, h + 72); bx += w + 4; }
+        x.fillStyle = pal[2];
+        x.beginPath(); x.arc(60, 40, 20, 0, 7); x.fill();
+      }
+    }
+    x.fillStyle = 'rgba(0,0,0,0.25)';
+    x.fillRect(0, 180, 256, 12);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    styles.push(tex);
+  }
+  return styles;
 }
 
 // ---------------------------------------------------------------- city meshes
@@ -236,27 +276,26 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
   scene.add(cityGroup);
 
   // ---------------------------------------------------------------- props (instanced)
+  // All street furniture + vegetation are original generated meshes from
+  // props.js / vegetation.js — one InstancedMesh per (kind, material part).
   const propGroup = new THREE.Group();
   propGroup.name = 'props';
 
-  const propDefs = {
-    lamp: null, tree: null, palm: null, container: null,
-    bench: null, hut: null, silo: null, crane: null,
-  };
+  const propDefs = {};
   const byKind = {};
   for (const p of city.props) (byKind[p.kind] = byKind[p.kind] || []).push(p);
 
   const dummy = new THREE.Object3D();
 
-  function instanced(geo, mat, list, yOf = () => 0, extraScaleY = false) {
+  function instanced(geo, mat, list, yOf = () => 0, extraScaleY = false, castShadow = true) {
     const im = new THREE.InstancedMesh(geo, mat, list.length);
-    im.castShadow = true;
+    im.castShadow = castShadow;
     for (let k = 0; k < list.length; k++) {
       const p = list[k];
       dummy.position.set(p.x, city.groundHeight(p.x, p.z) + yOf(p), p.z);
       dummy.rotation.set(0, p.rot || 0, 0);
-      const s = p.s || 1;
-      dummy.scale.set(s, extraScaleY ? s * (0.85 + ((k * 37) % 10) * 0.05) : s, s);
+      const sc = p.s || 1;
+      dummy.scale.set(sc, extraScaleY ? sc * (0.85 + ((k * 37) % 10) * 0.05) : sc, sc);
       dummy.updateMatrix();
       im.setMatrixAt(k, dummy.matrix);
       (p._slots = p._slots || []).push({ mesh: im, idx: k });
@@ -267,31 +306,36 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
   }
 
   const grey = new THREE.MeshLambertMaterial({ color: 0x5a5f66 });
-  const darkGrey = new THREE.MeshLambertMaterial({ color: 0x3c4046 });
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6a4a32 });
-  const leafMat = new THREE.MeshLambertMaterial({ color: 0x4a6e38 });
-  const palmLeafMat = new THREE.MeshLambertMaterial({ color: 0x4f7a3a });
   const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6a48 });
 
-  // lamp: GLB streetlight when fetched, procedural pole otherwise
-  if (byKind.lamp?.length) {
-    const lampModel = assets?.model('streetlight');
-    if (lampModel) {
-      instancedFromModel(lampModel, byKind.lamp, city, propGroup, { targetH: 6.8 });
-    } else {
-      const pole = new THREE.CylinderGeometry(0.09, 0.13, 7.2, 6);
-      pole.translate(0, 3.6, 0);
-      const arm = new THREE.BoxGeometry(1.4, 0.12, 0.12);
-      arm.translate(0.6, 7.05, 0);
-      instanced(mergeGeometries([pole, arm]), grey, byKind.lamp);
+  const vegLib = buildVegetation();
+  const propLib = buildPropLibrary();
+  const buildKind = (kind, list, yOf = () => 0, extraScaleY = false) => {
+    const parts = vegLib[kind] || propLib[kind];
+    if (!parts || !list?.length) return;
+    for (const part of parts) {
+      instanced(part.geo, part.mat, list, yOf, extraScaleY, part.castShadow !== false);
     }
-    // lamp heads (emissive at night)
-    const headGeo = new THREE.BoxGeometry(0.55, 0.18, 0.3);
-    headGeo.translate(lampModel ? 0.3 : 1.25, lampModel ? 6.5 : 7.0, 0);
+  };
+
+  buildKind('palm', byKind.palm);
+  buildKind('tree', byKind.tree, () => 0, true);
+  buildKind('bush', byKind.bush);
+  buildKind('bench', byKind.bench);
+  buildKind('hydrant', byKind.hydrant);
+  buildKind('trash', byKind.trash);
+  buildKind('dumpster', byKind.dumpster);
+  buildKind('trafficlight', byKind.trafficlight);
+  buildKind('utilitypole', byKind.utilitypole);
+
+  // streetlights + emissive heads + night light pools
+  if (byKind.lamp?.length) {
+    buildKind('lamp', byKind.lamp);
+    const headGeo = new THREE.BoxGeometry(0.6, 0.16, 0.26);
+    headGeo.translate(1.42, 7.32, 0);
     const headMat = new THREE.MeshLambertMaterial({ color: 0xccccbb, emissive: 0xffe9b0, emissiveIntensity: 0 });
-    const heads = instanced(headGeo, headMat, byKind.lamp);
-    propDefs.lampHeads = { mesh: heads, mat: headMat };
-    // light pools under lamps at night
+    instanced(headGeo, headMat, byKind.lamp);
+    propDefs.lampHeads = { mat: headMat };
     const poolGeo = new THREE.CircleGeometry(5.5, 18);
     poolGeo.rotateX(-Math.PI / 2);
     const poolMat = new THREE.MeshBasicMaterial({
@@ -300,7 +344,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     const pools = new THREE.InstancedMesh(poolGeo, poolMat, byKind.lamp.length);
     for (let k = 0; k < byKind.lamp.length; k++) {
       const p = byKind.lamp[k];
-      dummy.position.set(p.x + (lampModel ? 0.3 : 1.25), city.groundHeight(p.x, p.z) + 0.07, p.z);
+      dummy.position.set(p.x + 1.42, city.groundHeight(p.x, p.z) + 0.07, p.z);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
@@ -309,47 +353,17 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     }
     pools.instanceMatrix.needsUpdate = true;
     propGroup.add(pools);
-    propDefs.lampPools = { mesh: pools, mat: poolMat };
+    propDefs.lampPools = { mat: poolMat };
   }
 
-  function fixIndexed(g) { return g.index ? g : g; }
-
-  // tree: kenney tree cluster on grassy districts, procedural blob elsewhere
-  if (byKind.tree?.length) {
-    const treeModel = assets?.model('grass-trees') || assets?.model('grass-trees-tall');
-    const grassy = [], other = [];
-    for (const p of byKind.tree) {
-      const d = city.districtAt(p.x, p.z);
-      (treeModel && (d === 'park' || d === 'suburbs' || d === 'heights') ? grassy : other).push(p);
+  // planters: concrete box + hedge shrub
+  if (byKind.planter?.length) {
+    const boxG = new THREE.BoxGeometry(1.6, 0.5, 0.7);
+    boxG.translate(0, 0.25, 0);
+    instanced(boxG, grey, byKind.planter);
+    for (const part of vegLib.bush) {
+      instanced(part.geo, part.mat, byKind.planter, () => 0.32, false, false);
     }
-    if (grassy.length) instancedFromModel(treeModel, grassy, city, propGroup, { targetH: 4.6 });
-    if (other.length) {
-      const trunk = new THREE.CylinderGeometry(0.22, 0.3, 2.6, 6);
-      trunk.translate(0, 1.3, 0);
-      instanced(trunk, trunkMat, other);
-      const blob = new THREE.IcosahedronGeometry(2.4, 1);
-      blob.translate(0, 4.1, 0);
-      blob.scale(1, 1.15, 1);
-      instanced(blob, leafMat, other, () => 0, true);
-    }
-  }
-
-  // palm: lean trunk + fan of cones
-  if (byKind.palm?.length) {
-    const trunk = new THREE.CylinderGeometry(0.14, 0.22, 6.4, 6);
-    trunk.translate(0.35, 3.2, 0);
-    trunk.rotateZ(-0.1);
-    instanced(trunk, trunkMat, byKind.palm);
-    const fronds = [];
-    for (let i = 0; i < 5; i++) {
-      const f = new THREE.ConeGeometry(0.5, 3.4, 4);
-      f.translate(0, -1.2, 0);
-      f.rotateX(Math.PI * 0.62);
-      f.rotateY((i / 5) * Math.PI * 2);
-      f.translate(0.55, 6.6, 0);
-      fronds.push(f);
-    }
-    instanced(mergeGeometries(fronds), palmLeafMat, byKind.palm);
   }
 
   // containers with instance colours
@@ -362,19 +376,6 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     for (let k = 0; k < byKind.container.length; k++)
       im.setColorAt(k, new THREE.Color(cols[k % cols.length]));
     im.instanceColor.needsUpdate = true;
-  }
-
-  if (byKind.bench?.length) {
-    const benchModel = assets?.model('bench');
-    if (benchModel) {
-      instancedFromModel(benchModel, byKind.bench, city, propGroup, { targetW: 2.0 });
-    } else {
-      const seat = new THREE.BoxGeometry(2.2, 0.1, 0.6); seat.translate(0, 0.55, 0);
-      const back = new THREE.BoxGeometry(2.2, 0.5, 0.08); back.translate(0, 0.9, -0.28);
-      const legA = new THREE.BoxGeometry(0.1, 0.55, 0.55); legA.translate(-0.9, 0.27, 0);
-      const legB = new THREE.BoxGeometry(0.1, 0.55, 0.55); legB.translate(0.9, 0.27, 0);
-      instanced(mergeGeometries([seat, back, legA, legB]), woodMat, byKind.bench);
-    }
   }
 
   if (byKind.hut?.length) {
@@ -396,43 +397,123 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     instanced(mergeGeometries([tower, jib, counter]), new THREE.MeshLambertMaterial({ color: 0xa85f2a }), byKind.crane);
   }
 
-  // ---- kaykit street clutter (procedural stand-ins when assets are absent)
-  const glbOr = (key, list, opts, fallback) => {
-    if (!list?.length) return;
-    const m = assets?.model(key);
-    if (m) instancedFromModel(m, list, city, propGroup, opts);
-    else fallback?.();
-  };
-  glbOr('firehydrant', byKind.hydrant, { targetH: 0.75 }, () => {
-    const g = new THREE.CylinderGeometry(0.14, 0.16, 0.7, 8); g.translate(0, 0.35, 0);
-    instanced(g, new THREE.MeshLambertMaterial({ color: 0xb03a2e }), byKind.hydrant);
-  });
-  glbOr('trash_A', byKind.trash, { targetH: 0.9 }, () => {
-    const g = new THREE.CylinderGeometry(0.3, 0.26, 0.85, 8); g.translate(0, 0.42, 0);
-    instanced(g, darkGrey, byKind.trash);
-  });
-  glbOr('dumpster', byKind.dumpster, { targetW: 2.3 }, () => {
-    const g = new THREE.BoxGeometry(2.3, 1.3, 1.4); g.translate(0, 0.65, 0);
-    instanced(g, new THREE.MeshLambertMaterial({ color: 0x3e5e46 }), byKind.dumpster);
-  });
-  glbOr('bush', byKind.bush, { targetH: 1.0 }, () => {
-    const g = new THREE.IcosahedronGeometry(0.55, 1); g.translate(0, 0.5, 0);
-    instanced(g, leafMat, byKind.bush);
-  });
-  glbOr('trafficlight_A', byKind.trafficlight, { targetH: 5.6 }, () => {
-    const pole = new THREE.CylinderGeometry(0.08, 0.1, 5.4, 6); pole.translate(0, 2.7, 0);
-    const box = new THREE.BoxGeometry(0.3, 0.8, 0.25); box.translate(0, 5.0, 0);
-    instanced(mergeGeometries([pole, box]), darkGrey, byKind.trafficlight);
-  });
-  if (byKind.planter?.length) {
-    // concrete box + shrub
-    const boxG = new THREE.BoxGeometry(1.6, 0.5, 0.7); boxG.translate(0, 0.25, 0);
-    instanced(boxG, grey, byKind.planter);
-    const shrubModel = assets?.model('bush');
-    if (shrubModel) instancedFromModel(shrubModel, byKind.planter, city, propGroup, { targetH: 0.8, yOffset: 0.4 });
-    else {
-      const s = new THREE.IcosahedronGeometry(0.4, 1); s.translate(0, 0.75, 0);
-      instanced(s, leafMat, byKind.planter);
+  // ---- sagging utility wires strung between consecutive poles per street
+  if (byKind.utilitypole?.length) {
+    const groups = new Map();
+    for (const p of byKind.utilitypole) {
+      if (p.wireGroup === undefined) continue;
+      (groups.get(p.wireGroup) ?? groups.set(p.wireGroup, []).get(p.wireGroup)).push(p);
+    }
+    const pts = [];
+    const SAG = 0.55, WIRE_Y = 7.02, SEGS = 6;
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.seq - b.seq);
+      for (let i = 0; i < list.length - 1; i++) {
+        const a = list[i], b = list[i + 1];
+        const ya = city.groundHeight(a.x, a.z) + WIRE_Y;
+        const yb = city.groundHeight(b.x, b.z) + WIRE_Y;
+        // two wires on crossarm pins, offset perpendicular to the span
+        const dx = b.x - a.x, dz = b.z - a.z;
+        const len = Math.hypot(dx, dz) || 1;
+        const px = -dz / len, pz = dx / len;
+        for (const off of [-0.42, 0.42]) {
+          for (let sgi = 0; sgi < SEGS; sgi++) {
+            for (const tt of [sgi / SEGS, (sgi + 1) / SEGS]) {
+              const sag = Math.sin(tt * Math.PI) * -SAG;
+              pts.push(
+                a.x + dx * tt + px * off,
+                ya + (yb - ya) * tt + sag,
+                a.z + dz * tt + pz * off,
+              );
+            }
+          }
+        }
+      }
+    }
+    if (pts.length) {
+      const wg = new THREE.BufferGeometry();
+      wg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      const wires = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x15151a }));
+      wires.name = 'wires';
+      propGroup.add(wires);
+    }
+  }
+
+  // ---- murals: bold canvas art on blank side walls in the older districts
+  {
+    const muralStyles = buildMuralTextures(seed);
+    const perStyle = muralStyles.map(() => []);
+    let mi = 0;
+    for (const b of city.buildings) {
+      if (b.kind !== 'block' || b.h < 7) continue;
+      const dist = city.districtAt(b.x, b.z);
+      if (dist !== 'oldtown' && dist !== 'midtown') continue;
+      const hash = Math.abs(Math.round(b.x * 13 + b.z * 7));
+      if (hash % 6 !== 0) continue;
+      const side = hash % 2 ? 1 : -1;
+      perStyle[mi % muralStyles.length].push({ b, side });
+      mi++;
+    }
+    for (let si = 0; si < muralStyles.length; si++) {
+      const list = perStyle[si];
+      if (!list.length) continue;
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.MeshLambertMaterial({ map: muralStyles[si] });
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      for (let k = 0; k < list.length; k++) {
+        const { b, side } = list[k];
+        const g = city.groundHeight(b.x, b.z);
+        const w = Math.min(b.d * 0.62, 9);
+        const h = Math.min(b.h * 0.52, 7);
+        dummy.position.set(b.x + side * (b.w / 2 + 0.07), g + 3.4 + h / 2, b.z);
+        dummy.rotation.set(0, side > 0 ? Math.PI / 2 : -Math.PI / 2, 0);
+        dummy.scale.set(w, h, 1);
+        dummy.updateMatrix();
+        im.setMatrixAt(k, dummy.matrix);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      propGroup.add(im);
+    }
+    propDefs.muralCount = mi;
+  }
+
+  // ---- rooftop clutter: AC units + water tanks on mid-rise roofs
+  {
+    const acList = [];
+    const rr = new RNG(seed + 97);
+    for (const b of city.buildings) {
+      if ((b.kind !== 'block' && b.kind !== 'tower') || b.h < 9) continue;
+      const g = city.groundHeight(b.x, b.z);
+      const n = b.kind === 'tower' ? 2 : rr.chance(0.6) ? 1 : 2;
+      for (let k = 0; k < n; k++) {
+        acList.push({
+          x: b.x + rr.float(-0.3, 0.3) * b.w,
+          z: b.z + rr.float(-0.3, 0.3) * b.d,
+          rot: rr.chance(0.5) ? 0 : Math.PI / 2,
+          s: 1,
+          _y: g + b.h + 0.35,
+        });
+      }
+    }
+    if (acList.length) {
+      const box = new THREE.BoxGeometry(1.3, 0.62, 0.95);
+      const fan = new THREE.CylinderGeometry(0.34, 0.34, 0.1, 8);
+      fan.translate(0, 0.36, 0);
+      const geo = mergeGeometries([box, fan].map((gg, i) => {
+        if (i === 0) gg.translate(0, 0.31, 0);
+        return gg;
+      }));
+      const im = new THREE.InstancedMesh(geo, grey, acList.length);
+      for (let k = 0; k < acList.length; k++) {
+        const p = acList[k];
+        dummy.position.set(p.x, p._y - 0.35, p.z);
+        dummy.rotation.set(0, p.rot, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        im.setMatrixAt(k, dummy.matrix);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      propGroup.add(im);
     }
   }
 

@@ -456,6 +456,24 @@ export function generateCity(seed = 1337) {
       }
     }
 
+    // utility poles with sagging wires along old-town / docks / suburb streets
+    if (!e.artery && (dist === 'oldtown' || dist === 'docks' || dist === 'suburbs') &&
+        rand2i(e.id * 7, 3, seed + 48) < 0.75) {
+      const poleOff = roadHalf(false) + SIDEWALK + 0.9;
+      let seq = 0;
+      for (const t of [0.12, 0.5, 0.88]) {
+        const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
+        const px = e.horizontal ? x : x + poleOff;
+        const pz = e.horizontal ? z + poleOff : z;
+        if (!landAt(px, pz)) continue;
+        props.push({
+          kind: 'utilitypole', x: px, z: pz,
+          rot: e.horizontal ? Math.PI / 2 : 0, s: 1,
+          wireGroup: e.id, seq: seq++,
+        });
+      }
+    }
+
     // beach palms line the shore road densely
     if (beach) {
       for (let t = 0.1; t < 0.95; t += 0.13) {
@@ -547,6 +565,7 @@ export function generateCity(seed = 1337) {
     palm: { hw: 0.30, hd: 0.30, h: 7, scale: true },
     lamp: { hw: 0.16, hd: 0.16, h: 7, knock: { minSpeed: 7, fall: true, sparks: true } },
     trafficlight: { hw: 0.16, hd: 0.16, h: 5.5, knock: { minSpeed: 7, fall: true, sparks: true } },
+    utilitypole: { hw: 0.14, hd: 0.14, h: 7.6, knock: { minSpeed: 9, fall: true, sparks: true } },
     hydrant: { hw: 0.22, hd: 0.22, h: 0.8, knock: { minSpeed: 4, geyser: true } },
     bench: { hw: 1.10, hd: 0.35, h: 0.95, knock: { minSpeed: 5, topple: true } },
     trash: { hw: 0.30, hd: 0.30, h: 0.9, knock: { minSpeed: 2, topple: true } },

@@ -5,7 +5,7 @@
 import { dist2d, distSq2d } from '../core/mathutil.js';
 import { rand2i } from '../core/rng.js';
 
-const SPAWN_R = 170, DESPAWN_R = 220, MAX_ACTIVE = 16;
+const SPAWN_R = 170, DESPAWN_R = 220, MAX_ACTIVE = 28;
 const TYPES = ['sedan', 'sedan', 'sedan', 'taxi', 'pickup', 'van', 'sports', 'moto'];
 
 export class ParkedCars {
