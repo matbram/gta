@@ -1,10 +1,14 @@
 {
-  "name": "gta",
+  "name": "bayvale",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "An original open-world action game for the browser - Three.js, zero asset files",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "http-server -p 8080 -s",
+    "test:boot": "node test/boot.mjs",
+    "test:drive": "node test/drive.mjs",
+    "test:combat": "node test/combat.mjs",
+    "test:missions": "node test/missions.mjs",
+    "test": "node test/boot.mjs && node test/drive.mjs && node test/combat.mjs && node test/missions.mjs"
   },
   "repository": {
     "type": "git",
@@ -12,7 +16,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "three": "^0.185.1"
   }
