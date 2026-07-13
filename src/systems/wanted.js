@@ -50,6 +50,16 @@ export class WantedSystem {
     this.recalcStars(true);
   }
 
+  // a civilian phoned it in: heat bump + a unit sent to look at the spot
+  reportCrime(x, z) {
+    this.state.heat = clamp(this.state.heat + 16, 0, 900);
+    this.recalcStars();
+    // point an existing patrol/foot cop at the scene, or spawn one nearby
+    let cop = this.nearestCop(x, z, 240);
+    if (!cop) cop = this.spawnFootCop(false, true);
+    if (cop) cop.investigate = { x, z, t: 0 };
+  }
+
   clear() {
     this.state.heat = 0;
     this.state.stars = 0;
@@ -157,6 +167,20 @@ export class WantedSystem {
       if (aliveCars < resp.cars) this.spawnCruiser();
     }
 
+    // ---- beat patrol: the city always has a couple of cops walking around ----
+    if (stars === 0 && this.spawnT <= 0) {
+      this.spawnT = 4;
+      const patrols = this.footCops.filter((c) => !c.dead && c.patrol).length;
+      if (patrols < 2) {
+        const cop = this.spawnFootCop(false, true);
+        if (cop) {
+          // walk a sidewalk beat like a civilian
+          const ep = game.city.nearestEdgePoint(cop.pos.x, cop.pos.z);
+          if (ep) cop.setSidewalk(ep.edge);
+        }
+      }
+    }
+
     // roadblocks ahead of a driving player
     if (resp.roadblocks && player.vehicle && Math.abs(player.vehicle.speed) > 8) {
       this.roadblockT -= dt;
@@ -170,7 +194,8 @@ export class WantedSystem {
     for (const cop of [...this.footCops]) {
       cop.update(dt, game);
       const d = dist2d(cop.pos.x, cop.pos.z, player.pos.x, player.pos.z);
-      if ((cop.dead && cop.removeTimer > 20) || d > 260 || (stars === 0 && d > 60)) {
+      const cullDist = cop.patrol ? 230 : (stars === 0 ? 60 : 260);
+      if ((cop.dead && cop.removeTimer > 20) || d > cullDist) {
         cop.dispose();
         this.footCops.splice(this.footCops.indexOf(cop), 1);
       }
@@ -197,17 +222,18 @@ export class WantedSystem {
   }
 
   // ---------------- spawning ----------------
-  spawnFootCop(tough = false) {
+  spawnFootCop(tough = false, patrol = false) {
     const game = this.game;
     const p = game.player.pos;
     // spawn just off-screen on a sidewalk
     for (let tries = 0; tries < 8; tries++) {
       const a = Math.random() * Math.PI * 2;
-      const d = 45 + Math.random() * 45;
+      const d = patrol ? 70 + Math.random() * 80 : 45 + Math.random() * 45;
       const x = p.x + Math.cos(a) * d, z = p.z + Math.sin(a) * d;
       if (!game.city.landAt(x, z)) continue;
       const cop = new Cop(game.city, game.scene, tough);
       cop.place(x, z);
+      cop.patrol = patrol;
       this.footCops.push(cop);
       return cop;
     }

@@ -65,6 +65,7 @@ export class AudioEngine {
   }
 
   burst({ dur = 0.2, gain = 0.6, filterFrom = 3000, filterTo = 400, type = 'lowpass', q = 1 }) {
+    if (!(gain > 0.001)) return;          // inaudible / zero gain would throw on ramps
     const t = this.now();
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuffer(1);
@@ -80,6 +81,7 @@ export class AudioEngine {
   }
 
   tone({ freq = 440, freqTo = null, dur = 0.2, gain = 0.3, type = 'sine', delay = 0 }) {
+    if (!(gain > 0.001)) return;          // exponential ramps reject zero targets
     const t = this.now() + delay;
     const o = this.ctx.createOscillator();
     o.type = type;

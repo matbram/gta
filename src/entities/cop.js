@@ -11,11 +11,17 @@ export class Cop extends Ped {
     super(city, scene, tough ? { ...COP_LOOK, shirt: 0x181c22 } : COP_LOOK, { health: tough ? 110 : 60 });
     this.isCop = true;
     this.tough = tough;
+    this.walkSpeed = 1.25;
     this.state = 'chase';
     this.shootCooldown = 1 + Math.random();
     this.arrestT = 0;
     this.runSpeed = tough ? 6.4 : 5.9;
     this.accuracy = tough ? 0.75 : 0.5;
+  }
+
+  // cops don't scatter from gunfire — they engage
+  panic(fromX, fromZ) {
+    this.provoked = true;
   }
 
   update(dt, game) {
@@ -33,10 +39,34 @@ export class Cop extends Ped {
       return;
     }
 
-    // stand down once the heat is gone (unless personally attacked)
+    // no heat: walk the beat / investigate reports instead of chasing
     if (game.wanted.state.stars === 0 && !this.provoked) {
-      this.speed = 0;
       this.arrestT = 0;
+      if (this.investigate) {
+        const inv = this.investigate;
+        const dd = dist2d(this.pos.x, this.pos.z, inv.x, inv.z);
+        if (dd > 3) {
+          this.moveToward(inv.x, inv.z, this.runSpeed * 0.75, dt);
+          this.rig.setAnim('run');
+        } else {
+          // look around the scene
+          inv.t += dt;
+          this.speed = 0;
+          this.heading += dt * 0.9;
+          this.rig.setAnim('idle');
+          if (inv.t > 7) this.investigate = null;
+        }
+        this.rig.update(dt, this.speed);
+        this.syncRig();
+        return;
+      }
+      // sidewalk patrol uses the shared pedestrian wander brain
+      if (this.patrol) {
+        if (this.state === 'chase' || this.state === 'fight') this.state = 'wander';
+        super.update(dt, game);
+        return;
+      }
+      this.speed = 0;
       this.rig.setAnim('idle');
       this.rig.update(dt, 0);
       this.syncRig();

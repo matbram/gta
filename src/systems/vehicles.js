@@ -327,6 +327,7 @@ export class VehicleSystem {
       if (d < 8) o.applyDamage((8 - d) * 9, 'explosion');
     }
     this.game.peds?.explosionAt(x, z, 8);
+    this.game.dispatch?.reportFire(x, z, v);
     if (v.driver === 'player') {
       player.vehicle = null;
       v.driver = null;

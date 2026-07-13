@@ -4,9 +4,12 @@
 import * as THREE from 'three';
 import { Humanoid, randomLook } from './humanoid.js';
 import { clamp, angleDamp, circleVsAabb, dist2d } from '../core/mathutil.js';
+import { ARCHETYPES, makePersonality, reactToThreat } from '../systems/npcmind.js';
 
 const RADIUS = 0.35;
 let nextPedId = 1;
+const _headQ = new THREE.Quaternion();
+const _headAxis = new THREE.Vector3(0, 1, 0);
 
 export class Ped {
   constructor(city, scene, look, opts = {}) {
@@ -32,15 +35,36 @@ export class Ped {
     this.removeTimer = 0;         // counts up after death
     this.isCop = false;
     this.inVehicle = null;
+
+    // mind: role + personality (assigned fully by PedSystem for civilians)
+    this.archetype = opts.archetype ?? 'commuter';
+    this.personality = opts.personality ?? makePersonality(this.archetype);
+    const arch = ARCHETYPES[this.archetype];
+    if (arch && opts.archetype) {
+      this.walkSpeed = arch.walkSpeed[0] + Math.random() * (arch.walkSpeed[1] - arch.walkSpeed[0]);
+      this.brave = Math.random() < (arch.braveChance ?? 0.08);
+      const sc = arch.scale[0] + Math.random() * (arch.scale[1] - arch.scale[0]);
+      this.rig.group.scale.setScalar(sc);
+    }
   }
 
   place(x, z) {
     this.pos.set(x, this.city.groundHeight(x, z), z);
+    this.homeX = x;
+    this.homeZ = z;
     this.pickWanderTarget();
     this.syncRig();
   }
 
   pickWanderTarget() {
+    // loiterers shuffle around their home spot
+    if (this.loiter && this.homeX !== undefined) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 1.5 + Math.random() * 5;
+      this.target.x = this.homeX + Math.cos(a) * d;
+      this.target.z = this.homeZ + Math.sin(a) * d;
+      return;
+    }
     // sidewalk-following: aim for a point further along the current edge
     if (this.sidewalk) { this.advanceSidewalkTarget(); return; }
     const a = Math.random() * Math.PI * 2;
@@ -88,18 +112,30 @@ export class Ped {
     }
   }
 
-  panic(fromX, fromZ) {
+  panic(fromX, fromZ, directlyTargeted = false) {
     if (this.dead || this.state === 'driver') return;
-    if (this.brave && !this.panicked) {
-      this.state = 'fight';
+    // already reacting? repeated scares escalate to flat-out fleeing
+    if (this.panicked && this.state !== 'fight') {
+      this.state = 'flee';
       this.stateT = 0;
+      this.fleeFrom.x = fromX; this.fleeFrom.z = fromZ;
       return;
     }
-    this.panicked = true;
-    this.state = 'flee';
-    this.stateT = 0;
     this.fleeFrom.x = fromX;
     this.fleeFrom.z = fromZ;
+    const d = dist2d(this.pos.x, this.pos.z, fromX, fromZ);
+    const reaction = this.brave && directlyTargeted
+      ? 'fight'
+      : reactToThreat(this, d, directlyTargeted);
+    this.panicked = true;
+    this.stateT = 0;
+    switch (reaction) {
+      case 'fight': this.state = 'fight'; break;
+      case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); break;
+      case 'film': this.state = 'film'; break;
+      case 'call': this.state = 'call'; this.callT = 0; break;
+      default: this.state = 'flee';
+    }
   }
 
   damage(amount, game, source = 'player') {
@@ -122,8 +158,9 @@ export class Ped {
     game.state.stats.kills++;
     // panic everyone nearby
     game.peds?.panicAt(this.pos.x, this.pos.z, 26);
-    // drop some cash
+    // drop some cash; an ambulance may come for the body
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 10 + Math.floor(Math.random() * 30));
+    game.dispatch?.reportDeath(this);
   }
 
   update(dt, game) {
@@ -166,6 +203,38 @@ export class Ped {
         if (this.stateT > 9) { this.state = 'wander'; this.panicked = false; this.stateT = 0; }
         break;
       }
+      case 'cower': {
+        // crouch down, hands over head, until the danger passes
+        this.speed = 0;
+        this.rig.setAnim('kneel');
+        if (this.stateT > 6 + this.personality.bravery * 6) {
+          this.state = 'flee'; this.stateT = 0;
+        }
+        break;
+      }
+      case 'film': {
+        // stand at a distance and film with the phone — until it gets too close
+        this.speed = 0;
+        this.rig.setAnim('phone');
+        this.heading = angleDamp(this.heading,
+          Math.atan2(this.fleeFrom.x - this.pos.x, this.fleeFrom.z - this.pos.z), 6, dt);
+        const d = dist2d(this.pos.x, this.pos.z, this.fleeFrom.x, this.fleeFrom.z);
+        if (d < 8 || this.stateT > 14) { this.state = 'flee'; this.stateT = 0; }
+        break;
+      }
+      case 'call': {
+        // phone the police: takes a few seconds, then heat goes up
+        this.speed = 0;
+        this.rig.setAnim('phone');
+        this.callT = (this.callT ?? 0) + dt;
+        if (this.callT > 4) {
+          game.wanted?.reportCrime?.(this.fleeFrom.x, this.fleeFrom.z);
+          game.hud?.showToast('Someone called the police!', 3);
+          this.state = 'flee';
+          this.stateT = 0;
+        }
+        break;
+      }
       case 'fight': {
         // brave ped charges the player and swings
         const d = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
@@ -192,6 +261,25 @@ export class Ped {
     }
 
     this.rig.update(dt, this.speed);
+
+    // curious glance: heads turn toward the player walking by (post-mixer)
+    const headBone = this.rig.animator?.bones?.head;
+    if (headBone && !this.panicked && this.state !== 'driver') {
+      const dx = game.player.pos.x - this.pos.x;
+      const dz = game.player.pos.z - this.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < 49 && d2 > 1) {
+        let rel = Math.atan2(dx, dz) - this.heading;
+        while (rel > Math.PI) rel -= Math.PI * 2;
+        while (rel < -Math.PI) rel += Math.PI * 2;
+        if (Math.abs(rel) < 1.25) {
+          const look = rel * clamp(this.personality?.curiosity ?? 0.5, 0.25, 0.85);
+          _headQ.setFromAxisAngle(_headAxis, clamp(look, -0.65, 0.65));
+          headBone.quaternion.multiply(_headQ);
+        }
+      }
+    }
+
     this.syncRig();
   }
 

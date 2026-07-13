@@ -140,6 +140,8 @@ class Game {
       this.save = new save.SaveSystem(this);
       const parked = await import('./systems/parkedcars.js');
       this.parkedCars = new parked.ParkedCars(this);
+      const dispatch = await import('./systems/dispatch.js');
+      this.dispatch = new dispatch.Dispatch(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -351,6 +353,7 @@ class Game {
     this.peds?.update(dt);
     this.combat?.update(dt, aiming);
     this.wanted?.update(dt);
+    this.dispatch?.update(dt);
     this.missions?.update(dt);
     this.worldlife?.update(dt);
     this.particles?.update(dt);

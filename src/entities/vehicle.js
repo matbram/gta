@@ -15,6 +15,7 @@ export const VEHICLE_TYPES = {
   police:  { name: 'Interceptor', w: 1.9, l: 4.7, h: 1.45, maxSpeed: 38, accel: 12, grip: 8.5, steer: 2.5, mass: 1.1, colors: [0x16181d] },
   moto:    { name: 'Comet 250', w: 0.8,  l: 2.2,  h: 1.1,  maxSpeed: 40, accel: 13, grip: 8,   steer: 3.0, mass: 0.35, colors: [0x8a2f26, 0x22262c, 0x2e4a6a] },
   ambulance: { name: 'Lifeline', w: 2.1, l: 5.4,  h: 2.4,  maxSpeed: 30, accel: 8,  grip: 6.5, steer: 2.0, mass: 1.6, colors: [0xe8e4dc] },
+  firetruck: { name: 'BFD Engine 3', w: 2.4, l: 7.6, h: 2.9, maxSpeed: 27, accel: 7, grip: 6.5, steer: 1.7, mass: 2.6, colors: [0xb02318] },
 };
 
 const glassMatShared = new THREE.MeshLambertMaterial({ color: 0x1a2732 });
@@ -297,6 +298,25 @@ export class Vehicle {
         const band = new THREE.Mesh(new THREE.BoxGeometry(W + 0.04, 0.8, L * 0.86), glassMatShared);
         band.position.set(0, wheelR + bodyH + cabinH * 0.4, 0);
         g.add(band);
+      }
+      if (this.type === 'firetruck') {
+        // silver ladder on the roof + white stripe
+        const ladder = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, L * 0.62),
+          new THREE.MeshLambertMaterial({ color: 0xb8bec4 }));
+        ladder.position.set(0, wheelR + bodyH + cabinH + 0.12, -L * 0.08);
+        g.add(ladder);
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, 0.24, L * 0.8),
+          new THREE.MeshLambertMaterial({ color: 0xe8e4dc }));
+        stripe.position.set(0, wheelR + bodyH * 0.65, 0);
+        g.add(stripe);
+        this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
+        this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff4422, emissiveIntensity: 0 });
+        const lb1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.28), this.lightbarR);
+        lb1.position.set(-0.25, wheelR + bodyH + cabinH + 0.05, L * 0.32);
+        g.add(lb1);
+        const lb2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.28), this.lightbarB);
+        lb2.position.set(0.25, wheelR + bodyH + cabinH + 0.05, L * 0.32);
+        g.add(lb2);
       }
     }
 

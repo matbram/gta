@@ -3,6 +3,7 @@
 
 import { Ped, randomLook } from '../entities/ped.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
+import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 
 const TARGET_PEDS = 40;
 const SPAWN_MIN = 55, SPAWN_MAX = 150, DESPAWN = 230;
@@ -63,10 +64,36 @@ export class PedSystem {
       if (!city.landAt(x, z)) continue;
       if (Math.random() > this.densityAt(x, z)) continue;
 
-      const ped = new Ped(city, this.game.scene, randomLook(Math.random));
+      // role + personality by district
+      const district = city.districtAt(x, z);
+      const archetype = pickArchetype(district);
+      const arch = ARCHETYPES[archetype];
+      const look = randomLook(Math.random);
+      if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
+      const ped = new Ped(city, this.game.scene, look, {
+        archetype, personality: makePersonality(archetype),
+      });
       ped.place(x, z);
-      ped.setSidewalk(edge, Math.random() < 0.5 ? 1 : -1, side);
+      if (arch?.loiter) {
+        ped.loiter = true;                        // vendors/gangsters hold their corner
+      } else {
+        ped.setSidewalk(edge, Math.random() < 0.5 ? 1 : -1, side);
+      }
       this.peds.push(ped);
+
+      // gangsters hang out in small groups
+      if (archetype === 'gangster' && Math.random() < 0.6) {
+        for (let k = 0; k < 1 + (Math.random() < 0.4 ? 1 : 0); k++) {
+          const gl = randomLook(Math.random);
+          gl.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
+          const buddy = new Ped(city, this.game.scene, gl, {
+            archetype, personality: makePersonality(archetype),
+          });
+          buddy.place(x + (Math.random() - 0.5) * 4, z + (Math.random() - 0.5) * 4);
+          buddy.loiter = true;
+          this.peds.push(buddy);
+        }
+      }
       return;
     }
   }

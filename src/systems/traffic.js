@@ -79,7 +79,13 @@ export class TrafficSystem {
 
   panic(vehicle) {
     const car = this.cars.find((c) => c.vehicle === vehicle);
-    if (car) car.panicT = 8 + Math.random() * 5;
+    if (!car) return;
+    // aggressive drivers get OUT to confront you; the rest floor it
+    if (!car.rage && car.driverPed?.personality?.aggression > 0.72 && Math.random() < 0.5) {
+      car.rage = true;
+    } else {
+      car.panicT = 8 + Math.random() * 5;
+    }
   }
 
   trySpawn(p) {
@@ -123,6 +129,15 @@ export class TrafficSystem {
     this.cars.push(car);
   }
 
+  seatDriver(car, dt) {
+    const dp = car.driverPed, v = car.vehicle;
+    dp.pos.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
+    dp.heading = v.heading;
+    dp.rig.group.position.copy(dp.pos);
+    dp.rig.group.rotation.y = dp.heading;
+    dp.rig.update(dt, 0);
+  }
+
   laneTarget(car, tAhead) {
     // point on the edge at parameter t, offset to the right-hand lane
     const e = car.edge;
@@ -147,6 +162,24 @@ export class TrafficSystem {
     const v = car.vehicle;
     const game = this.game;
     if (v.dead) return;
+
+    // road rage: pull over, get out, square up
+    if (car.rage) {
+      v.updatePhysics(dt, { throttle: v.speed > 0.5 ? -1 : 0, steer: 0, handbrake: v.speed < 2 });
+      if (Math.abs(v.speed) < 0.6 && car.driverPed) {
+        const ped = car.driverPed;
+        game.peds.ejectDriver(ped, v);
+        ped.state = 'fight';
+        ped.panicked = true;
+        ped.stateT = 0;
+        v.driver = null;
+        car.driverPed = null;
+        this.forget(car);
+      } else if (car.driverPed && car.driverPed.state === 'driver') {
+        this.seatDriver(car, dt);
+      }
+      return;
+    }
 
     const e = car.edge;
     // advance parameter along edge based on actual position projection
@@ -249,14 +282,7 @@ export class TrafficSystem {
     v.updatePhysics(dt, { throttle, steer, handbrake: false });
 
     // keep the visible driver seated
-    if (car.driverPed && car.driverPed.state === 'driver') {
-      const dp = car.driverPed;
-      dp.pos.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
-      dp.heading = v.heading;
-      dp.rig.group.position.copy(dp.pos);
-      dp.rig.group.rotation.y = dp.heading;
-      dp.rig.update(dt, 0);
-    }
+    if (car.driverPed && car.driverPed.state === 'driver') this.seatDriver(car, dt);
 
     // unstick: if barely moving against a wall for a while, nudge to lane
     if (Math.abs(v.speed) < 0.4 && !blocked && want > 2) {

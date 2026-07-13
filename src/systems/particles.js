@@ -199,6 +199,20 @@ export class ParticleSystem {
     this.sparks(x, y + 0.5, z, 16);
   }
 
+  // firefighter hose arc
+  waterJet(x, y, z, dirX, dirZ) {
+    for (let i = 0; i < 3; i++) {
+      this.smoke.emit({
+        x, y, z,
+        vx: dirX * (7 + Math.random() * 3) + (Math.random() - 0.5) * 1.2,
+        vy: 2.2 + Math.random() * 1.2,
+        vz: dirZ * (7 + Math.random() * 3) + (Math.random() - 0.5) * 1.2,
+        life: 0.7 + Math.random() * 0.3, s0: 0.3, s1: 1.1, a: 0.7,
+        r: 0.68, g: 0.82, b: 0.95, grav: -13, drag: 0.99,
+      });
+    }
+  }
+
   waterSplash(x, y, z) {
     for (let i = 0; i < 12; i++) {
       this.smoke.emit({

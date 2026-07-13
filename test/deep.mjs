@@ -45,7 +45,11 @@ const respray = await page.evaluate(() => {
   v.vel.set(0, 0);
   g.player.pos.set(m.x, 0, m.z);
   window.__game.tick(1);
-  return { stars: g.state.wanted.stars, cops: g.wanted.footCops.length + g.wanted.cruisers.length };
+  // beat-patrol cops legitimately exist at zero stars — count only responders
+  return {
+    stars: g.state.wanted.stars,
+    cops: g.wanted.footCops.filter((c) => !c.patrol).length + g.wanted.cruisers.length,
+  };
 });
 console.log('after respray:', JSON.stringify(respray),
   respray.stars === 0 && respray.cops === 0 ? 'RESPRAY OK' : 'RESPRAY FAIL');
