@@ -45,9 +45,11 @@ const life = await page.evaluate(() => ({
 console.log('world life:', JSON.stringify(life),
   life.traffic > 0 && life.peds > 0 ? 'LIFE OK' : 'LIFE FAIL');
 
-// exit vehicle
-await page.keyboard.press('f');
-await page.waitForTimeout(400);
+// exit vehicle (tick consumes the keypress deterministically — headless
+// frames can be seconds long with skinned characters on SwiftShader)
+await page.keyboard.down('f');
+await page.evaluate(() => window.__game.tick(0.3));
+await page.keyboard.up('f');
 const out = await page.evaluate(() => !window.__game.game.player.vehicle);
 console.log('exited vehicle:', out ? 'OK' : 'FAIL');
 await page.screenshot({ path: 'screenshots/06-street.png' });
