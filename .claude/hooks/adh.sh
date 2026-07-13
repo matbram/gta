@@ -14,6 +14,25 @@ if [ -z "${ADH_API_URL:-}" ] || [ -z "${ADH_PROJECT_TOKEN:-}" ]; then
 fi
 
 root="${CLAUDE_PROJECT_DIR:-$PWD}"
+config_path="$root/.adh/config.json"
+repository="$(python3 - "$config_path" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get("repository", "")
+    print(value if isinstance(value, str) and value != "REPLACED_BY_ADH" else "")
+except Exception:
+    pass
+PY
+)"
+connector_version="$(python3 - "$config_path" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get("connector_version", "")
+    print(value if isinstance(value, int) else "")
+except Exception:
+    pass
+PY
+)"
 payload_session_id="$(printf '%s' "$payload" | python3 -c 'import json,sys; value=json.load(sys.stdin).get("session_id", ""); print(value if isinstance(value, str) else "")' 2>/dev/null || true)"
 if [ -n "$payload_session_id" ]; then
   session_id="${payload_session_id#cse_}"
@@ -48,6 +67,8 @@ response="$(curl --fail --silent --show-error --max-time 3 \
   --header 'Content-Type: application/json' \
   --header "X-ADH-Branch: ${branch}" \
   --header "X-ADH-Commit: ${commit}" \
+  --header "X-ADH-Repository: ${repository}" \
+  --header "X-ADH-Connector-Version: ${connector_version}" \
   --header "X-ADH-Changed-Files-B64: ${changed_files_b64}" \
   --header "X-ADH-Surface: ${surface}" \
   --header "X-ADH-Session-ID: ${session_id:-}" \
