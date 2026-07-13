@@ -6,10 +6,13 @@ import { dist2d, clamp, angleDamp } from '../core/mathutil.js';
 export class Goon extends Ped {
   constructor(city, scene, opts = {}) {
     super(city, scene, {
-      skin: 0xa9765a,
       shirt: opts.shirt ?? 0x5a2430,
       pants: 0x23262b,
-      hair: 0x0e0c0a,
+      topStyle: 'hoodie',
+      hat: Math.random() < 0.4 ? 'beanie' : null,
+      accent: 0x1a1a20,
+      female: false,
+      age: 0.25 + Math.random() * 0.3,
     }, { health: opts.health ?? 65 });
     this.isGoon = true;
     this.aggroRange = opts.aggroRange ?? 60;

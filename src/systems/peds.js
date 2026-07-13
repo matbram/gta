@@ -2,6 +2,7 @@
 // runs their brains, handles run-overs, panic waves and cleanup.
 
 import { Ped, randomLook } from '../entities/ped.js';
+import { enrichLook } from '../entities/humanoid.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
 import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 
@@ -105,7 +106,7 @@ export class PedSystem {
       const district = city.districtAt(x, z);
       const archetype = pickArchetype(district);
       const arch = ARCHETYPES[archetype];
-      const look = randomLook(Math.random);
+      const look = enrichLook({ ...(arch?.look ?? {}) });
       if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
       const ped = new Ped(city, this.game.scene, look, {
         archetype, personality: makePersonality(archetype),
@@ -121,7 +122,7 @@ export class PedSystem {
       // gangsters hang out in small groups
       if (archetype === 'gangster' && Math.random() < 0.6) {
         for (let k = 0; k < 1 + (Math.random() < 0.4 ? 1 : 0); k++) {
-          const gl = randomLook(Math.random);
+          const gl = enrichLook({ ...(arch?.look ?? {}) });
           gl.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
           const buddy = new Ped(city, this.game.scene, gl, {
             archetype, personality: makePersonality(archetype),

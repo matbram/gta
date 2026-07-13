@@ -6,8 +6,8 @@
 import { Ped } from '../entities/ped.js';
 import { dist2d, clamp, wrapAngle } from '../core/mathutil.js';
 
-const FF_LOOK = { skin: 0xc99b72, shirt: 0xb03a2e, pants: 0x8a6a1a, hair: 0x17120e };
-const MEDIC_LOOK = { skin: 0xc99b72, shirt: 0xe8e4dc, pants: 0x4a7fb5, hair: 0x2a2018 };
+const FF_LOOK = { uniform: 'fire', hat: 'helmet', accent: 0xb03a2e };
+const MEDIC_LOOK = { uniform: 'medic', hat: 'cap', accent: 0xe8e8ea };
 
 class CrewMember extends Ped {
   constructor(city, scene, look) {

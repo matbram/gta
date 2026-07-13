@@ -13,7 +13,13 @@ export class Player {
     this.city = city;
     this.scene = scene;
 
-    this.rig = new Humanoid({ skin: 0xb98a62, shirt: 0xf2efe6, pants: 0x4a5240, hair: 0x17120e });
+    // fixed protagonist look — stable across sessions
+    this.rig = new Humanoid({
+      skin: 0xb98a62, shirt: 0xf2efe6, pants: 0x4a5240, hair: 0x17120e,
+      shoes: 0xe8e4da, eyes: 0x4a3624, female: false, age: 0.34, body: 'avg',
+      hairStyle: 'short', beard: 'stubble', topStyle: 'tee', bottomStyle: 'jeans',
+      sleeves: 'short', heightScale: 1.01,
+    });
     scene.add(this.rig.group);
 
     this.pos = new THREE.Vector3(0, 0, 0);

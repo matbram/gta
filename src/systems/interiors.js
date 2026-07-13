@@ -12,9 +12,9 @@ const BASE_X = 2600;            // interior row, far east of the island
 const SPACING = 160;
 
 const KEEPER_LOOKS = [
-  { skin: 0xc99b72, shirt: 0x6a8a5a, pants: 0x3a4444, hair: 0x2a2018 },
-  { skin: 0x8a5a3a, shirt: 0x8a6a4a, pants: 0x2e3440, hair: 0x0e0c0a },
-  { skin: 0xe8b88a, shirt: 0x5a6a8a, pants: 0x4a4038, hair: 0x5a4028 },
+  { uniform: 'keeper', shirt: 0x6a8a5a },
+  { uniform: 'keeper', shirt: 0x8a6a4a },
+  { uniform: 'keeper', shirt: 0x5a6a8a },
 ];
 
 export class Interiors {

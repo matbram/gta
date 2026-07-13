@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, damp } from '../core/mathutil.js';
 import { Animator, GESTURES } from '../core/animator.js';
+import { characterFactory } from './charactermesh.js';
 
 const GEO = {};
 function geo(key, make) {
@@ -269,18 +270,55 @@ export class BoxHumanoid {
 }
 
 // Random pedestrian looks (deterministic variety comes from Math.random of spawner's rng)
-const SKINS = [0xc99b72, 0x8a5a3a, 0x6a4530, 0xe8b88a, 0xa9765a];
+const SKINS = [0xc99b72, 0x8a5a3a, 0x6a4530, 0xe8b88a, 0xa9765a, 0xf0c9a0, 0x5a3826];
 const SHIRTS = [0xffffff, 0xb03a2e, 0x3a5a8a, 0x4a7a4a, 0xe8c84a, 0x8a4a8a, 0x333a44, 0xd87a3a, 0x88ccc0];
 const PANTS = [0x4a5568, 0x2e3440, 0x6a5a48, 0x3e4e3e, 0x8a8a92, 0x252a33];
-const HAIRS = [0x2a2018, 0x0e0c0a, 0x5a4028, 0x888078, 0xc8b088];
+const HAIRS = [0x2a2018, 0x0e0c0a, 0x5a4028, 0x888078, 0x8a3a1e];
+const GRAYS = [0x9a9a98, 0xcfcfcb, 0x77736e];
+const SHOES = [0x2c2620, 0xe8e4da, 0x503a28, 0x21242a, 0x8a2a2a];
+const EYES = [0x4a3624, 0x2e4a66, 0x3a5a3a, 0x241a12];
 
 export function randomLook(rng) {
-  return {
+  return enrichLook({
     skin: SKINS[Math.floor(rng() * SKINS.length)],
     shirt: SHIRTS[Math.floor(rng() * SHIRTS.length)],
     pants: PANTS[Math.floor(rng() * PANTS.length)],
-    hair: HAIRS[Math.floor(rng() * HAIRS.length)],
+  }, rng);
+}
+
+// Fill any missing "rich" look fields (face, age, hair style, outfit cut)
+// so legacy {skin, shirt, pants, hair} colour looks keep working while the
+// character factory gets everything it needs. Idempotent.
+export function enrichLook(look = {}, rng = Math.random) {
+  if (look._rich) return look;
+  const female = look.female ?? (look.uniform ? rng() < 0.35 : rng() < 0.46);
+  const age = look.age ?? 0.18 + rng() * 0.62;
+  const gray = age > 0.74;
+  const out = {
+    _rich: true,
+    ...look,
+    female, age,
+    skin: look.skin ?? SKINS[(rng() * SKINS.length) | 0],
+    shirt: look.shirt ?? SHIRTS[(rng() * SHIRTS.length) | 0],
+    pants: look.pants ?? PANTS[(rng() * PANTS.length) | 0],
+    hair: look.hair ?? (gray ? GRAYS[(rng() * GRAYS.length) | 0] : HAIRS[(rng() * HAIRS.length) | 0]),
+    shoes: look.shoes ?? SHOES[(rng() * SHOES.length) | 0],
+    eyes: look.eyes ?? EYES[(rng() * EYES.length) | 0],
+    body: look.body ?? (rng() < 0.15 ? 'heavy' : 'avg'),
+    hairStyle: look.hairStyle ?? (female
+      ? ['bob', 'pony', 'short', 'afro'][(rng() * 4) | 0]
+      : (gray && rng() < 0.45 ? 'bald' : ['short', 'buzz', 'afro', 'short'][(rng() * 4) | 0])),
+    beard: look.beard ?? (!female && rng() < 0.32 ? (rng() < 0.4 ? 'full' : 'stubble') : null),
+    topStyle: look.topStyle ?? ['tee', 'tee', 'shirt', 'hoodie', 'jacket'][(rng() * 5) | 0],
+    bottomStyle: look.bottomStyle ?? (rng() < 0.13 ? 'shorts' : rng() < 0.42 ? 'slacks' : 'jeans'),
+    sleeves: look.sleeves ?? (rng() < 0.55 ? 'short' : 'long'),
+    print: look.print ?? null,
+    uniform: look.uniform ?? null,
+    hat: look.hat ?? null,
+    heightScale: look.heightScale ?? 0.94 + rng() * 0.11,
   };
+  if (out.uniform || out.topStyle === 'jacket' || out.topStyle === 'hoodie') out.sleeves = 'long';
+  return out;
 }
 
 // ====================================================================
@@ -297,7 +335,14 @@ const RUN_REF = 5.0;
 export class SkinnedHumanoid {
   constructor(look = {}, modelKey = 'Soldier') {
     this.group = new THREE.Group();
-    const asset = humanoidAssets.skinned(modelKey);
+    this.look = enrichLook(look);
+
+    // our own generated body on the GLB's skeleton; the GLB mesh itself is
+    // never rendered. Fallback: raw GLB clone if the factory can't init.
+    this.factoryBuilt = characterFactory.init(humanoidAssets);
+    const asset = this.factoryBuilt
+      ? characterFactory.build(this.look)
+      : humanoidAssets.skinned(modelKey);
     this.modelRoot = asset.scene;
     this.modelRoot.rotation.y = Math.PI;      // mixamo rigs face -z; game faces +z
     this.group.add(this.modelRoot);
@@ -307,31 +352,34 @@ export class SkinnedHumanoid {
     this.animator = new Animator(this.modelRoot, asset.animations);
 
     // bone-based sizing: skinned bounds lie (bind-pose bones carry the scale),
-    // so measure rendered height head→feet and normalize to 1.78 m
+    // so measure rendered height head→feet and normalize to the target height
     this.modelRoot.updateMatrixWorld(true);
     const b = this.animator.bones;
     const vh = new THREE.Vector3(), vf = new THREE.Vector3();
     let s = 1;
+    const targetH = 1.78 * (this.look.heightScale ?? 1) * (this.look.age > 0.75 ? 0.97 : 1);
     if (b.head && (b.footL || b.footR)) {
       b.head.getWorldPosition(vh);
       (b.footL ?? b.footR).getWorldPosition(vf);
       const renderedH = (vh.y - vf.y) + 0.22;   // head bone sits at the chin; add skull + sole
-      s = 1.78 / Math.max(renderedH, 0.2);
+      s = targetH / Math.max(renderedH, 0.2);
       this.modelRoot.scale.setScalar(s);
       this.modelRoot.position.y = -(vf.y - 0.08) * s;
     }
 
-    // per-instance material tint for crowd variety
-    const tint = new THREE.Color(look.shirt ?? 0xffffff);
-    this.modelRoot.traverse((o) => {
-      if (o.isMesh || o.isSkinnedMesh) {
-        o.castShadow = true;
-        o.frustumCulled = false;             // skinned bounds lag the skeleton
-        o.material = o.material.clone();
-        o.material.color = new THREE.Color(0xffffff).lerp(tint, 0.42);
-        o.material.envMapIntensity = 0.35;
-      }
-    });
+    if (!this.factoryBuilt) {
+      // legacy tint path for the raw GLB fallback only
+      const tint = new THREE.Color(this.look.shirt ?? 0xffffff);
+      this.modelRoot.traverse((o) => {
+        if (o.isMesh || o.isSkinnedMesh) {
+          o.castShadow = true;
+          o.frustumCulled = false;
+          o.material = o.material.clone();
+          o.material.color = new THREE.Color(0xffffff).lerp(tint, 0.42);
+          o.material.envMapIntensity = 0.35;
+        }
+      });
+    }
 
     // weapon anchor on the right hand bone (scale-compensated)
     this.handAnchor = new THREE.Group();
@@ -430,9 +478,12 @@ export class SkinnedHumanoid {
   }
 
   dispose() {
-    this.modelRoot.traverse((o) => {
-      if ((o.isMesh || o.isSkinnedMesh) && o.material) o.material.dispose();
-    });
+    if (!this.factoryBuilt) {
+      // factory materials + geometry are cached and shared — never disposed here
+      this.modelRoot.traverse((o) => {
+        if ((o.isMesh || o.isSkinnedMesh) && o.material) o.material.dispose();
+      });
+    }
     this.group.removeFromParent();
   }
 }

@@ -12,6 +12,7 @@ export const ARCHETYPES = {
     tints: [0x8a8f98, 0x4a5a8a, 0x5a4a3a, 0x3a4a44, 0x7a6a5a, 0x9a8a9a],
     bias: { bravery: 0, aggression: 0, curiosity: 0, civic: 0.1 },
     idles: ['phone', 'stand'],
+    look: { topStyle: 'shirt', bottomStyle: 'slacks' },
   },
   tourist: {
     weight: { beach: 4, park: 3, crown: 2, oldtown: 1.5, midtown: 1 },
@@ -19,6 +20,7 @@ export const ARCHETYPES = {
     tints: [0xd8b060, 0x60b0d8, 0xd86080, 0x80d860, 0xe8e0c0],
     bias: { bravery: -0.05, aggression: -0.2, curiosity: 0.35, civic: 0 },
     idles: ['photo', 'stand', 'phone'],
+    look: { topStyle: 'tee', bottomStyle: 'shorts', sleeves: 'short', print: 'floral' },
   },
   jogger: {
     weight: { beach: 3, park: 3, suburbs: 1.5, heights: 1 },
@@ -26,6 +28,7 @@ export const ARCHETYPES = {
     tints: [0xe84a4a, 0x4ae8b0, 0xe8e84a, 0xff8830],
     bias: { bravery: 0.05, aggression: -0.1, curiosity: -0.25, civic: -0.1 },
     idles: [],
+    look: { topStyle: 'tee', bottomStyle: 'shorts', sleeves: 'short', hat: null, age: 0.3 },
   },
   elderly: {
     weight: { suburbs: 3, park: 2.5, oldtown: 1.5, beach: 1 },
@@ -33,20 +36,23 @@ export const ARCHETYPES = {
     tints: [0xb0a890, 0x90a0b0, 0xa090a0, 0x8a8a7a],
     bias: { bravery: -0.3, aggression: -0.3, curiosity: 0.05, civic: 0.25 },
     idles: ['bench', 'stand'],
+    look: { age: 0.85, topStyle: 'shirt', bottomStyle: 'slacks', sleeves: 'long' },
   },
   vendor: {
     weight: { oldtown: 3, midtown: 2.5, beach: 1.5, crown: 1 },
     walkSpeed: [1.0, 1.3], scale: [0.98, 1.05],
     tints: [0x6a8a5a, 0x8a6a4a, 0x5a6a8a],
     bias: { bravery: 0.05, aggression: 0, curiosity: 0.1, civic: 0.4 },
-    idles: ['stand'], loiter: true,
+    idles: ['stand'],
+    look: { uniform: 'vendor', topStyle: 'shirt' }, loiter: true,
   },
   gangster: {
     weight: { docks: 4, heights: 2, midtown: 0.6 },
     walkSpeed: [1.1, 1.5], scale: [1.0, 1.08],
     tints: [0x5a2430, 0x2a1a3a, 0x3a2a1a, 0x1a1a22],
     bias: { bravery: 0.35, aggression: 0.5, curiosity: -0.1, civic: -0.5 },
-    idles: ['stand'], loiter: true, braveChance: 0.75,
+    idles: ['stand'],
+    look: { topStyle: 'hoodie', age: 0.3, female: false }, loiter: true, braveChance: 0.75,
   },
 };
 

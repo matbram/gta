@@ -4,11 +4,12 @@
 import { Ped } from './ped.js';
 import { dist2d, clamp, angleDamp } from '../core/mathutil.js';
 
-const COP_LOOK = { skin: 0xc99b72, shirt: 0x2a3a55, pants: 0x1c2434, hair: 0x17120e };
+// uniform + cap; face/age/build randomize per officer
+const COP_LOOK = { uniform: 'cop', hat: 'cap', bottomStyle: 'slacks' };
 
 export class Cop extends Ped {
   constructor(city, scene, tough = false) {
-    super(city, scene, tough ? { ...COP_LOOK, shirt: 0x181c22 } : COP_LOOK, { health: tough ? 110 : 60 });
+    super(city, scene, tough ? { ...COP_LOOK, body: 'heavy', female: false } : { ...COP_LOOK }, { health: tough ? 110 : 60 });
     this.isCop = true;
     this.tough = tough;
     this.walkSpeed = 1.25;
