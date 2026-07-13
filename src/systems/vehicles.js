@@ -98,7 +98,13 @@ export class VehicleSystem {
     const player = this.game.player;
     const v = player.vehicle;
     if (!v) return;
-    if (Math.abs(v.speed) > 14) return;   // too fast to bail at full speed (keeps it simple)
+    const bailSpeed = Math.abs(v.speed);
+    if (bailSpeed > 14) {
+      // bail out: hit the pavement rolling, car keeps going
+      player.damage(Math.min(25, (bailSpeed - 14) * 1.2), 'bail');
+      this.game.cameraRig.addShake(0.5);
+      this.game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 6);
+    }
     const door = v.seatWorldPos();
     player.vehicle = null;
     v.driver = null;

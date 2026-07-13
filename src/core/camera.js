@@ -58,7 +58,7 @@ export class CameraRig {
       lookAt.z = damp(lookAt.z, target.z, l, dt);
     }
 
-    let wantDist = aimMode ? 2.2 : (driving ? this.dist + 1.6 : this.dist);
+    let wantDist = aimMode ? 3.0 : (driving ? this.dist + 1.6 : this.dist);
     this.curDist = damp(this.curDist, wantDist, 6, dt);
 
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);

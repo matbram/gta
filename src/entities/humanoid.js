@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { clamp, lerp, damp } from '../core/mathutil.js';
+import { Animator, GESTURES } from '../core/animator.js';
 
 const GEO = {};
 function geo(key, make) {
@@ -10,7 +11,7 @@ function geo(key, make) {
   return GEO[key];
 }
 
-export class Humanoid {
+export class BoxHumanoid {
   constructor(look = {}) {
     const skin = look.skin ?? 0xc99b72;
     const shirt = look.shirt ?? 0xffffff;
@@ -280,4 +281,167 @@ export function randomLook(rng) {
     pants: PANTS[Math.floor(rng() * PANTS.length)],
     hair: HAIRS[Math.floor(rng() * HAIRS.length)],
   };
+}
+
+// ====================================================================
+// Skinned character path — real GLB rig + AnimationMixer via Animator.
+// Same public API as BoxHumanoid so all callers work unchanged.
+// ====================================================================
+
+export let humanoidAssets = null;
+export function setHumanoidAssets(a) { humanoidAssets = a; }
+
+const WALK_REF = 1.7;   // m/s the walk clip was authored at (tuned by eye)
+const RUN_REF = 5.0;
+
+export class SkinnedHumanoid {
+  constructor(look = {}, modelKey = 'Soldier') {
+    this.group = new THREE.Group();
+    const asset = humanoidAssets.skinned(modelKey);
+    this.modelRoot = asset.scene;
+    this.modelRoot.rotation.y = Math.PI;      // mixamo rigs face -z; game faces +z
+    this.group.add(this.modelRoot);
+    this.height = 1.78;
+    this.legLen = 0.86;
+
+    this.animator = new Animator(this.modelRoot, asset.animations);
+
+    // bone-based sizing: skinned bounds lie (bind-pose bones carry the scale),
+    // so measure rendered height head→feet and normalize to 1.78 m
+    this.modelRoot.updateMatrixWorld(true);
+    const b = this.animator.bones;
+    const vh = new THREE.Vector3(), vf = new THREE.Vector3();
+    let s = 1;
+    if (b.head && (b.footL || b.footR)) {
+      b.head.getWorldPosition(vh);
+      (b.footL ?? b.footR).getWorldPosition(vf);
+      const renderedH = (vh.y - vf.y) + 0.22;   // head bone sits at the chin; add skull + sole
+      s = 1.78 / Math.max(renderedH, 0.2);
+      this.modelRoot.scale.setScalar(s);
+      this.modelRoot.position.y = -(vf.y - 0.08) * s;
+    }
+
+    // per-instance material tint for crowd variety
+    const tint = new THREE.Color(look.shirt ?? 0xffffff);
+    this.modelRoot.traverse((o) => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        o.castShadow = true;
+        o.frustumCulled = false;             // skinned bounds lag the skeleton
+        o.material = o.material.clone();
+        o.material.color = new THREE.Color(0xffffff).lerp(tint, 0.42);
+        o.material.envMapIntensity = 0.35;
+      }
+    });
+
+    // weapon anchor on the right hand bone (scale-compensated)
+    this.handAnchor = new THREE.Group();
+    const handBone = this.animator.bones.handR;
+    if (handBone) {
+      handBone.add(this.handAnchor);
+      const ws = new THREE.Vector3();
+      handBone.getWorldScale(ws);
+      this.group.updateMatrixWorld(true);
+      handBone.getWorldScale(ws);
+      const inv = 1 / Math.max(ws.x, 1e-4);
+      this.handAnchor.scale.setScalar(inv);
+      this.handAnchor.rotation.set(0, -Math.PI / 2, Math.PI / 2); // grip alignment
+    } else {
+      this.group.add(this.handAnchor);
+    }
+
+    this.anim = 'idle';
+    this.aimPitch = 0;
+    this.dead = false;
+    this.deadT = 0;
+    this.punchAlt = false;
+    this.swimTilt = 0;
+    this.animator.play('idle');
+  }
+
+  setAnim(name) {
+    if (this.anim === name || this.dead) return;
+    this.anim = name;
+    const A = this.animator;
+    switch (name) {
+      case 'idle': A.play('idle'); A.setOverlay('none'); break;
+      case 'walk': A.play('walk'); A.setOverlay('none'); break;
+      case 'run': A.play('run'); A.setOverlay('none'); break;
+      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay('none'); break;
+      case 'jump': A.play('idle', { timeScale: 0.2 }); A.setOverlay('jump'); break;
+      case 'swim': A.play('idle', { timeScale: 0.6 }); A.setOverlay('swim'); break;
+      case 'drive': A.play('idle', { timeScale: 0.12 }); A.setOverlay('drive'); break;
+      case 'aim': A.play('idle', { timeScale: 0.5 }); A.setOverlay('aimPistol'); break;
+      case 'aimwalk': A.play('walk'); A.setOverlay('aimPistol'); break;
+      // extended poses used by NPC behaviours
+      case 'sit': A.play('idle', { timeScale: 0.1 }); A.setOverlay('sit'); break;
+      case 'phone': A.play('idle', { timeScale: 0.5 }); A.setOverlay('phone'); break;
+      case 'handsup': A.play('idle', { timeScale: 0.3 }); A.setOverlay('handsUp'); break;
+      case 'kneel': A.play('idle', { timeScale: 0.1 }); A.setOverlay('kneel'); break;
+      case 'hose': A.play('idle', { timeScale: 0.4 }); A.setOverlay('hose'); break;
+      default: A.play('idle'); A.setOverlay('none');
+    }
+  }
+
+  setOverlay(name) { this.animator.setOverlay(name); }
+
+  startPunch() {
+    const g = this.punchAlt ? GESTURES.hook : GESTURES.punch;
+    this.punchAlt = !this.punchAlt;
+    this.animator.startGesture(0.38, (t, bones, q, e) => g(bones, q, e, t));
+  }
+
+  flinch() {
+    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t));
+  }
+
+  die() {
+    if (this.dead) return;
+    this.dead = true;
+    this.deadT = 0;
+    this.animator.play('idle', { timeScale: 0 });
+    this.animator.setOverlay('none');
+  }
+
+  update(dt, speed = 0) {
+    if (this.dead) {
+      this.deadT += dt;
+      // simple fall (verlet ragdoll replaces this in the combat phase)
+      const t = clamp(this.deadT * 3.0, 0, 1);
+      this.group.rotation.x = lerp(this.group.rotation.x, -Math.PI / 2 * 0.94, t * 0.3);
+      this.group.position.y = Math.max(this.group.position.y - dt * 1.4, 0.1);
+      this.animator.update(dt * 0.25);
+      return;
+    }
+
+    // reduce foot slide: scale clip speed to actual velocity
+    if (this.anim === 'walk' || this.anim === 'aimwalk') {
+      if (this.animator.current) this.animator.current.timeScale = clamp(speed / WALK_REF, 0.5, 1.8);
+    } else if (this.anim === 'run' || this.anim === 'sprint') {
+      if (this.animator.current) this.animator.current.timeScale = clamp(speed / RUN_REF, 0.6, 1.6);
+    }
+
+    // swim body tilt
+    const wantTilt = this.anim === 'swim' ? -Math.PI / 2 * 0.8 : 0;
+    this.swimTilt = damp(this.swimTilt, wantTilt, 8, dt);
+    this.modelRoot.rotation.x = this.swimTilt;
+
+    this.animator.aimPitch = (this.anim === 'aim' || this.anim === 'aimwalk') ? -this.aimPitch : 0;
+    this.animator.update(dt);
+  }
+
+  dispose() {
+    this.modelRoot.traverse((o) => {
+      if ((o.isMesh || o.isSkinnedMesh) && o.material) o.material.dispose();
+    });
+    this.group.removeFromParent();
+  }
+}
+
+// Humanoid: picks the skinned rig when character assets are loaded,
+// falls back to the box rig otherwise. (Constructor-return pattern.)
+export class Humanoid {
+  constructor(look = {}) {
+    if (humanoidAssets?.has('Soldier')) return new SkinnedHumanoid(look);
+    return new BoxHumanoid(look);
+  }
 }

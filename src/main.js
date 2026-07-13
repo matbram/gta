@@ -74,6 +74,8 @@ class Game {
     // entities pull their models from the shared registry
     const vehMod = await import('./entities/vehicle.js');
     vehMod.setVehicleAssets(this.assets);
+    const humMod = await import('./entities/humanoid.js');
+    humMod.setHumanoidAssets(this.assets);
 
     await prog(24, 'surveying the bay…');
     this.city = generateCity(SEED);
