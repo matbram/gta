@@ -336,7 +336,7 @@ class Game {
     this.minimap.draw(
       this.player.pos.x, this.player.pos.z,
       this.cameraRig.yaw + Math.PI,
-      blips, this.state.waypoint
+      blips, this.state.waypoint, this.worldlife?.route
     );
   }
 

@@ -14,7 +14,7 @@ export class Minimap {
   }
 
   // blips: [{x, z, color, shape:'dot'|'square'|'triangle', label, above, below}]
-  draw(px, pz, headingRad, blips = [], waypoint = null) {
+  draw(px, pz, headingRad, blips = [], waypoint = null, route = null) {
     const ctx = this.ctx;
     const S = this.canvas.width;          // 448
     const R = S / 2;
@@ -44,6 +44,25 @@ export class Minimap {
       const c = Math.cos(headingRad), s = Math.sin(headingRad);
       return [R + dx * c - dz * s, R + dx * s + dz * c];
     };
+
+    // waypoint route drawn over the map
+    if (route && route.length > 1) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(R, R, R - 6, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(150,80,150,0.9)';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < route.length; i++) {
+        const [x, y] = rot(route[i].x, route[i].z);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
 
     const drawBlip = (b) => {
       let [x, y] = rot(b.x, b.z);
