@@ -98,6 +98,23 @@ class Game {
     this.hud = new Hud();
     this.minimap = new Minimap(this.city);
 
+    await prog(92, 'casting the extras…');
+    // pre-warm the generated-asset caches so first encounters don't hitch:
+    // body geometry variants + a spread of atlas looks
+    try {
+      const { characterFactory } = await import('./entities/charactermesh.js');
+      if (characterFactory.init(this.assets)) {
+        for (const v of ['male', 'female', 'heavy']) {
+          for (const h of ['short', 'buzz', 'bob', 'afro', 'pony']) characterFactory.geometry(v, h, null);
+        }
+        for (const hat of ['cap', 'helmet', 'beanie']) characterFactory.geometry('male', 'short', hat);
+      }
+      const { materialForLook } = await import('./entities/charactertex.js');
+      const { enrichLook } = await import('./entities/humanoid.js');
+      for (let i = 0; i < 10; i++) materialForLook(enrichLook({}));
+      for (const uniform of ['cop', 'fire', 'medic', 'keeper']) materialForLook(enrichLook({ uniform }));
+    } catch (e) { console.warn('[boot] pre-warm skipped:', e.message); }
+
     // lazy-loaded gameplay systems land here in later phases
     await this.loadSystems(prog);
 

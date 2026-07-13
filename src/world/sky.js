@@ -201,7 +201,9 @@ export class SkyDome {
     if (key === this._envKey) return false;
     this._envKey = key;
     const old = this._envRT;
-    this._envRT = gfx.pmrem.fromScene(this.envScene, 0.35, 1, DOME_R * 2);
+    // sigma 0: the dome is already a smooth gradient, and any blur sigma
+    // runs a huge convolution that stalls the frame (the periodic hitch)
+    this._envRT = gfx.pmrem.fromScene(this.envScene, 0, 1, DOME_R * 2);
     this.scene.environment = this._envRT.texture;
     old?.dispose();
     return true;

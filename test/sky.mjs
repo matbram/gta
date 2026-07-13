@@ -7,7 +7,11 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+const sigmaWarns = [];
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(m.text());
+  if (m.text().includes('sigmaRadians')) sigmaWarns.push(m.text());
+});
 page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 await page.goto('http://localhost:8080/?q=low', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => window.__game?.mode === 'menu', null, { timeout: 240000 });
@@ -122,6 +126,9 @@ await page.evaluate(() => window.__game.setWeather('clear'));
   }));
   console.log('skids:', JSON.stringify(s), s.skids > 0 ? 'SKID OK' : 'SKID FAIL');
 }
+
+// the env bake must not run the PMREM blur (it stalls frames + warns)
+console.log('sigma warnings:', sigmaWarns.length, sigmaWarns.length === 0 ? 'SIGMA OK' : 'SIGMA FAIL');
 
 console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 8).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();
