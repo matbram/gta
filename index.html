@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BAYVALE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --hud-yellow:#e8c84a; --hud-green:#5fae52; --hud-red:#b03a2e; --hud-blue:#4a7fb5;
+    --hud-shadow:2px 2px 0 rgba(0,0,0,.85);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Arial,Helvetica,sans-serif;
+    -webkit-user-select:none;user-select:none}
+  #app{position:relative;width:100%;height:100%}
+  canvas#game{display:block;width:100%;height:100%;outline:none}
+
+  /* ---------- overlays ---------- */
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;z-index:50}
+  .hidden{display:none!important}
+
+  #loading{background:linear-gradient(160deg,#1a1420 0%,#2d1f33 40%,#6b3a3a 80%,#c97b4a 100%);color:#f4e9d8;z-index:100}
+  #loading .title{font:italic 900 84px Georgia,'Times New Roman',serif;letter-spacing:4px;
+    color:#f4e9d8;text-shadow:4px 4px 0 #3a2431,8px 8px 18px rgba(0,0,0,.6)}
+  #loading .subtitle{font:italic 700 20px Georgia,serif;color:#e0c9a8;margin-top:6px;letter-spacing:6px}
+  #loadbar{width:340px;height:10px;border:2px solid #f4e9d8;margin-top:38px;padding:2px;border-radius:2px}
+  #loadbar>div{height:100%;width:0%;background:#e8c84a;transition:width .15s}
+  #loadmsg{margin-top:12px;font:13px monospace;color:#d8c0a0;letter-spacing:1px}
+
+  #menu{background:rgba(8,6,12,.72);backdrop-filter:blur(3px);z-index:90}
+  #menu .title{font:italic 900 72px Georgia,serif;color:#f4e9d8;text-shadow:4px 4px 0 #3a2431,6px 6px 16px #000}
+  #menu .subtitle{font:italic 700 17px Georgia,serif;color:#cbb389;letter-spacing:5px;margin:4px 0 40px}
+  .menu-btn{font:700 22px Arial;letter-spacing:2px;color:#e8dcc8;background:rgba(30,22,38,.85);
+    border:2px solid #6b5a49;padding:12px 60px;margin:7px;min-width:320px;text-align:center;cursor:pointer;
+    border-radius:3px;transition:all .12s}
+  .menu-btn:hover{background:#4a3550;border-color:#e8c84a;color:#fff;transform:scale(1.03)}
+  .menu-btn.disabled{opacity:.35;pointer-events:none}
+  #menu .foot{position:absolute;bottom:26px;font:12px monospace;color:#8a7a68;letter-spacing:1px}
+
+  #pause{background:rgba(5,5,10,.78);z-index:80}
+  #pause h1{font:italic 900 46px Georgia,serif;color:#f4e9d8;margin-bottom:18px;text-shadow:var(--hud-shadow)}
+  #pause .stats{font:15px/1.9 monospace;color:#cfc2ae;margin-bottom:24px;text-align:center}
+
+  #helpbox{position:absolute;right:30px;top:50%;transform:translateY(-50%);width:330px;
+    background:rgba(10,8,16,.9);border:1px solid #55483d;padding:18px 22px;border-radius:4px;z-index:81}
+  #helpbox h2{font:italic 800 20px Georgia,serif;color:#e8c84a;margin-bottom:10px}
+  #helpbox table{width:100%;font:12.5px/1.75 monospace;color:#d8ccb8;border-collapse:collapse}
+  #helpbox td:first-child{color:#e8c84a;width:104px;font-weight:bold}
+
+  /* ---------- HUD ---------- */
+  #hud{position:absolute;inset:0;pointer-events:none;z-index:20}
+
+  #hud-topright{position:absolute;top:18px;right:22px;text-align:right}
+  #hud-clock{font:800 24px 'Arial Black',Arial;color:#e8dcc8;text-shadow:var(--hud-shadow);letter-spacing:2px}
+  #hud-money{font:800 26px 'Arial Black',Arial;color:var(--hud-green);text-shadow:var(--hud-shadow);letter-spacing:1px;margin-top:2px}
+  #hud-money.flash{color:#9fe88a}
+  #hud-stars{margin-top:4px;font-size:24px;letter-spacing:3px;height:30px;text-shadow:var(--hud-shadow)}
+  #hud-stars .on{color:#e8c84a}
+  #hud-stars .off{color:rgba(255,255,255,.16)}
+  .hud-bar{width:172px;height:11px;background:rgba(0,0,0,.55);border:2px solid rgba(0,0,0,.75);
+    margin:4px 0 0 auto;border-radius:2px;overflow:hidden}
+  .hud-bar>div{height:100%;transition:width .2s}
+  #hud-health>div{background:var(--hud-red)}
+  #hud-armor>div{background:#b8c4cc}
+  #hud-breath{width:172px}
+  #hud-breath>div{background:var(--hud-blue)}
+  #hud-weapon{margin-top:8px;display:inline-flex;flex-direction:column;align-items:center;
+    background:rgba(0,0,0,.38);border:2px solid rgba(0,0,0,.5);border-radius:4px;padding:5px 10px;min-width:96px}
+  #hud-weapon .wicon{font-size:30px;line-height:34px;filter:drop-shadow(2px 2px 0 rgba(0,0,0,.8))}
+  #hud-weapon .wname{font:700 10px Arial;color:#d8ccb8;letter-spacing:1px;margin-top:1px}
+  #hud-weapon .wammo{font:800 15px 'Arial Black',Arial;color:#e8dcc8;text-shadow:var(--hud-shadow)}
+
+  #minimap-wrap{position:absolute;left:20px;bottom:20px;width:224px;height:224px}
+  #minimap{width:224px;height:224px;border-radius:50%;border:3px solid rgba(10,10,14,.9);
+    box-shadow:0 0 0 2px rgba(232,200,74,.25),0 4px 18px rgba(0,0,0,.6)}
+  #zonename{position:absolute;right:26px;bottom:26px;font:italic 800 34px Georgia,serif;color:#e8c84a;
+    text-shadow:3px 3px 0 rgba(0,0,0,.9);opacity:0;transition:opacity .5s;letter-spacing:1px}
+
+  #vehname{position:absolute;right:26px;bottom:72px;font:italic 700 22px Georgia,serif;color:#b8c4cc;
+    text-shadow:2px 2px 0 rgba(0,0,0,.9);opacity:0;transition:opacity .5s}
+
+  #centermsg{position:absolute;left:0;right:0;top:34%;text-align:center;
+    font:italic 900 76px Georgia,serif;letter-spacing:3px;opacity:0;transition:opacity .8s;
+    text-shadow:4px 4px 0 rgba(0,0,0,.85),0 0 34px rgba(0,0,0,.5)}
+  #centermsg.wasted{color:#b03a2e}
+  #centermsg.busted{color:#4a7fb5}
+  #centermsg.passed{color:#e8c84a}
+  #centersub{position:absolute;left:0;right:0;top:calc(34% + 92px);text-align:center;
+    font:700 24px Arial;color:#e8dcc8;text-shadow:var(--hud-shadow);opacity:0;transition:opacity .8s}
+
+  #objective{position:absolute;left:0;right:0;bottom:118px;text-align:center;pointer-events:none}
+  #objective span{display:inline-block;background:rgba(0,0,0,.45);color:#e8dcc8;font:700 17px Arial;
+    padding:7px 20px;border-radius:3px;text-shadow:1px 1px 0 #000;max-width:70%}
+  #objective b{color:#e8c84a}
+  #subtitle{position:absolute;left:0;right:0;bottom:64px;text-align:center;pointer-events:none}
+  #subtitle span{display:inline-block;color:#fff;font:italic 600 19px Georgia,serif;
+    text-shadow:2px 2px 2px #000;background:rgba(0,0,0,.3);padding:4px 16px;border-radius:3px;max-width:76%}
+  #subtitle .speaker{color:#e8c84a;font-style:normal;font-weight:800}
+
+  #toast{position:absolute;left:0;right:0;top:15%;text-align:center;pointer-events:none}
+  #toast span{display:inline-block;color:#e8c84a;font:700 20px Arial;text-shadow:var(--hud-shadow);
+    background:rgba(0,0,0,.4);padding:6px 22px;border-radius:3px;opacity:0;transition:opacity .4s}
+
+  #timerbox{position:absolute;left:0;right:0;top:9%;text-align:center;display:none}
+  #timerbox span{font:800 40px 'Arial Black',Arial;color:#e8c84a;text-shadow:3px 3px 0 rgba(0,0,0,.9)}
+  #timerbox.urgent span{color:#b03a2e}
+
+  #crosshair{position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%);
+    display:none;pointer-events:none}
+  #crosshair:before,#crosshair:after{content:'';position:absolute;background:rgba(255,255,255,.92);
+    box-shadow:0 0 2px #000}
+  #crosshair:before{left:12px;top:2px;width:2px;height:22px}
+  #crosshair:after{left:2px;top:12px;width:22px;height:2px}
+  #crosshair.hitmark:before,#crosshair.hitmark:after{background:#e83a2e}
+
+  #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;
+    background:radial-gradient(ellipse at center,transparent 46%,rgba(160,10,10,.55) 100%)}
+  #fader{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .7s;z-index:60}
+
+  /* ---------- big map ---------- */
+  #bigmap{background:rgba(6,8,10,.92);z-index:70;cursor:crosshair}
+  #bigmap canvas{border:2px solid #55483d;box-shadow:0 8px 40px #000}
+  #bigmap .maphint{margin-top:10px;font:13px monospace;color:#9a8a76;letter-spacing:1px}
+
+  /* ---------- shop ---------- */
+  #shop{background:rgba(6,8,10,.88);z-index:75}
+  #shop .panel{background:#16121e;border:2px solid #6b5a49;border-radius:6px;padding:26px 34px;min-width:520px}
+  #shop h1{font:italic 900 34px Georgia,serif;color:#e8c84a;margin-bottom:16px;text-shadow:var(--hud-shadow)}
+  .shop-item{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;margin:4px 0;
+    background:rgba(255,255,255,.045);border:1px solid transparent;border-radius:3px;cursor:pointer;
+    font:600 16px Arial;color:#d8ccb8}
+  .shop-item:hover{border-color:#e8c84a;background:rgba(232,200,74,.08)}
+  .shop-item .price{color:var(--hud-green);font-weight:800}
+  .shop-item.cant .price{color:#b03a2e}
+  .shop-item .icon{font-size:22px;margin-right:12px}
+  #shop .leave{margin-top:14px;text-align:center;font:13px monospace;color:#9a8a76}
+
+  #radiotoast{position:absolute;left:0;right:0;top:22%;text-align:center;pointer-events:none}
+  #radiotoast span{display:inline-block;font:italic 800 24px Georgia,serif;color:#e8dcc8;
+    text-shadow:var(--hud-shadow);opacity:0;transition:opacity .4s}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game" tabindex="0"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="hud-topright">
+      <div id="hud-clock">00:00</div>
+      <div id="hud-money">$0</div>
+      <div id="hud-stars"></div>
+      <div class="hud-bar" id="hud-health"><div style="width:100%"></div></div>
+      <div class="hud-bar" id="hud-armor"><div style="width:0%"></div></div>
+      <div class="hud-bar hidden" id="hud-breath"><div style="width:100%"></div></div>
+      <div id="hud-weapon"><div class="wicon">👊</div><div class="wname">FISTS</div><div class="wammo"></div></div>
+    </div>
+    <div id="minimap-wrap"><canvas id="minimap" width="448" height="448"></canvas></div>
+    <div id="zonename"></div>
+    <div id="vehname"></div>
+    <div id="centermsg"></div>
+    <div id="centersub"></div>
+    <div id="objective"><span class="hidden"></span></div>
+    <div id="subtitle"><span class="hidden"></span></div>
+    <div id="toast"><span></span></div>
+    <div id="radiotoast"><span></span></div>
+    <div id="timerbox"><span>0:00</span></div>
+    <div id="crosshair"></div>
+    <div id="vignette"></div>
+  </div>
+
+  <div id="fader"></div>
+
+  <div id="loading" class="overlay">
+    <div class="title">BAYVALE</div>
+    <div class="subtitle">A CITY WITH TEETH</div>
+    <div id="loadbar"><div></div></div>
+    <div id="loadmsg">warming up…</div>
+  </div>
+
+  <div id="menu" class="overlay hidden">
+    <div class="title">BAYVALE</div>
+    <div class="subtitle">A CITY WITH TEETH</div>
+    <div class="menu-btn" id="btn-new">NEW GAME</div>
+    <div class="menu-btn" id="btn-continue">CONTINUE</div>
+    <div class="menu-btn" id="btn-controls">CONTROLS</div>
+    <div class="foot">an original open-world game &mdash; all assets procedurally generated</div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <h1>PAUSED</h1>
+    <div class="stats" id="pause-stats"></div>
+    <div class="menu-btn" id="btn-resume">RESUME</div>
+    <div class="menu-btn" id="btn-pause-controls">CONTROLS</div>
+    <div class="menu-btn" id="btn-quit">QUIT TO MENU</div>
+  </div>
+
+  <div id="helpbox" class="hidden">
+    <h2>CONTROLS</h2>
+    <table>
+      <tr><td>W A S D</td><td>move / drive</td></tr>
+      <tr><td>MOUSE</td><td>camera (click to lock)</td></tr>
+      <tr><td>SHIFT</td><td>sprint</td></tr>
+      <tr><td>SPACE</td><td>jump / handbrake</td></tr>
+      <tr><td>LMB</td><td>attack / fire</td></tr>
+      <tr><td>RMB</td><td>aim</td></tr>
+      <tr><td>SCROLL / Q</td><td>switch weapon</td></tr>
+      <tr><td>F</td><td>enter / exit vehicle</td></tr>
+      <tr><td>R</td><td>reload &middot; radio (in car)</td></tr>
+      <tr><td>H</td><td>horn</td></tr>
+      <tr><td>T</td><td>taxi fares (in a taxi)</td></tr>
+      <tr><td>M</td><td>map (click sets waypoint)</td></tr>
+      <tr><td>V</td><td>camera distance</td></tr>
+      <tr><td>ESC / P</td><td>pause</td></tr>
+    </table>
+  </div>
+
+  <div id="bigmap" class="overlay hidden">
+    <canvas id="bigmap-canvas" width="768" height="768"></canvas>
+    <div class="maphint">CLICK &mdash; set waypoint &nbsp;&middot;&nbsp; RIGHT CLICK &mdash; clear &nbsp;&middot;&nbsp; M &mdash; close</div>
+  </div>
+
+  <div id="shop" class="overlay hidden">
+    <div class="panel">
+      <h1 id="shop-title">SHOP</h1>
+      <div id="shop-items"></div>
+      <div class="leave">walk away or press ESC to leave</div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
