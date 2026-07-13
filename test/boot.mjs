@@ -11,7 +11,7 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 
-await page.goto('http://localhost:8080/', { waitUntil: 'domcontentloaded' });
+await page.goto('http://localhost:8080/?q=low', { waitUntil: 'domcontentloaded' });
 
 // wait for menu (boot finished) or failure
 try {

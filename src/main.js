@@ -36,18 +36,21 @@ class Game {
     const canvas = $('game');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(innerWidth, innerHeight);
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 3200);
+
+    const { Graphics } = await import('./core/graphics.js');
+    this.gfx = new Graphics(this.renderer, this.scene, this.camera);
+    // headless tests force ?q=low for speed
+    const params = new URLSearchParams(location.search);
+    if (params.get('q')) this.gfx.setQuality(params.get('q'));
 
     addEventListener('resize', () => {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth, innerHeight);
+      this.gfx.resize(innerWidth, innerHeight);
     });
 
     const prog = async (pct, msg) => {
@@ -66,7 +69,7 @@ class Game {
     this.cityMeshes = buildCityMeshes(this.city, this.scene, SEED);
 
     await prog(74, 'wiring the streetlights…');
-    this.dayNight = new DayNight(this.scene, this.renderer);
+    this.dayNight = new DayNight(this.scene, this.gfx);
 
     await prog(84, 'waking up the city…');
     this.input = new Input(canvas);
@@ -137,6 +140,16 @@ class Game {
     $('btn-resume').onclick = () => this.resume();
     $('btn-pause-controls').onclick = () => $('helpbox').classList.toggle('hidden');
     $('btn-quit').onclick = () => location.reload();
+    const qBtn = $('btn-quality');
+    const syncQ = () => { qBtn.textContent = 'QUALITY: ' + this.gfx.quality.toUpperCase(); };
+    syncQ();
+    qBtn.onclick = () => {
+      const order = ['low', 'medium', 'high'];
+      const next = order[(order.indexOf(this.gfx.quality) + 1) % order.length];
+      this.gfx.autoDrop = false;      // manual choice wins over auto-degrade
+      this.gfx.setQuality(next);
+      syncQ();
+    };
 
     // idle menu camera drifting over downtown
     this.menuCamAngle = 0;
@@ -288,7 +301,7 @@ class Game {
       this.vehicles?.setNight?.(night);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.gfx.render(dt);
     this.input?.endFrame();
   }
 

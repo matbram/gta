@@ -28,9 +28,34 @@ export function buildTerrain(city, scene) {
   ground.name = 'terrain';
   scene.add(ground);
 
-  // ---- water ----
-  const waterMat = new THREE.MeshLambertMaterial({
-    color: 0x2e6485, transparent: true, opacity: 0.86,
+  // ---- water: normal-mapped, scrolling, with specular sun glint ----
+  const waterNormal = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const ctx = c.getContext('2d');
+    // encode gentle wave normals: mostly +z (128,128,255) with soft ripples
+    const img = ctx.createImageData(256, 256);
+    for (let y = 0; y < 256; y++) {
+      for (let x = 0; x < 256; x++) {
+        const i = (y * 256 + x) * 4;
+        const nx = Math.sin(x * 0.18 + y * 0.07) * 22 + Math.sin(x * 0.045 - y * 0.11) * 14;
+        const ny = Math.cos(x * 0.09 - y * 0.16) * 22 + Math.sin(y * 0.05 + x * 0.12) * 14;
+        img.data[i] = 128 + nx;
+        img.data[i + 1] = 128 + ny;
+        img.data[i + 2] = 255;
+        img.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(140, 140);
+    return t;
+  })();
+  const waterMat = new THREE.MeshPhongMaterial({
+    color: 0x2e6485, transparent: true, opacity: 0.88,
+    shininess: 220, specular: 0x88aabb,
+    normalMap: waterNormal, normalScale: new THREE.Vector2(0.55, 0.55),
   });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(SPAN * 3, SPAN * 3), waterMat);
   water.rotation.x = -Math.PI / 2;
@@ -70,8 +95,9 @@ export function buildTerrain(city, scene) {
   return {
     ground, water, stars,
     update(dt, t) {
-      // gentle water shimmer
-      waterMat.opacity = 0.84 + Math.sin(t * 0.8) * 0.03;
+      // gentle shimmer + two-direction normal scroll
+      waterMat.opacity = 0.85 + Math.sin(t * 0.8) * 0.03;
+      waterNormal.offset.set(t * 0.008, t * 0.0045);
     },
     setStarAlpha(a) { starMat.opacity = a; },
   };

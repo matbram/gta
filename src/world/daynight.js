@@ -20,8 +20,9 @@ const SKY_STOPS = [
 ];
 
 export class DayNight {
-  constructor(scene, renderer) {
+  constructor(scene, gfx = null) {
     this.scene = scene;
+    this.gfx = gfx;
     this.minutes = 10 * 60;            // start 10:00
     this.speed = 1;                    // game-minutes per real second
 
@@ -38,6 +39,7 @@ export class DayNight {
     this.sun.shadow.bias = -0.0004;
     scene.add(this.sun);
     scene.add(this.sun.target);
+    gfx?.registerSun(this.sun);
 
     this.moon = new THREE.DirectionalLight(0x8899cc, 0);
     scene.add(this.moon);
@@ -97,6 +99,19 @@ export class DayNight {
     }
 
     this.nightIntensity = night;
+
+    // cinematic exposure + bloom curve: bright warm noon, dim blue night,
+    // slightly crushed golden hours; emissives bloom harder after dark
+    if (this.gfx) {
+      const dayT2 = clamp((h - 6) / 14, 0, 1);
+      const arc = Math.sin(dayT2 * Math.PI);          // 0 at sunrise/sunset, 1 at noon
+      const exposure = night > 0.5
+        ? lerp(1.0, 0.85, night)
+        : lerp(0.95, 1.12, arc);
+      this.gfx.setExposure(exposure);
+      this.gfx.setBloomStrength(1 + night * 1.1);
+      this.gfx.setEnvironmentIntensity(lerp(1.0, 0.12, night));
+    }
     return night;
   }
 
