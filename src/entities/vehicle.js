@@ -337,6 +337,13 @@ export class Vehicle {
   }
 
   dispose() {
+    // geometries are built per vehicle — free them; shared materials stay
+    this.group.traverse((o) => {
+      if (o.isMesh) {
+        o.geometry?.dispose();
+        if (o.material !== glassMatShared && o.material !== tireMatShared) o.material?.dispose();
+      }
+    });
     this.group.removeFromParent();
   }
 }

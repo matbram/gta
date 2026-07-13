@@ -62,6 +62,11 @@ export class MissionSystem {
     return !!next;
   }
 
+  // hostiles from the running mission — combat/vehicles/peds use this for hit tests
+  activeGoons() {
+    return this.active ? this.active.ctx.goons : [];
+  }
+
   nextMissionFor(contactId) {
     return MISSIONS.find((m) => m.contact === contactId && !this.passed.has(m.id) &&
       (m.requires ? m.requires.every((r) => this.passed.has(r)) : true));
@@ -157,6 +162,7 @@ export class MissionSystem {
     game.audio?.missionPassed();
     game.hud.setObjective('');
     game.hud.setTimer(null);
+    this.dialogueQueue.length = 0;      // drop unread mid-mission lines
     if (a.def.outro) this.queueDialogue(a.def.outro);
     a.def.cleanup?.(a.ctx);
     this.cleanupCtx(a.ctx);
@@ -171,14 +177,20 @@ export class MissionSystem {
     }
   }
 
-  fail(reason = 'You blew it.') {
+  fail(reason = 'You blew it.', quiet = false) {
     const a = this.active;
     if (!a) return;
     const game = this.game;
-    game.hud.showCenter('MISSION FAILED', 'wasted', reason, 4.5);
-    game.audio?.missionFailed();
+    // quiet: the WASTED/BUSTED banner owns the screen — a toast arrives after respawn
+    if (!quiet) {
+      game.hud.showCenter('MISSION FAILED', 'wasted', reason, 4.5);
+      game.audio?.missionFailed();
+    }
     game.hud.setObjective('');
     game.hud.setTimer(null);
+    this.dialogueQueue.length = 0;
+    this.dialogueT = 0;
+    game.hud.clearSubtitle?.();
     a.def.cleanup?.(a.ctx);
     this.cleanupCtx(a.ctx);
     this.active = null;
@@ -202,19 +214,20 @@ export class MissionSystem {
       if (!v.dead && v !== this.game.player.vehicle) this.game.vehicles.remove(v);
       else v.missionKeep = false;
     }
+    // live goons vanish with the mission; dead ones linger briefly as bodies
+    const bodies = [];
     for (const g of ctx.goons) {
       if (!g.dead) g.dispose();
-      else g.missionCleanup = true;   // dead bodies fade with ped cleanup below
+      else bodies.push(g);
     }
-    // dead goons: let them linger briefly via ped-system-style timer — simplest: schedule dispose
-    setTimeout(() => { for (const g of ctx.goons) g.dispose?.(); }, 15000);
+    if (bodies.length) setTimeout(() => { for (const g of bodies) g.dispose?.(); }, 15000);
     ctx.goons.length = 0;
     ctx.extraBlips.length = 0;
     this.objectiveMarker.visible = false;
   }
 
   onPlayerDown(kind) {
-    if (this.active) this.fail(kind === 'wasted' ? 'You got wasted.' : 'You got busted.');
+    if (this.active) this.fail(kind === 'wasted' ? 'You got wasted.' : 'You got busted.', true);
   }
 
   // ---------------- per-frame ----------------

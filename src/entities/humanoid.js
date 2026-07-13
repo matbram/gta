@@ -258,6 +258,11 @@ export class Humanoid {
   }
 
   dispose() {
+    // geometries are shared via the GEO cache — only free this figure's materials
+    this.matSkin.dispose();
+    this.matShirt.dispose();
+    this.matPants.dispose();
+    this.matHair.dispose();
     this.group.removeFromParent();
   }
 }

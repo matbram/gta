@@ -34,6 +34,16 @@ export class AudioEngine {
     } catch { this.enabled = false; }
   }
 
+  // pause/resume everything (menus, map, shop) — suspends the whole context
+  setActive(active) {
+    if (!this.ctx || this._active === active) return;
+    this._active = active;
+    try {
+      if (active) this.ctx.resume();
+      else this.ctx.suspend();
+    } catch {}
+  }
+
   // gain scaled by distance from player
   spatialGain(x, z, base = 1, range = 90) {
     const p = this.game.player.pos;

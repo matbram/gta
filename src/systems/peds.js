@@ -75,18 +75,22 @@ export class PedSystem {
   }
 
   explosionAt(x, z, radius) {
-    for (const ped of this.peds) {
+    const targets = [...this.peds, ...(this.game.missions?.activeGoons?.() ?? [])];
+    for (const ped of targets) {
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
-      if (d < radius) ped.damage((radius - d) * 18, this.game, 'explosion');
+      if (d < radius && !ped.dead) ped.damage((radius - d) * 18, this.game, 'explosion');
     }
     this.panicAt(x, z, radius * 4);
   }
 
   checkRunOver(vehicle, speed) {
-    for (const ped of this.peds) {
+    const targets = [...this.peds, ...(this.game.missions?.activeGoons?.() ?? [])];
+    for (const ped of targets) {
       if (ped.dead) continue;
       const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
       if (d < vehicle.radius + 0.4) {
+        if (this.game.time - (ped._lastRunOverT ?? -9) < 0.6) continue;
+        ped._lastRunOverT = this.game.time;
         ped.damage(speed * 4.5, this.game, 'runover');
         if (!ped.dead) {
           // knocked aside
@@ -95,7 +99,7 @@ export class PedSystem {
           ped.pos.x += nx * 1.4;
           ped.pos.z += nz * 1.4;
         }
-        if (vehicle.driver === 'player') {
+        if (vehicle.driver === 'player' && !ped.isGoon) {
           this.game.wanted?.crime(ped.dead ? 'kill' : 'assault', ped.pos.x, ped.pos.z);
         }
       } else if (d < vehicle.radius + 3.2 && speed > 8) {
@@ -118,8 +122,12 @@ export class PedSystem {
     if (!this.peds.includes(pedLike)) this.peds.push(pedLike);
   }
 
-  killInVehicle(pedLike) {
+  killInVehicle(pedLike, vehicle = null) {
     if (!pedLike || pedLike === 'player') return;
+    if (vehicle) {
+      // corpse falls beside the wreck, not at the world origin
+      pedLike.place(vehicle.pos.x + 1.2, vehicle.pos.z + 1.2);
+    }
     if (!this.peds.includes(pedLike)) {
       pedLike.rig.group.visible = true;
       this.peds.push(pedLike);

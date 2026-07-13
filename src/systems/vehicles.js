@@ -44,10 +44,10 @@ export class VehicleSystem {
   }
 
   remove(v) {
+    if (this.game.player.vehicle === v) this.exitVehicleForced();
     v.dispose();
     const i = this.vehicles.indexOf(v);
     if (i >= 0) this.vehicles.splice(i, 1);
-    if (this.game.player.vehicle === v) this.game.player.vehicle = null;
   }
 
   nearestVehicle(x, z, maxDist = 4, filter = null) {
@@ -79,10 +79,13 @@ export class VehicleSystem {
     }
 
     v.driver = 'player';
+    v.aiControlled = false;
+    v.missionDriven = false;
     player.vehicle = v;
     player.setVisible(false);
     player.pos.set(v.pos.x, v.pos.y, v.pos.z);
     this.game.traffic?.releaseVehicle(v);
+    this.game.wanted?.releaseCruiser(v);
     this.game.audio?.carDoor();
     this.game.audio?.startEngine();
     if (this.game.audio?.radio?.station >= 0) this.game.audio.radio.start();
@@ -158,7 +161,7 @@ export class VehicleSystem {
     // physics for AI/parked vehicles happens in traffic system (AI) or here (parked drift-stop)
     for (const v of this.vehicles) {
       if (v.driver === 'player') continue;
-      if (!v.aiControlled) {
+      if (!v.aiControlled && !v.missionDriven) {
         // parked / abandoned cars still need to roll to a stop & sink etc.
         if (v.vel.lengthSq() > 0.01 || v.sinking > 0) {
           v.updatePhysics(dt, { throttle: 0, steer: 0, handbrake: false });
@@ -217,7 +220,9 @@ export class VehicleSystem {
       if (sp < 2.5) continue;
       this.game.peds?.checkRunOver(v, sp);
       if (v.driver !== 'player' && !player.vehicle && !player.dead) {
-        if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45) {
+        if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
+            game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
+          v._lastPlayerHitT = game.time;
           player.damage(sp * 3.2, 'runover');
           player.vel.x += v.vel.x * 0.6;
           player.vel.z += v.vel.y * 0.6;
@@ -262,6 +267,18 @@ export class VehicleSystem {
           this.game.particles?.puffSmoke(v.pos.x, v.pos.y + 1.6, v.pos.z, 0.08);
         }
       }
+      // wreck lifecycle: burn out, then clear the hulk away
+      if (v.dead) {
+        v.deadT = (v.deadT ?? 0) + dt;
+        if (v.burning && v.deadT > 16) v.burning = false;
+        const d = dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
+        const missionHeld = v.missionKeep && this.game.missions?.active;
+        if (!missionHeld && v !== player.vehicle &&
+            ((v.deadT > 45 && d > 60) || v.deadT > 150 || d > 320)) {
+          this.remove(v);
+          continue;
+        }
+      }
       // siren flash
       if (v.type === 'police') v.flashSiren(this.game.time);
     }
@@ -300,12 +317,14 @@ export class VehicleSystem {
     this.game.peds?.explosionAt(x, z, 8);
     if (v.driver === 'player') {
       player.vehicle = null;
+      v.driver = null;
       player.teleport(x + 2, z + 2, v.heading);
       player.setVisible(true);
       player.damage(65, 'explosion');
       this.game.audio?.stopEngine();
+      this.game.audio?.radio?.stop();
     } else if (v.driver && v.driver !== 'player') {
-      this.game.peds?.killInVehicle(v.driver);
+      this.game.peds?.killInVehicle(v.driver, v);
       v.driver = null;
     }
     this.game.wanted?.crime('explosion', x, z);

@@ -146,6 +146,11 @@ export class Radio {
     const st = STATIONS[this.station];
     const stepDur = 60 / st.bpm / 4;      // 16th note
 
+    // resync after pause / throttled tab so we never burst-play missed notes
+    if (ctx.currentTime - this.stepTime > 0.5) {
+      this.stepTime = ctx.currentTime + 0.05;
+    }
+
     while (this.stepTime < ctx.currentTime + 0.25) {
       const s = this.nextStep;
       const bar = Math.floor(s / 16) % st.chords.length;

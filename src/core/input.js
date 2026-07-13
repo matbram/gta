@@ -26,7 +26,9 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       if (!this.enabled) return;
       if (!this.pointerLocked && document.pointerLockElement !== canvas) {
+        // this click acquires pointer lock — swallow it so it doesn't fire the weapon
         canvas.requestPointerLock?.();
+        return;
       }
       this.mouseDown[e.button] = true;
       this.mousePressed[e.button] = true;

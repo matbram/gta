@@ -33,6 +33,16 @@ export class Cop extends Ped {
       return;
     }
 
+    // stand down once the heat is gone (unless personally attacked)
+    if (game.wanted.state.stars === 0 && !this.provoked) {
+      this.speed = 0;
+      this.arrestT = 0;
+      this.rig.setAnim('idle');
+      this.rig.update(dt, 0);
+      this.syncRig();
+      return;
+    }
+
     const d = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
     const los = game.wanted.lineOfSight(this.pos.x, this.pos.y + 1.5, this.pos.z, player.pos.x, player.pos.y + 1.2, player.pos.z);
     this.shootCooldown -= dt;

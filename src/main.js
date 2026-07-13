@@ -180,7 +180,7 @@ class Game {
 
   beginDeathFlow(kind) {
     if (this.deathFlow) return;
-    this.deathFlow = { kind, t: 0 };
+    this.deathFlow = { kind, t: 0, failedMission: this.missions?.active?.def.title ?? null };
     this.missions?.onPlayerDown?.(kind);
     if (kind === 'wasted') {
       this.hud.showCenter('WASTED', 'wasted', '', 5);
@@ -220,6 +220,9 @@ class Game {
         f.kind === 'wasted'
           ? `St. Aurora patched you up. -$${cost}`
           : `They took a cut and let you walk. -$${cost}`, 5);
+      if (f.failedMission) {
+        setTimeout(() => this.hud.showToast(`Mission failed — ${f.failedMission}. Return to the contact to retry.`, 5), 1800);
+      }
     }
     if (f.t > 4.0) {
       this.hud.fade(false);
@@ -271,6 +274,9 @@ class Game {
     if (mode === 'play') this.updatePlay(dt);
     else if (mode === 'menu') this.updateMenu(dt);
     else if (mode === 'map') this.worldlife?.updateBigMap?.();
+
+    // silence engine/siren/radio while paused or in menus
+    this.audio?.setActive(mode === 'play');
 
     // day/night always ticks (freezes visuals in pause but cheap either way)
     if (mode === 'play' || mode === 'menu') {
@@ -338,7 +344,7 @@ class Game {
     for (const bp of this.blipProviders) bp(blips);
     this.minimap.draw(
       this.player.pos.x, this.player.pos.z,
-      this.cameraRig.yaw + Math.PI,
+      this.cameraRig.yaw,
       blips, this.state.waypoint, this.worldlife?.route
     );
   }

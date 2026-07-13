@@ -25,8 +25,12 @@ function gotoStep(text, getTarget, opts = {}) {
       const t = typeof getTarget === 'function' ? getTarget(ctx) : getTarget;
       if (!t) return null;
       const px = g.player.pos.x, pz = g.player.pos.z;
+      if (opts.requireVehicleId) {
+        const mv = ctx.data[opts.requireVehicleId];
+        if (!mv || mv.dead) return 'fail:The vehicle was destroyed.';
+        if (g.player.vehicle !== mv) return null;
+      }
       if (opts.requireVehicle && !g.player.vehicle) return null;
-      if (opts.requireVehicleId && g.player.vehicle !== ctx.data[opts.requireVehicleId]) return null;
       if (dist2d(px, pz, t.x, t.z) < (opts.radius ?? 4)) {
         if (opts.requireStop && g.player.vehicle && Math.abs(g.player.vehicle.speed) > 2) return null;
         return 'done';
@@ -141,8 +145,8 @@ export const MISSIONS = [
         },
         update(ctx) {
           const g = ctx.game;
-          if (!g.player.vehicle || g.player.vehicle !== ctx.data.cab) return null;
           if (ctx.data.cab.dead) return 'fail:The cab is wrecked.';
+          if (!g.player.vehicle || g.player.vehicle !== ctx.data.cab) return null;
           const poi = g.city.pois[ctx.data.fares[i].pickPoi];
           if (dist2d(g.player.pos.x, g.player.pos.z, poi.x, poi.z) < 6 && Math.abs(g.player.vehicle.speed) < 2) return 'done';
           return null;
@@ -156,8 +160,8 @@ export const MISSIONS = [
         },
         update(ctx) {
           const g = ctx.game;
-          if (!g.player.vehicle || g.player.vehicle !== ctx.data.cab) return null;
           if (ctx.data.cab.dead) return 'fail:The cab is wrecked.';
+          if (!g.player.vehicle || g.player.vehicle !== ctx.data.cab) return null;
           const poi = g.city.pois[ctx.data.fares[i].dropPoi];
           if (dist2d(g.player.pos.x, g.player.pos.z, poi.x, poi.z) < 6 && Math.abs(g.player.vehicle.speed) < 2) {
             ctx.game.addMoney(40);
@@ -347,6 +351,7 @@ export const MISSIONS = [
       const poi = g.city.pois.respray;
       const v = g.vehicles.spawnOnRoadNear(poi.x, poi.z, 'pickup', 0x5a4632);
       v.missionKeep = true;
+      v.missionDriven = true;   // physics stepped by the mission script, not the vehicle system
       ctx.vehicles.push(v);
       ctx.data.runner = v;
       ctx.data.fleeT = 0;
@@ -430,6 +435,7 @@ export const MISSIONS = [
               v.pos.x + Math.cos(a) * 120, v.pos.z + Math.sin(a) * 120, 'moto', 0x16181d);
             if (bike) {
               bike.missionKeep = true;
+              bike.missionDriven = true;
               ctx.vehicles.push(bike);
               (ctx.data.bikes = ctx.data.bikes || []).push(bike);
               ctx.extraBlips.push({ alive: () => !bike.dead, x: () => bike.pos.x, z: () => bike.pos.z, color: '#d84a3a' });
@@ -482,7 +488,7 @@ export const MISSIONS = [
     },
     steps: [
       {
-        text: (ctx) => `Defend the club — wave ${Math.min(ctx.data.wave + 1, 3)}/3.`,
+        text: (ctx) => `Defend the club — wave ${Math.max(1, Math.min(ctx.data.wave, 3))}/3.`,
         marker: false,
         enter(ctx) {
           const g = ctx.game;
@@ -581,6 +587,7 @@ export const MISSIONS = [
               g.player.pos.x + Math.cos(a) * 150, g.player.pos.z + Math.sin(a) * 150, 'sports', 0x16181d);
             if (h) {
               h.missionKeep = true;
+              h.missionDriven = true;
               ctx.vehicles.push(h);
               ctx.data.hunters.push(h);
               ctx.extraBlips.push({ alive: () => !h.dead, x: () => h.pos.x, z: () => h.pos.z, color: '#d84a3a' });

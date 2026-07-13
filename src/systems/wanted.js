@@ -83,6 +83,16 @@ export class WantedSystem {
     return true;
   }
 
+  // player took this cruiser — hand it over as a normal car
+  releaseCruiser(vehicle) {
+    const cr = this.cruisers.find((c) => c.vehicle === vehicle);
+    if (!cr) return;
+    this.game.audio?.stopSiren(vehicle.id);
+    vehicle.sirenOn = false;
+    vehicle.flashSiren(0);
+    this.cruisers.splice(this.cruisers.indexOf(cr), 1);
+  }
+
   nearestCop(x, z, maxDist) {
     let best = null, bd = maxDist * maxDist;
     for (const c of this.footCops) {
@@ -107,7 +117,15 @@ export class WantedSystem {
           this.lineOfSight(c.pos.x, c.pos.y + 1.5, c.pos.z, player.pos.x, player.pos.y + 1, player.pos.z)) { seen = true; break; }
     }
     if (!seen) for (const cr of this.cruisers) {
-      if (!cr.vehicle.dead && distSq2d(cr.vehicle.pos.x, cr.vehicle.pos.z, player.pos.x, player.pos.z) < 90 * 90) { seen = true; break; }
+      const v = cr.vehicle;
+      if (v.dead) continue;
+      const d2 = distSq2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
+      // parked roadblocks only spot you up close; pursuers need line of sight
+      const range = cr.state === 'block' ? 30 : 90;
+      if (d2 < range * range &&
+          this.lineOfSight(v.pos.x, v.pos.y + 1.6, v.pos.z, player.pos.x, player.pos.y + 1.2, player.pos.z)) {
+        seen = true; break;
+      }
     }
     if (stars > 0) {
       if (seen) {
@@ -318,7 +336,12 @@ export class WantedSystem {
   despawnAll(instant = false) {
     for (const c of this.footCops) c.dispose();
     this.footCops.length = 0;
-    for (const cr of this.cruisers) {
+    for (const cr of [...this.cruisers]) {
+      // never delete the car out from under the player (e.g. respray in a stolen cruiser)
+      if (this.game.player.vehicle === cr.vehicle) {
+        this.releaseCruiser(cr.vehicle);
+        continue;
+      }
       this.game.audio?.stopSiren(cr.vehicle.id);
       this.game.vehicles.remove(cr.vehicle);
     }

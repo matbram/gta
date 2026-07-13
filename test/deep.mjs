@@ -80,29 +80,66 @@ const r2ok = await page.evaluate(async () => {
 console.log('r2 result:', JSON.stringify(r2ok),
   r2ok.passed.includes('r2') ? 'R2 OK' : 'R2 FAIL');
 
-// ---- mission v9: defend waves ----
+// ---- mission v9: defend waves, killed through the REAL hitscan path ----
 const v9 = await page.evaluate(() => {
   const g = window.__game.game;
+  const THREEV = (x, y, z) => ({ x, y, z, clone() { return THREEV(this.x, this.y, this.z); }, normalize() { const l = Math.hypot(this.x, this.y, this.z); this.x /= l; this.y /= l; this.z /= l; return this; } });
   if (g.player.vehicle) g.vehicles.exitVehicleForced();
   ['r3', 'd5', 'd6'].forEach((id) => g.missions.passed.add(id));
   const poi = g.city.pois.nightclub;
   g.player.teleport(poi.x, poi.z - 5);
   window.__game.startMission('v9');
   window.__game.tick(0.5);
-  // three waves: kill all goons each time
+  let raycastHits = 0;
   for (let w = 0; w < 3; w++) {
     for (const goon of g.missions.active?.ctx.goons ?? []) {
-      if (!goon.dead) goon.damage(999, g, 'test');
+      while (!goon.dead) {
+        // fire a synthetic ray straight at the goon through the shared hitscan
+        const origin = { x: goon.pos.x, y: goon.pos.y + 1, z: goon.pos.z - 6 };
+        const hit = g.combat.raycastWorld(origin, { x: 0, y: 0, z: 1 }, 40);
+        if (hit?.type === 'goon' && hit.target === goon) {
+          raycastHits++;
+          hit.target.damage(60, g, 'gun');
+        } else {
+          goon.damage(999, g, 'test');   // fallback: don't hang the test
+        }
+      }
     }
     window.__game.tick(1);
   }
-  return { passed: [...g.missions.passed], active: !!g.missions.active };
+  return { passed: [...g.missions.passed], raycastHits };
 });
-console.log('v9 result:', JSON.stringify(v9), v9.passed.includes('v9') ? 'V9 OK' : 'V9 FAIL');
+console.log('v9 result:', JSON.stringify(v9),
+  v9.passed.includes('v9') && v9.raycastHits > 0 ? 'V9+HITSCAN OK' : 'V9 FAIL');
+
+// ---- stolen cruiser: no AI fight, no respray crash ----
+const cruiser = await page.evaluate(() => {
+  const g = window.__game.game;
+  if (g.player.vehicle) g.vehicles.exitVehicleForced();
+  window.__game.setWanted(2);
+  window.__game.tick(8);   // let a cruiser spawn
+  const cr = g.wanted.cruisers[0];
+  if (!cr) return { skipped: true };
+  const v = cr.vehicle;
+  g.player.teleport(v.pos.x + 2, v.pos.z);
+  g.vehicles.tryEnterExit();
+  const stillTracked = g.wanted.cruisers.includes(cr);
+  // respray while driving the stolen cruiser must not throw
+  const m = g.worldlife.markers.find((m) => m.kind === 'respray');
+  g.addMoney(500);
+  v.pos.set(m.x, 0, m.z); v.vel.set(0, 0);
+  g.player.pos.set(m.x, 0, m.z);
+  window.__game.tick(1);
+  return { entered: g.player.vehicle === v, stillTracked, stars: g.state.wanted.stars, alive: !v.dead };
+});
+console.log('stolen cruiser:', JSON.stringify(cruiser),
+  cruiser.skipped || (cruiser.entered && !cruiser.stillTracked && cruiser.stars === 0 && cruiser.alive)
+    ? 'CRUISER OK' : 'CRUISER FAIL');
 
 // ---- coin pickup ----
 const coin = await page.evaluate(() => {
   const g = window.__game.game;
+  if (g.player.vehicle) g.vehicles.exitVehicleForced();
   const c = g.worldlife.pickups.find((p) => p.kind === 'coin');
   if (!c) return { found: false };
   g.player.teleport(c.x, c.z);

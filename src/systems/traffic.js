@@ -40,12 +40,18 @@ export class TrafficSystem {
       const v = car.vehicle;
       if (dist2d(v.pos.x, v.pos.z, p.x, p.z) > DESPAWN || v.dead) {
         if (v.dead) {
-          // leave the wreck in the world (vehicle system keeps it) but stop driving it
+          // wreck stays (vehicle system culls it later); free the driver rig
+          // unless the explosion path already handed the ped to the ped system
           this.forget(car);
+          if (car.driverPed && !this.game.peds.peds.includes(car.driverPed)) {
+            car.driverPed.dispose();
+          }
         } else {
           this.game.vehicles.remove(v);
           this.forget(car);
-          if (car.driverPed) car.driverPed.dispose();
+          if (car.driverPed && !this.game.peds.peds.includes(car.driverPed)) {
+            car.driverPed.dispose();
+          }
         }
       }
     }

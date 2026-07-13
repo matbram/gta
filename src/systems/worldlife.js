@@ -69,9 +69,12 @@ export class WorldLife {
   // ---------------- pickups ----------------
   dropCash(x, z, amount) {
     const game = this.game;
-    const geo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 10);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x5fae52, emissive: 0x2a5e28, emissiveIntensity: 0.5 });
-    const mesh = new THREE.Mesh(geo, mat);
+    // shared geometry/material for every cash drop (they come and go constantly)
+    if (!this._cashGeo) {
+      this._cashGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 10);
+      this._cashMat = new THREE.MeshLambertMaterial({ color: 0x5fae52, emissive: 0x2a5e28, emissiveIntensity: 0.5 });
+    }
+    const mesh = new THREE.Mesh(this._cashGeo, this._cashMat);
     const y = game.city.groundHeight(x, z);
     mesh.position.set(x, y + 0.25, z);
     game.scene.add(mesh);
@@ -407,8 +410,8 @@ export class WorldLife {
         m.cooldown = 3;
         if (m.kind === 'safehouse') {
           game.player.heal(100);
-          game.save?.save();
-          game.hud.showToast('Game saved. You feel rested.', 3.5);
+          const ok = game.save?.save();
+          game.hud.showToast(ok ? 'Game saved. You feel rested.' : 'Rested — but saving failed (storage blocked).', 3.5);
           game.audio?.pickup();
         } else if (m.kind === 'gunshop') this.openShop('gunshop');
         else if (m.kind === 'food') this.openShop('food');

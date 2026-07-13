@@ -143,6 +143,11 @@ export class Hud {
     this.el.objective.classList.remove('hidden');
   }
 
+  clearSubtitle() {
+    this.subtitleTimer = 0;
+    this.el.subtitle.classList.add('hidden');
+  }
+
   say(speaker, line, seconds = 4.5) {
     this.el.subtitle.innerHTML = speaker ? `<span class="speaker">${speaker}:</span> ${line}` : line;
     this.el.subtitle.classList.remove('hidden');

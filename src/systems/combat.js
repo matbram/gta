@@ -166,13 +166,22 @@ export class CombatSystem {
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
       const reachX = player.pos.x + fx * spec.range * 0.7;
       const reachZ = player.pos.z + fz * spec.range * 0.7;
-      const target = game.peds?.nearestPed(reachX, reachZ, spec.range, (t) => !t.dead)
+      let target = game.peds?.nearestPed(reachX, reachZ, spec.range, (t) => !t.dead)
         || game.wanted?.nearestCop(reachX, reachZ, spec.range);
+      if (!target) {
+        // mission goons are punchable too
+        let bd = spec.range * spec.range;
+        for (const goon of game.missions?.activeGoons?.() || []) {
+          if (goon.dead) continue;
+          const d = (goon.pos.x - reachX) ** 2 + (goon.pos.z - reachZ) ** 2;
+          if (d < bd) { bd = d; target = goon; }
+        }
+      }
       game.audio?.punch();
       if (target) {
         target.damage(spec.dmg, game, 'melee');
         game.particles?.blood(target.pos.x, target.pos.y + 1.2, target.pos.z, 3);
-        game.wanted?.crime(target.isCop ? 'copAttack' : 'assault', player.pos.x, player.pos.z);
+        if (!target.isGoon) game.wanted?.crime(target.isCop ? 'copAttack' : 'assault', player.pos.x, player.pos.z);
         this.hitmark();
       } else {
         // smack vehicles too
@@ -252,9 +261,12 @@ export class CombatSystem {
       if (hit.type === 'static') {
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 3);
         game.audio?.ricochet(hit.point.x, hit.point.z);
-      } else if (hit.type === 'ped' || hit.type === 'cop') {
+      } else if (hit.type === 'ped' || hit.type === 'cop' || hit.type === 'goon') {
         hit.target.damage(spec.dmg, game, 'gun');
-        game.wanted?.crime(hit.type === 'cop' ? (hit.target.dead ? 'copKill' : 'copAttack') : (hit.target.dead ? 'kill' : 'assault'), player.pos.x, player.pos.z);
+        // shooting mission goons is gang business — no extra police heat beyond the gunfire itself
+        if (hit.type !== 'goon') {
+          game.wanted?.crime(hit.type === 'cop' ? (hit.target.dead ? 'copKill' : 'copAttack') : (hit.target.dead ? 'kill' : 'assault'), player.pos.x, player.pos.z);
+        }
         anyHit = true;
       } else if (hit.type === 'vehicle') {
         hit.target.applyDamage(spec.dmg * 0.55, 'gun');
@@ -297,6 +309,10 @@ export class CombatSystem {
     for (const cop of game.wanted?.footCops || []) {
       if (cop.dead) continue;
       consider(sphereHit(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, 0.55), 'cop', cop);
+    }
+    for (const goon of game.missions?.activeGoons?.() || []) {
+      if (goon.dead) continue;
+      consider(sphereHit(goon.pos.x, goon.pos.y + 1.0, goon.pos.z, 0.55), 'goon', goon);
     }
     for (const v of game.vehicles?.vehicles || []) {
       if (v === game.player.vehicle) continue;
