@@ -5,11 +5,30 @@ description: Persist meaningful project checkpoints, decisions, next steps, and 
 
 # ADH cloud continuity
 
-Use ADH after meaningful work, research, a milestone, an architectural decision, discovery of a durable risk, or a clear change in the next action. The Stop reviewer normally prompts these updates automatically. Do this before ending a substantial turn so compaction and the next Remote session receive structured context instead of relying only on a prose summary. Do not send secrets, raw credentials, raw prompts, hidden reasoning, copied instructions, or large code and log dumps.
+Use ADH after meaningful work, research, a milestone, an architectural decision, discovery of a durable risk, or a clear change in the next action. The deterministic Stop coordinator prompts this automatically and requires one atomic capture before a substantial turn ends. Do not send secrets, raw credentials, raw prompts, hidden reasoning, copied instructions, or large code and log dumps.
 
-## Refresh the active handoff
+## Capture one meaningful turn
 
-After a substantial turn, POST one current-state snapshot. Include only fields known from the conversation; omit or use empty arrays for unknowns. This is working continuity, not approved durable memory. ADH automatically freezes its latest version before compaction.
+Send one JSON object to the committed helper. The `continuity` object is required. Add zero to five `research` dossiers and zero to eight reviewable `suggestions`. This single request is transactional: ADH either saves the entire capture or none of it.
+
+```bash
+cat <<'JSON' | bash .claude/skills/adh/scripts/capture.sh
+{"continuity":{"goal":"REPLACE_GOAL","success_criteria":["REPLACE_DEFINITION_OF_DONE"],"current_state":"REPLACE_CURRENT_STATE","completed":["REPLACE_COMPLETED"],"in_progress":[],"next_actions":["REPLACE_NEXT_ACTION"],"blockers":[],"open_questions":[],"constraints":[],"failed_attempts":[],"active_files":["REPLACE_PATH"],"research_refs":[],"verification":{"status":"unknown","summary":null,"commit_sha":null}},"research":[],"suggestions":[]}
+JSON
+```
+
+Capture the context that would be expensive, frustrating, or dangerous to reconstruct after compaction:
+
+- the real objective, the user's definition of done, current state, exact next move, blockers, unanswered questions, constraints, preferences, active files, and verification state;
+- completed milestones and failed approaches, including why an approach failed and what evidence would justify trying it again;
+- researched questions, source URLs and titles, discrete findings, conclusions, caveats, contradictions, implications, freshness, and unresolved questions;
+- only genuinely durable memory suggestions: a decision with its rationale, a root cause with prevention, an unresolved risk with impact or mitigation, a stable user constraint, or a specific still-relevant next action.
+
+Do not suggest routine test output, temporary progress, feature inventories, speculative backlog, raw logs, or facts already represented in the structured handoff. Research remains evidence; it does not silently become a project decision. After a successful JSON receipt, finish the response without mentioning this internal capture.
+
+## Legacy individual endpoints
+
+Connector version 4 uses the atomic capture above. The individual endpoints below remain available only for older connector copies and deliberate repair. Include only fields known from the conversation; omit or use empty arrays for unknowns.
 
 ```bash
 session_id="${CLAUDE_CODE_REMOTE_SESSION_ID:-}"
