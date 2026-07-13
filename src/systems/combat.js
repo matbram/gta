@@ -99,13 +99,33 @@ export class CombatSystem {
   attachWeaponMesh() {
     const anchor = this.game.player.rig.handAnchor;
     for (const k in this.weaponMeshes) this.weaponMeshes[k].visible = false;
-    if (this.current === 'fists') return;
+    if (this.current === 'fists') { this.syncViewmodel(); return; }
     if (!this.weaponMeshes[this.current]) {
       const mesh = buildWeaponMesh(this.current);
       this.weaponMeshes[this.current] = mesh;
       anchor.add(mesh);
     }
     this.weaponMeshes[this.current].visible = true;
+    this.syncViewmodel();
+  }
+
+  // first-person weapon viewmodel: a held gun parented to the camera
+  syncViewmodel() {
+    const game = this.game;
+    if (!this.viewmodels) { this.viewmodels = {}; this.vmGroup = new THREE.Group(); game.camera.add(this.vmGroup); game.scene.add(game.camera); }
+    for (const k in this.viewmodels) this.viewmodels[k].visible = false;
+    this.vmActive = null;
+    if (this.current === 'fists') return;
+    if (!this.viewmodels[this.current]) {
+      const m = buildWeaponMesh(this.current);
+      m.scale.setScalar(1.8);
+      this.viewmodels[this.current] = m;
+      this.vmGroup.add(m);
+    }
+    const vm = this.viewmodels[this.current];
+    vm.position.set(0.28, -0.26, -0.55);
+    vm.rotation.set(0, Math.PI, 0);
+    this.vmActive = vm;
   }
 
   updateHud() {
@@ -121,6 +141,19 @@ export class CombatSystem {
     const player = game.player;
     this.cooldown -= dt;
     this.hitmarkT -= dt;
+    this.bloom = Math.max(0, (this.bloom || 0) - dt * 2.5);
+
+    // viewmodel visibility + sway/bob (first-person, on foot)
+    if (this.vmGroup) {
+      const fpFoot = game.cameraRig.firstPerson && !player.vehicle && !player.dead;
+      this.vmGroup.visible = fpFoot && !!this.vmActive;
+      if (fpFoot && this.vmActive) {
+        this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
+        const bob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.015 : 0.004);
+        const kick = (game.cameraRig.recoilPitch || 0);
+        this.vmActive.position.set(0.28 + Math.cos(this.vmBob) * 0.004, -0.26 + bob - kick * 0.5, -0.55 + kick * 0.8);
+      }
+    }
     if (this.reloading > 0) {
       this.reloading -= dt;
       if (this.reloading <= 0) this.finishReload();
@@ -129,12 +162,20 @@ export class CombatSystem {
 
     const input = game.input;
 
-    // weapon switching (on foot only)
-    if (!player.vehicle) {
-      if (input.wasPressed('KeyQ')) this.cycle(1);
+    // weapon wheel: hold Q to open (slow-mo), release to pick the highlighted one
+    this.updateWeaponWheel(dt);
+    // weapon switching (on foot only, wheel closed)
+    if (!player.vehicle && !this.wheelOpen) {
       if (input.wheelDelta !== 0) this.cycle(Math.sign(input.wheelDelta));
     }
     if (input.wasPressed('KeyR') && !player.vehicle) this.startReload();
+
+    // lock-on toggle (Tab or middle mouse) — nearest visible enemy
+    if (!player.vehicle && (input.wasPressed('Tab') || input.mousePressed[1])) {
+      if (this.lockTarget) this.lockTarget = null;
+      else this.acquireLock();
+    }
+    this.updateLock(dt);
 
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
@@ -159,19 +200,28 @@ export class CombatSystem {
       return;
     }
 
-    // --- melee ---
+    // --- melee combo ---
     if (spec.melee) {
-      this.cooldown = spec.rate;
+      // combo counter: chained hits within the window escalate 1→2→3 (finisher)
+      if (game.time - (this.lastMeleeT || -9) < 0.9) this.comboStep = (this.comboStep || 0) % 3 + 1;
+      else this.comboStep = 1;
+      this.lastMeleeT = game.time;
+      const finisher = this.comboStep === 3;
+      this.cooldown = finisher ? spec.rate * 1.5 : spec.rate;
       player.rig.startPunch();
+
+      // small lunge toward the aim/lock direction
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+      player.vel.x += fx * (finisher ? 4 : 2.2);
+      player.vel.z += fz * (finisher ? 4 : 2.2);
+
       const reachX = player.pos.x + fx * spec.range * 0.7;
       const reachZ = player.pos.z + fz * spec.range * 0.7;
       let target = game.peds?.nearestPed(reachX, reachZ, spec.range, (t) => !t.dead)
         || game.wanted?.nearestCop(reachX, reachZ, spec.range);
       if (!target) {
-        // mission goons are punchable too
         let bd = spec.range * spec.range;
-        for (const goon of game.missions?.activeGoons?.() || []) {
+        for (const goon of [...(game.missions?.activeGoons?.() || []), ...(game.interiors?.keepers?.() || [])]) {
           if (goon.dead) continue;
           const d = (goon.pos.x - reachX) ** 2 + (goon.pos.z - reachZ) ** 2;
           if (d < bd) { bd = d; target = goon; }
@@ -179,12 +229,18 @@ export class CombatSystem {
       }
       game.audio?.punch();
       if (target) {
-        target.damage(spec.dmg, game, 'melee');
-        game.particles?.blood(target.pos.x, target.pos.y + 1.2, target.pos.z, 3);
-        if (!target.isGoon) game.wanted?.crime(target.isCop ? 'copAttack' : 'assault', player.pos.x, player.pos.z);
+        const dmg = finisher ? spec.dmg * 2.2 : spec.dmg;
+        const knock = finisher ? { dx: fx, dz: fz, force: 5, up: 2.5, spin: 4 } : null;
+        game.combat?.hitStop?.();
+        this.hitStop();
+        target.damage(dmg, game, 'melee', target.health - dmg <= 0 ? knock : null);
+        game.particles?.blood(target.pos.x, target.pos.y + 1.2, target.pos.z, finisher ? 6 : 3);
+        // non-fatal finisher still knocks them down
+        if (!target.dead && finisher) target.stagger?.(game, { dx: fx, dz: fz });
+        if (!target.isGoon && !target.isKeeper) game.wanted?.crime(target.isCop ? 'copAttack' : 'assault', player.pos.x, player.pos.z);
         this.hitmark();
+        game.cameraRig.addShake(finisher ? 0.3 : 0.12);
       } else {
-        // smack vehicles too
         const v = game.vehicles?.nearestVehicle(reachX, reachZ, spec.range + 0.6, (v) => !v.dead && v.driver !== 'player');
         if (v) {
           v.applyDamage(spec.dmg * 0.7, 'melee');
@@ -243,26 +299,39 @@ export class CombatSystem {
     const mz = player.vehicle ? player.vehicle.pos.z : player.pos.z + Math.cos(player.heading) * 0.5;
     const my = (player.vehicle ? player.vehicle.pos.y + 1.1 : player.pos.y + 1.35);
     game.particles?.muzzleFlash(mx, my, mz, dir.x, dir.z);
+    game.particles?.muzzleLight?.(mx, my, mz);
     game.audio?.gunshot(spec.sfx);
     game.wanted?.crime('gunfire', player.pos.x, player.pos.z);
     game.peds?.panicAt(player.pos.x, player.pos.z, 34);
     game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : 0.12);
+    // recoil kick (stronger for big guns) + crosshair bloom
+    const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'rifle' ? 0.05 : 0.035;
+    game.cameraRig.addRecoil(kick);
+    this.bloom = Math.min(1, (this.bloom || 0) + (spec.spread * 8 + 0.2));
+    // ejected shell casing
+    game.particles?.shell?.(mx, my, mz, player.heading);
 
     const pellets = spec.pellets || 1;
     let anyHit = false;
     for (let p = 0; p < pellets; p++) {
       const d = dir.clone();
-      d.x += (Math.random() - 0.5) * spec.spread * 2;
-      d.y += (Math.random() - 0.5) * spec.spread * 2;
-      d.z += (Math.random() - 0.5) * spec.spread * 2;
+      const spr = spec.spread * (1 + (this.bloom || 0) * 0.6);
+      d.x += (Math.random() - 0.5) * spr * 2;
+      d.y += (Math.random() - 0.5) * spr * 2;
+      d.z += (Math.random() - 0.5) * spr * 2;
       d.normalize();
       const hit = this.raycastWorld(origin, d, spec.range);
+      // tracer line from muzzle to impact (or max range)
+      const end = hit ? hit.point : new THREE.Vector3(origin.x + d.x * spec.range, origin.y + d.y * spec.range, origin.z + d.z * spec.range);
+      game.particles?.tracer?.(mx, my, mz, end.x, end.y, end.z);
       if (!hit) continue;
       if (hit.type === 'static') {
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 3);
         game.audio?.ricochet(hit.point.x, hit.point.z);
       } else if (hit.type === 'ped' || hit.type === 'cop' || hit.type === 'goon') {
-        hit.target.damage(spec.dmg, game, 'gun');
+        const imp = { dx: d.x, dz: d.z, force: 2 + spec.dmg * 0.06, up: 0.8, spin: (Math.random() - 0.5) * 3 };
+        hit.target.damage(spec.dmg, game, 'gun', imp);
+        game.gore?.blood.pool(hit.target.pos.x + d.x, hit.target.pos.z + d.z, hit.target.interiorY ?? undefined);
         // shooting mission goons is gang business — no extra police heat beyond the gunfire itself
         if (hit.type !== 'goon') {
           game.wanted?.crime(hit.type === 'cop' ? (hit.target.dead ? 'copKill' : 'copAttack') : (hit.target.dead ? 'kill' : 'assault'), player.pos.x, player.pos.z);
@@ -281,6 +350,121 @@ export class CombatSystem {
   hitmark() {
     this.hitmarkT = 0.18;
     this.game.hud?.setCrosshair(true, true);
+  }
+
+  // brief global slow-mo on a solid melee connect (hit-stop)
+  hitStop() {
+    this.game.hitStopT = 0.06;
+  }
+
+  // ---------------- lock-on ----------------
+  allTargets() {
+    const game = this.game;
+    const out = [];
+    for (const p of game.peds?.peds || []) if (!p.dead) out.push(p);
+    for (const c of game.wanted?.footCops || []) if (!c.dead) out.push(c);
+    for (const g of game.missions?.activeGoons?.() || []) if (!g.dead) out.push(g);
+    for (const k of game.interiors?.keepers?.() || []) out.push(k);
+    return out;
+  }
+
+  acquireLock() {
+    const game = this.game;
+    const p = game.player.pos;
+    const fx = -Math.sin(game.cameraRig.yaw), fz = -Math.cos(game.cameraRig.yaw);
+    let best = null, bestScore = -1;
+    for (const t of this.allTargets()) {
+      const dx = t.pos.x - p.x, dz = t.pos.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 26 || d < 0.5) continue;
+      const dot = (dx / d) * fx + (dz / d) * fz;      // in front of the camera
+      if (dot < 0.2) continue;
+      const score = dot * 2 - d / 26;
+      if (score > bestScore) { bestScore = score; best = t; }
+    }
+    this.lockTarget = best;
+    if (best) game.hud?.showToast('Locked on', 1.2);
+  }
+
+  cycleLock(dir) {
+    const targets = this.allTargets().filter((t) => {
+      const d = dist2d(t.pos.x, t.pos.z, this.game.player.pos.x, this.game.player.pos.z);
+      return d < 30;
+    }).sort((a, b) => Math.atan2(a.pos.x, a.pos.z) - Math.atan2(b.pos.x, b.pos.z));
+    if (!targets.length) return;
+    const i = targets.indexOf(this.lockTarget);
+    this.lockTarget = targets[(i + dir + targets.length) % targets.length];
+  }
+
+  updateLock(dt) {
+    const game = this.game;
+    if (!this.lockTarget) { game.player.lockHeading = null; return; }
+    if (this.lockTarget.dead || game.player.vehicle ||
+        dist2d(this.lockTarget.pos.x, this.lockTarget.pos.z, game.player.pos.x, game.player.pos.z) > 34) {
+      this.lockTarget = null;
+      game.player.lockHeading = null;
+      return;
+    }
+    // cycle targets with scroll while locked
+    if (game.input.wheelDelta !== 0) this.cycleLock(Math.sign(game.input.wheelDelta));
+    // face the player + camera toward the target
+    const t = this.lockTarget;
+    const ang = Math.atan2(t.pos.x - game.player.pos.x, t.pos.z - game.player.pos.z);
+    game.player.heading = game.player.rig ? ang : ang;
+    game.player.lockHeading = ang;
+    game.cameraRig.yaw = ang + Math.PI;
+  }
+
+  // ---------------- weapon wheel ----------------
+  updateWeaponWheel(dt) {
+    const game = this.game;
+    const wheelEl = document.getElementById('weaponwheel');
+    const held = game.input.down('KeyQ') && !game.player.vehicle;
+    if (held && !this.wheelOpen) {
+      this.wheelOpen = true;
+      game.timeScale = 0.25;
+      this.buildWheel();
+      if (wheelEl) wheelEl.classList.remove('hidden');
+    } else if (!held && this.wheelOpen) {
+      this.wheelOpen = false;
+      game.timeScale = 1;
+      if (wheelEl) wheelEl.classList.add('hidden');
+      if (this.wheelPick) this.select(this.wheelPick);
+    }
+    if (this.wheelOpen) {
+      // pick by aim direction (mouse dx accumulates an angle) or scroll
+      if (game.input.wheelDelta !== 0) {
+        const owned = ORDER.filter((w) => this.inventory[w]);
+        const i = owned.indexOf(this.wheelPick || this.current);
+        this.wheelPick = owned[(i + Math.sign(game.input.wheelDelta) + owned.length) % owned.length];
+        this.highlightWheel();
+      }
+    }
+  }
+
+  buildWheel() {
+    const el = document.getElementById('weaponwheel');
+    if (!el) return;
+    const owned = ORDER.filter((w) => this.inventory[w]);
+    this.wheelPick = this.current;
+    el.innerHTML = '';
+    const n = owned.length;
+    owned.forEach((id, k) => {
+      const ang = (k / n) * Math.PI * 2 - Math.PI / 2;
+      const div = document.createElement('div');
+      div.className = 'ww-slot' + (id === this.current ? ' sel' : '');
+      div.dataset.id = id;
+      div.style.left = `calc(50% + ${Math.cos(ang) * 130}px)`;
+      div.style.top = `calc(50% + ${Math.sin(ang) * 130}px)`;
+      div.innerHTML = `<span class="ww-ic">${WEAPONS[id].icon}</span><span class="ww-nm">${WEAPONS[id].name}</span>`;
+      el.appendChild(div);
+    });
+  }
+
+  highlightWheel() {
+    const el = document.getElementById('weaponwheel');
+    if (!el) return;
+    for (const s of el.children) s.classList.toggle('sel', s.dataset.id === this.wheelPick);
   }
 
   // shared hitscan against peds, cops, vehicles and static boxes

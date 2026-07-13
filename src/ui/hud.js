@@ -163,9 +163,11 @@ export class Hud {
 
   damageFlash() { this.damageFlashT = 0.28; }
 
-  setCrosshair(visible, hit = false) {
+  setCrosshair(visible, hit = false, bloom = 0) {
     this.el.crosshair.style.display = visible ? 'block' : 'none';
     this.el.crosshair.classList.toggle('hitmark', hit);
+    // bloom spreads the crosshair arms outward
+    if (visible) this.el.crosshair.style.transform = `translate(-50%,-50%) scale(${1 + bloom * 0.9})`;
   }
 
   fade(toBlack, instant = false) {

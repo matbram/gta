@@ -112,6 +112,46 @@ export class ParticleSystem {
   update(dt) {
     this.smoke.update(dt);
     this.glow.update(dt);
+
+    // muzzle light decay
+    if (this._mLight && this._mLightT > 0) {
+      this._mLightT -= dt;
+      this._mLight.intensity = this._mLightT > 0 ? this._mLight.intensity * 0.7 : 0;
+      if (this._mLightT <= 0) this._mLight.intensity = 0;
+    }
+
+    // tracers fade fast then return to the pool
+    if (this._tracers) {
+      for (const tr of this._tracers) {
+        tr.t += dt;
+        tr.line.material.opacity = Math.max(0, 0.85 - tr.t * 12);
+        if (tr.t > 0.07) { tr.line.visible = false; this._tracerPool.push(tr.line); tr._done = true; }
+      }
+      if (this._tracers.some((t) => t._done)) this._tracers = this._tracers.filter((t) => !t._done);
+    }
+
+    // shell physics
+    if (this._shells) {
+      const d = this._shellDummy;
+      let any = false;
+      for (let i = 0; i < this._shells.length; i++) {
+        const s = this._shells[i];
+        if (!s.live) { d.position.set(0, -100, 0); d.updateMatrix(); this._shellMesh.setMatrixAt(i, d.matrix); continue; }
+        any = true;
+        s.t += dt;
+        s.vy -= 16 * dt;
+        s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+        const gy = this.game.city.groundHeight(s.x, s.z) + 0.02;
+        if (s.y <= gy) { s.y = gy; s.vy *= -0.3; s.vx *= 0.5; s.vz *= 0.5; if (s.t > 4) s.live = false; }
+        s.rot += dt * 8;
+        d.position.set(s.x, s.y, s.z);
+        d.rotation.set(s.rot, s.rot * 0.7, 1.2);
+        d.scale.setScalar(1);
+        d.updateMatrix();
+        this._shellMesh.setMatrixAt(i, d.matrix);
+      }
+      if (any) this._shellMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ---------- effect recipes ----------
@@ -166,6 +206,66 @@ export class ParticleSystem {
       life: 0.08, s0: 1.1, s1: 0.3, a: 1,
       r: 1, g: 0.85, b: 0.4,
     });
+  }
+
+  // brief point-light flash at the muzzle (pooled, one shared light)
+  muzzleLight(x, y, z) {
+    if (!this._mLight) {
+      this._mLight = new THREE.PointLight(0xffddaa, 0, 22, 2);
+      this.game.scene.add(this._mLight);
+      this._mLightT = 0;
+    }
+    this._mLight.position.set(x, y, z);
+    this._mLight.intensity = 6;
+    this._mLightT = 0.06;
+  }
+
+  // glowing tracer line from muzzle to impact
+  tracer(x0, y0, z0, x1, y1, z1) {
+    if (!this._tracers) {
+      this._tracerPool = [];
+      this._tracers = [];
+      const mat = new THREE.LineBasicMaterial({ color: 0xffe6a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+      for (let i = 0; i < 24; i++) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const line = new THREE.Line(geo, mat.clone());
+        line.frustumCulled = false;
+        line.visible = false;
+        this.game.scene.add(line);
+        this._tracerPool.push(line);
+      }
+    }
+    const line = this._tracerPool.pop();
+    if (!line) return;
+    const pos = line.geometry.attributes.position.array;
+    pos[0] = x0; pos[1] = y0; pos[2] = z0;
+    pos[3] = x1; pos[4] = y1; pos[5] = z1;
+    line.geometry.attributes.position.needsUpdate = true;
+    line.material.opacity = 0.85;
+    line.visible = true;
+    this._tracers.push({ line, t: 0 });
+  }
+
+  // ejected brass shell (pooled instanced)
+  shell(x, y, z, heading) {
+    if (!this._shells) {
+      const geo = new THREE.CylinderGeometry(0.02, 0.02, 0.07, 5);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xc8a848, metalness: 0.8, roughness: 0.4 });
+      this._shellMesh = new THREE.InstancedMesh(geo, mat, 30);
+      this._shellMesh.frustumCulled = false;
+      this.game.scene.add(this._shellMesh);
+      this._shells = [];
+      this._shellCursor = 0;
+      for (let i = 0; i < 30; i++) this._shells.push({ x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, rot: 0, live: false });
+      this._shellDummy = new THREE.Object3D();
+    }
+    const s = this._shells[this._shellCursor];
+    this._shellCursor = (this._shellCursor + 1) % 30;
+    const rx = Math.cos(heading), rz = -Math.sin(heading);   // eject to the right
+    s.x = x; s.y = y; s.z = z;
+    s.vx = rx * 2 + (Math.random() - 0.5); s.vy = 1.5 + Math.random(); s.vz = rz * 2 + (Math.random() - 0.5);
+    s.rot = Math.random() * 6; s.live = true; s.t = 0;
   }
 
   fire(x, y, z, n = 2) {

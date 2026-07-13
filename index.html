@@ -115,6 +115,18 @@
   #crosshair:after{left:2px;top:12px;width:22px;height:2px}
   #crosshair.hitmark:before,#crosshair.hitmark:after{background:#e83a2e}
 
+  #lockon{position:absolute;width:44px;height:44px;transform:translate(-50%,-50%);pointer-events:none;
+    border:2px solid #e83a2e;border-radius:50%;box-shadow:0 0 8px rgba(232,58,46,.8)}
+  #lockon:before{content:'';position:absolute;inset:6px;border:1px solid rgba(232,58,46,.6);border-radius:50%}
+
+  #weaponwheel{position:absolute;inset:0;pointer-events:none;z-index:30;
+    background:radial-gradient(circle at center,rgba(0,0,0,.35) 0%,rgba(0,0,0,.55) 60%)}
+  .ww-slot{position:absolute;transform:translate(-50%,-50%);width:96px;text-align:center;
+    background:rgba(20,16,26,.85);border:2px solid #55483d;border-radius:8px;padding:8px 4px;transition:all .1s}
+  .ww-slot.sel{border-color:#e8c84a;background:#4a3550;transform:translate(-50%,-50%) scale(1.14)}
+  .ww-ic{display:block;font-size:26px;line-height:30px;filter:drop-shadow(1px 1px 0 #000)}
+  .ww-nm{display:block;font:700 10px Arial;color:#d8ccb8;letter-spacing:1px;margin-top:2px}
+
   #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;
     background:radial-gradient(ellipse at center,transparent 46%,rgba(160,10,10,.55) 100%)}
   #fader{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .7s;z-index:60}
@@ -167,6 +179,8 @@
     <div id="radiotoast"><span></span></div>
     <div id="timerbox"><span>0:00</span></div>
     <div id="crosshair"></div>
+    <div id="lockon" class="hidden"></div>
+    <div id="weaponwheel" class="hidden"></div>
     <div id="vignette"></div>
   </div>
 
@@ -206,7 +220,9 @@
       <tr><td>SPACE</td><td>jump / handbrake</td></tr>
       <tr><td>LMB</td><td>attack / fire</td></tr>
       <tr><td>RMB</td><td>aim</td></tr>
-      <tr><td>SCROLL / Q</td><td>switch weapon</td></tr>
+      <tr><td>SCROLL</td><td>switch weapon</td></tr>
+      <tr><td>HOLD Q</td><td>weapon wheel</td></tr>
+      <tr><td>TAB / MMB</td><td>lock on target</td></tr>
       <tr><td>F</td><td>enter / exit vehicle</td></tr>
       <tr><td>R</td><td>reload &middot; radio (in car)</td></tr>
       <tr><td>H</td><td>horn</td></tr>

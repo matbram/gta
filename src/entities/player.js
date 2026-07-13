@@ -63,6 +63,7 @@ export class Player {
 
   damage(amount, source = 'unknown') {
     if (this.dead) return;
+    if (this.iframeT > 0 && source !== 'fall' && source !== 'explosion') return;   // dodge i-frames
     if (this.armor > 0) {
       const absorbed = Math.min(this.armor, amount * 0.7);
       this.armor -= absorbed;
@@ -140,11 +141,21 @@ export class Player {
     this.vel.x = damp(this.vel.x, ax, 12, dt);
     this.vel.z = damp(this.vel.z, az, 12, dt);
 
-    // gravity + jump
-    if (this.grounded && input.wasPressed('Space')) {
+    // dodge roll while locked on (Space) — quick sidestep with brief i-frames
+    if (this.lockHeading != null && this.grounded && input.wasPressed('Space') && this.dodgeT <= 0) {
+      const sideSign = h >= 0 ? 1 : -1;
+      const dodgeAng = this.heading + Math.PI / 2 * sideSign;
+      this.vel.x = Math.sin(dodgeAng) * 11;
+      this.vel.z = Math.cos(dodgeAng) * 11;
+      this.dodgeT = 0.35;
+      this.iframeT = 0.35;
+    } else if (this.grounded && input.wasPressed('Space')) {
+      // gravity + jump
       this.vel.y = 5.6;
       this.grounded = false;
     }
+    if (this.dodgeT > 0) this.dodgeT -= dt;
+    if (this.iframeT > 0) this.iframeT -= dt;
     this.vel.y -= 18 * dt;
 
     this.pos.x += this.vel.x * dt;
@@ -163,8 +174,10 @@ export class Player {
 
     this.collide();
 
-    // facing: aim → face camera direction; else face movement
-    if (aiming) {
+    // facing: lock-on → face target; aim → face camera; else face movement
+    if (this.lockHeading != null && this.dodgeT <= 0) {
+      this.heading = angleDamp(this.heading, this.lockHeading, 16, dt);
+    } else if (aiming) {
       this.heading = angleDamp(this.heading, camYaw + Math.PI, 18, dt);
     } else if (moving) {
       this.heading = angleDamp(this.heading, Math.atan2(mx, mz), 14, dt);

@@ -136,6 +136,8 @@ class Game {
       this.audio.radio = new radio.Radio(this.audio);
       const fx = await import('./systems/particles.js');
       this.particles = new fx.ParticleSystem(this);
+      const gore = await import('./systems/gore.js');
+      this.gore = new gore.Gore(this);
       const save = await import('./core/save.js');
       this.save = new save.SaveSystem(this);
       const parked = await import('./systems/parkedcars.js');
@@ -293,7 +295,9 @@ class Game {
 
   // ------------------------------------------------------------- main loop
   frame() {
-    const dt = clamp(this.clock.getDelta(), 0, 0.05);
+    let dt = clamp(this.clock.getDelta(), 0, 0.05);
+    if (this.timeScale && this.timeScale !== 1) dt *= this.timeScale;   // weapon-wheel slow-mo
+    if (this.hitStopT > 0) { this.hitStopT -= dt; dt *= 0.15; }         // melee hit-stop
     this.time += dt;
     const mode = this.state.mode;
 
@@ -360,6 +364,7 @@ class Game {
     this.missions?.update(dt);
     this.worldlife?.update(dt);
     this.particles?.update(dt);
+    this.gore?.update(dt);
     this.audio?.update(dt);
 
     // camera follows player or vehicle (re-read: enter/exit can happen mid-frame)
@@ -369,6 +374,10 @@ class Game {
     this.cameraRig.update(dt, camTarget, veh ? 2.1 : 1.55, {
       driving: !!veh, speed, aimMode: aiming,
     });
+    // hide the player body in on-foot first-person so it doesn't clip the camera
+    if (!veh && !this.player.dead && !this.interiors?.current) {
+      this.player.rig.group.visible = !this.cameraRig.firstPerson;
+    }
 
     // zone popups (streets only)
     const zone = this.interiors?.current ? this.state.zone
@@ -378,9 +387,21 @@ class Game {
       this.hud.showZone(zone);
     }
 
+    // lock-on screen marker
+    const lockEl = $('lockon');
+    const lt = this.combat?.lockTarget;
+    if (lt && !lt.dead) {
+      const v = new THREE.Vector3(lt.pos.x, lt.pos.y + 1.1, lt.pos.z).project(this.camera);
+      if (v.z < 1) {
+        lockEl.classList.remove('hidden');
+        lockEl.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
+        lockEl.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
+      } else lockEl.classList.add('hidden');
+    } else lockEl.classList.add('hidden');
+
     // HUD + minimap
     this.hud.update(dt, this);
-    this.hud.setCrosshair(aiming);
+    this.hud.setCrosshair(aiming, false, this.combat?.bloom || 0);
     const blips = [];
     for (const bp of this.blipProviders) bp(blips);
     this.minimap.draw(

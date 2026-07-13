@@ -25,7 +25,10 @@ export class CameraRig {
   }
 
   cycleDistance() {
-    this.distIndex = (this.distIndex + 1) % DISTANCES.length;
+    // cycle: near → mid → far → first-person → near
+    if (this.firstPerson) { this.firstPerson = false; this.distIndex = 0; }
+    else if (this.distIndex === DISTANCES.length - 1) { this.firstPerson = true; }
+    else this.distIndex++;
     this.dist = DISTANCES[this.distIndex];
   }
 
@@ -36,6 +39,7 @@ export class CameraRig {
   }
 
   addShake(amount) { this.shakeAmp = Math.min(1.4, this.shakeAmp + amount); }
+  addRecoil(amount) { this.recoilPitch = (this.recoilPitch || 0) + amount; }
 
   applyMouse(dx, dy, sensitivity = 0.0026) {
     this.yaw -= dx * sensitivity;
@@ -46,6 +50,29 @@ export class CameraRig {
   update(dt, target, targetHeight = 1.55, opts = {}) {
     const { driving = false, speed = 0, aimMode = false } = opts;
     this.aim = aimMode;
+
+    // ---- first-person ----
+    if (this.firstPerson && !driving) {
+      const eyeH = 1.62;
+      const ex = target.x, ey = target.y + eyeH, ez = target.z;
+      // look direction from yaw/pitch
+      const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+      const dx = -Math.sin(this.yaw) * cp;
+      const dz = -Math.cos(this.yaw) * cp;
+      let px = ex, py = ey, pz = ez;
+      if (this.shakeAmp > 0.001) {
+        const tt = performance.now() * 0.05;
+        px += Math.sin(tt * 1.3) * this.shakeAmp * 0.05;
+        py += Math.sin(tt * 1.7) * this.shakeAmp * 0.05;
+        this.shakeAmp = Math.max(0, this.shakeAmp - dt * 2.4);
+      }
+      this.camera.position.set(px, py, pz);
+      this.camera.lookAt(px + dx, py + sp + this.recoilPitch, pz + dz);
+      const fov = this.baseFov + (aimMode ? -14 : 0);
+      if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+      this.recoilPitch = damp(this.recoilPitch || 0, 0, 8, dt);
+      return;
+    }
 
     const lookAt = this.smoothTarget;
     if (!this.initialized) {

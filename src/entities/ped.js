@@ -138,23 +138,45 @@ export class Ped {
     }
   }
 
-  damage(amount, game, source = 'player') {
+  damage(amount, game, source = 'player', impact = null) {
     if (this.dead) return;
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
     if (this.health <= 0) {
-      this.die(game);
+      // impact from the player if not otherwise supplied
+      if (!impact) {
+        const dx = this.pos.x - game.player.pos.x, dz = this.pos.z - game.player.pos.z;
+        const l = Math.hypot(dx, dz) || 1;
+        impact = { dx: dx / l, dz: dz / l, force: source === 'runover' ? 6 : 2.5, up: 1 };
+      }
+      this.die(game, impact);
       return;
     }
-    this.panic(game.player.pos.x, game.player.pos.z);
+    // flinch on non-fatal hits (skinned rig)
+    this.rig.flinch?.();
+    this.panic(game.player.pos.x, game.player.pos.z, source === 'melee' || source === 'gun');
   }
 
-  die(game) {
+  // knocked down but alive: brief ragdoll-style topple, then get up
+  stagger(game, dir = null) {
+    if (this.dead || this.knockdown) return;
+    this.knockdown = { t: 0, dur: 2.2 };
+    this.rig.interiorY = this.interiorY ?? null;
+    const d = dir ?? { dx: this.pos.x - game.player.pos.x, dz: this.pos.z - game.player.pos.z };
+    const l = Math.hypot(d.dx, d.dz) || 1;
+    this.knockRag = game.gore?.makeRagdoll(this.rig, { dx: d.dx / l, dz: d.dz / l, force: 3, up: 1.5, spin: (Math.random() - 0.5) * 4 });
+  }
+
+  die(game, impact = null) {
     if (this.dead) return;
     this.dead = true;
     this.state = 'dead';
     this.rig.die();
+    // ragdoll launched by the killing impulse
+    this.rig.interiorY = this.interiorY ?? null;
+    this.ragdoll = game.gore?.makeRagdoll(this.rig, impact);
     game.audio?.scream(this.pos.x, this.pos.z);
+    game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.state.stats.kills++;
     // panic everyone nearby
     game.peds?.panicAt(this.pos.x, this.pos.z, 26);
@@ -165,8 +187,25 @@ export class Ped {
 
   update(dt, game) {
     if (this.dead) {
-      this.rig.update(dt, 0);
+      if (this.ragdoll) this.ragdoll.update(dt);
+      else this.rig.update(dt, 0);
       this.removeTimer += dt;
+      return;
+    }
+    // knockdown: ragdoll on the ground, then spring back up
+    if (this.knockdown) {
+      this.knockdown.t += dt;
+      this.knockRag?.update(dt);
+      if (this.knockdown.t >= this.knockdown.dur) {
+        // reset the rig upright
+        this.rig.group.rotation.set(0, this.heading, 0);
+        this.rig.group.position.y = this.pos.y;
+        this.knockdown = null;
+        this.knockRag = null;
+        this.state = 'flee';
+        this.panicked = true;
+        this.stateT = 0;
+      }
       return;
     }
     this.stateT += dt;
