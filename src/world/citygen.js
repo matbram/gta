@@ -360,7 +360,6 @@ export function generateCity(seed = 1337) {
         for (let k = 0; k < stacks; k++) {
           const px = r.float(lot.x0 + 4, lot.x1 - 4), pz = r.float(lot.z0 + 3, lot.z1 - 3);
           props.push({ kind: 'container', x: px, z: pz, rot: r.chance(0.5) ? 0 : Math.PI / 2, s: 1 });
-          addBox(px - 3.2, pz - 1.4, px + 3.2, pz + 1.4, 2.9, 'prop');
         }
         if (r.chance(0.3)) props.push({ kind: 'crane', x: cx, z: lot.z1 - 6, rot: r.float(0, 6.28), s: 1 });
         break;
@@ -380,7 +379,6 @@ export function generateCity(seed = 1337) {
         for (let k = 0; k < trees; k++) {
           const px = r.float(lot.x0, lot.x1), pz = r.float(lot.z0, lot.z1);
           props.push({ kind: 'tree', x: px, z: pz, rot: r.float(0, 6.28), s: r.float(0.9, 1.5) });
-          addBox(px - 0.4, pz - 0.4, px + 0.4, pz + 0.4, 5, 'prop');
         }
         for (let k = 0; k < 2; k++)
           props.push({ kind: 'bench', x: r.float(lot.x0, lot.x1), z: r.float(lot.z0, lot.z1), rot: r.float(0, 6.28), s: 1 });
@@ -404,7 +402,6 @@ export function generateCity(seed = 1337) {
           if (r.chance(0.6)) {
             const sx = cx + r.float(-16, 16), sz = cz + r.float(-16, 16);
             props.push({ kind: 'silo', x: sx, z: sz, rot: 0, s: 1 });
-            addBox(sx - 2.4, sz - 2.4, sx + 2.4, sz + 2.4, 11, 'prop');
           }
         }
         if (r.chance(0.5)) {
@@ -486,7 +483,6 @@ export function generateCity(seed = 1337) {
       if (r2.chance(0.3)) {
         const dx = c.lot.x1 - 2, dz = c.lot.z1 - 2.5;
         props.push({ kind: 'dumpster', x: dx, z: dz, rot: r2.chance(0.5) ? 0 : Math.PI / 2, s: 1 });
-        addBox(dx - 1.2, dz - 0.8, dx + 1.2, dz + 0.8, 1.4, 'prop');
       }
     }
     if (c.district === 'crown' && c.hasRoad && r2.chance(0.5)) {
@@ -542,8 +538,34 @@ export function generateCity(seed = 1337) {
     }
   }
 
-  // tree colliders (thin) for placed trees/palms near roadsides are skipped —
-  // only park trees & big props got colliders above. Keeps driving forgiving.
+  // ---------------------------------------------------------------- prop colliders
+  // Half-extents (pre-rotation) + knock behaviour per prop kind. Every solid
+  // street prop stops vehicles; 'knock' kinds break loose on a hard enough hit
+  // (handled by the knockables system). Bushes/hedges stay drive-through soft.
+  const PROP_PHYS = {
+    tree: { hw: 0.35, hd: 0.35, h: 6, scale: true },
+    palm: { hw: 0.30, hd: 0.30, h: 7, scale: true },
+    lamp: { hw: 0.16, hd: 0.16, h: 7, knock: { minSpeed: 7, fall: true, sparks: true } },
+    trafficlight: { hw: 0.16, hd: 0.16, h: 5.5, knock: { minSpeed: 7, fall: true, sparks: true } },
+    hydrant: { hw: 0.22, hd: 0.22, h: 0.8, knock: { minSpeed: 4, geyser: true } },
+    bench: { hw: 1.10, hd: 0.35, h: 0.95, knock: { minSpeed: 5, topple: true } },
+    trash: { hw: 0.30, hd: 0.30, h: 0.9, knock: { minSpeed: 2, topple: true } },
+    planter: { hw: 0.85, hd: 0.40, h: 0.55 },
+    dumpster: { hw: 1.20, hd: 0.80, h: 1.4 },
+    container: { hw: 3.20, hd: 1.40, h: 2.9 },
+    silo: { hw: 2.40, hd: 2.40, h: 11 },
+    crane: { hw: 1.20, hd: 1.20, h: 15 },
+    hut: { hw: 2.20, hd: 2.20, h: 3 },
+  };
+  for (const p of props) {
+    const ph = PROP_PHYS[p.kind];
+    if (!ph) continue;
+    const sc = ph.scale ? (p.s || 1) : 1;
+    const cr = Math.abs(Math.cos(p.rot || 0)), sr = Math.abs(Math.sin(p.rot || 0));
+    const ex = (cr * ph.hw + sr * ph.hd) * sc;   // AABB of the rotated footprint
+    const ez = (sr * ph.hw + cr * ph.hd) * sc;
+    p.box = addBox(p.x - ex, p.z - ez, p.x + ex, p.z + ez, ph.h * sc, 'prop', p);
+  }
 
   // ---------------------------------------------------------------- points of interest
   // Snap POIs onto cells of given district that touch a road.
@@ -613,7 +635,7 @@ export function generateCity(seed = 1337) {
     nodes, edges, cells,
     buildings, props, pois, doors,
     trafficLights, parkingSlots,
-    addBox, removeBox, queryColliders, boxes,
+    addBox, removeBox, queryColliders, boxes, propPhys: PROP_PHYS,
     nearestNode, nearestEdgePoint,
     roadHalf,
   };

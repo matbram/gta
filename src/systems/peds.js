@@ -45,6 +45,43 @@ export class PedSystem {
         this.peds.splice(this.peds.indexOf(ped), 1);
       }
     }
+
+    this.separate();
+  }
+
+  // soft ped-vs-ped (and ped-vs-player) pushout so crowds never merge into
+  // one another. Positional only — cheap and stable at ≤41 entities.
+  separate() {
+    const R = 0.35, RR = (R * 2) * (R * 2);
+    const list = this.peds;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (a.dead || a.noSeparate) continue;
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j];
+        if (b.dead || b.noSeparate) continue;
+        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= RR || d2 < 1e-8) continue;
+        const d = Math.sqrt(d2);
+        const push = (R * 2 - d) * 0.5;
+        const nx = dx / d, nz = dz / d;
+        a.pos.x -= nx * push; a.pos.z -= nz * push;
+        b.pos.x += nx * push; b.pos.z += nz * push;
+      }
+      // keep walkers from standing inside the player too
+      const pl = this.game.player;
+      if (!pl.dead && !pl.vehicle) {
+        const dx = pl.pos.x - a.pos.x, dz = pl.pos.z - a.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < RR && d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          const push = (R * 2 - d) * 0.5;
+          a.pos.x -= (dx / d) * push;
+          a.pos.z -= (dz / d) * push;
+        }
+      }
+    }
   }
 
   trySpawn(p) {

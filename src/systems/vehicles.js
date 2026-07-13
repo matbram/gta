@@ -4,7 +4,11 @@
 
 import * as THREE from 'three';
 import { Vehicle, VEHICLE_TYPES } from '../entities/vehicle.js';
-import { clamp, dist2d, distSq2d } from '../core/mathutil.js';
+import { clamp, dist2d, distSq2d, obbVsObb } from '../core/mathutil.js';
+
+// scratch OBBs for the pair loop (no per-pair garbage)
+const _oa = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
+const _ob = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 
 export class VehicleSystem {
   constructor(game) {
@@ -19,6 +23,7 @@ export class VehicleSystem {
     const v = new Vehicle(type, this.game.city, this.game.scene, colorOverride);
     v.pos.set(x, this.game.city.groundHeight(x, z), z);
     v.heading = heading;
+    v.onCrash = (veh, box, impact) => this.handleStaticCrash(veh, box, impact);
     v.syncMesh(0);
     v.setNightLights(this.night > 0.5);
     this.vehicles.push(v);
@@ -48,6 +53,23 @@ export class VehicleSystem {
     v.dispose();
     const i = this.vehicles.indexOf(v);
     if (i >= 0) this.vehicles.splice(i, 1);
+  }
+
+  // vehicle hit a static collider. Returns true if the obstacle broke away
+  // (knockable prop) so the car keeps rolling instead of bouncing.
+  handleStaticCrash(veh, box, impact) {
+    if (box.kind === 'prop' && box.owner) {
+      const kn = this.game.city.propPhys?.[box.owner.kind]?.knock;
+      if (kn && impact > kn.minSpeed && this.game.knockables?.knock(box.owner, veh)) {
+        return true;
+      }
+    }
+    if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
+      veh._lastCrashSfxT = this.game.time;
+      this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
+      if (veh.driver === 'player') this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
+    }
+    return false;
   }
 
   nearestVehicle(x, z, maxDist = 4, filter = null) {
@@ -195,47 +217,61 @@ export class VehicleSystem {
       }
     }
 
-    // vehicle-vs-vehicle collisions (simple circle pairs)
+    // vehicle-vs-vehicle collisions: circle broad phase, true OBB narrow phase
     const vs = this.vehicles;
     for (let i = 0; i < vs.length; i++) {
       const a = vs[i];
       for (let j = i + 1; j < vs.length; j++) {
         const b = vs[j];
         const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
-        const rr = a.radius + b.radius;
+        const rr = a.boundR + b.boundR;
         const d2 = dx * dx + dz * dz;
-        if (d2 > rr * rr || d2 < 1e-6) continue;
-        const d = Math.sqrt(d2);
-        const nx = dx / d, nz = dz / d;
-        const overlap = rr - d;
+        if (d2 > rr * rr) continue;
+        _oa.x = a.pos.x; _oa.z = a.pos.z; _oa.hw = a.hw; _oa.hl = a.hl; _oa.heading = a.heading;
+        _ob.x = b.pos.x; _ob.z = b.pos.z; _ob.hw = b.hw; _ob.hl = b.hl; _ob.heading = b.heading;
+        let hit = obbVsObb(_oa, _ob);
+        if (!hit) continue;
+        // hit normal points b→a; flip so n points a→b (push-apart convention below)
         const ma = a.spec.mass, mb = b.spec.mass;
         const tot = ma + mb;
-        a.pos.x -= nx * overlap * (mb / tot);
-        a.pos.z -= nz * overlap * (mb / tot);
-        b.pos.x += nx * overlap * (ma / tot);
-        b.pos.z += nz * overlap * (ma / tot);
-        // relative speed along normal
-        const rvx = b.vel.x - a.vel.x, rvz = b.vel.y - a.vel.y;
-        const rel = rvx * nx + rvz * nz;
-        if (rel < 0) {
-          const impulse = -rel * 0.8;
-          a.vel.x -= nx * impulse * (mb / tot);
-          a.vel.y -= nz * impulse * (mb / tot);
-          b.vel.x += nx * impulse * (ma / tot);
-          b.vel.y += nz * impulse * (ma / tot);
-          const impact = -rel;
-          if (impact > 5) {
-            a.applyDamage(impact * 1.2, 'crash');
-            b.applyDamage(impact * 1.2, 'crash');
-            this.game.particles?.sparks((a.pos.x + b.pos.x) / 2, a.pos.y + 0.6, (a.pos.z + b.pos.z) / 2, 6);
-            if (a.driver === 'player' || b.driver === 'player') {
-              this.game.cameraRig.addShake(clamp(impact / 20, 0, 0.7));
-              this.game.wanted?.crime('crash', a.pos.x, a.pos.z);
+        for (let iter = 0; iter < 2 && hit; iter++) {
+          const nx = -hit.nx, nz = -hit.nz;
+          a.pos.x -= nx * hit.depth * (mb / tot);
+          a.pos.z -= nz * hit.depth * (mb / tot);
+          b.pos.x += nx * hit.depth * (ma / tot);
+          b.pos.z += nz * hit.depth * (ma / tot);
+          if (iter === 0) {
+            // relative speed along normal
+            const rvx = b.vel.x - a.vel.x, rvz = b.vel.y - a.vel.y;
+            const rel = rvx * nx + rvz * nz;
+            if (rel < 0) {
+              const impulse = -rel * 0.8;
+              a.vel.x -= nx * impulse * (mb / tot);
+              a.vel.y -= nz * impulse * (mb / tot);
+              b.vel.x += nx * impulse * (ma / tot);
+              b.vel.y += nz * impulse * (ma / tot);
+              const impact = -rel;
+              if (impact > 5) {
+                a.applyDamage(impact * 1.2, 'crash');
+                b.applyDamage(impact * 1.2, 'crash');
+                this.game.particles?.sparks((a.pos.x + b.pos.x) / 2, a.pos.y + 0.6, (a.pos.z + b.pos.z) / 2, 6);
+                this.game.audio?.crash?.(impact, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2);
+                if (a.driver === 'player' || b.driver === 'player') {
+                  this.game.cameraRig.addShake(clamp(impact / 20, 0, 0.7));
+                  this.game.wanted?.crime('crash', a.pos.x, a.pos.z);
+                }
+                // AI drivers panic when rammed
+                const other = a.driver === 'player' ? b : a;
+                if (other.aiControlled) this.game.traffic?.panic(other);
+              }
             }
-            // AI drivers panic when rammed
-            const other = a.driver === 'player' ? b : a;
-            if (other.aiControlled) this.game.traffic?.panic(other);
           }
+          // deep overlap (high-speed hit): resolve once more so cars never interlock
+          if (hit.depth > 1.2) {
+            _oa.x = a.pos.x; _oa.z = a.pos.z; _oa.heading = a.heading;
+            _ob.x = b.pos.x; _ob.z = b.pos.z; _ob.heading = b.heading;
+            hit = obbVsObb(_oa, _ob);
+          } else hit = null;
         }
       }
     }

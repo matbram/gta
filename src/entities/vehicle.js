@@ -2,7 +2,7 @@
 // arcade driving physics with grip/drift, damage, smoke, fire, explosion.
 
 import * as THREE from 'three';
-import { clamp, damp, lerp, circleVsAabb, wrapAngle } from '../core/mathutil.js';
+import { clamp, damp, lerp, obbVsAabb, wrapAngle } from '../core/mathutil.js';
 
 // All vehicle names are original.
 export const VEHICLE_TYPES = {
@@ -61,7 +61,13 @@ export class Vehicle {
     this.smokeTimer = 0;
     this.fireTimer = 0;
     this.lastHitSpeed = 0;
-    this.radius = Math.max(this.spec.w, this.spec.l) * 0.36;
+    // true oriented footprint for collision; radius stays width-scale for
+    // run-over / door checks that model "touching the car's side"
+    this.hw = this.spec.w / 2 + 0.05;
+    this.hl = this.spec.l / 2;
+    this.boundR = Math.hypot(this.hw, this.hl);
+    this.radius = this.spec.w * 0.5 + 0.3;
+    this.onCrash = null;               // set by VehicleSystem (sfx + knockables)
 
     this.buildMesh(colorOverride);
   }
@@ -381,9 +387,14 @@ export class Vehicle {
     this.speed = vf;
     this.lateral = vl;
 
-    // integrate
-    this.pos.x += this.vel.x * dt;
-    this.pos.z += this.vel.y * dt;
+    // integrate (substepped so fast cars can't tunnel through thin poles)
+    const steps = Math.min(4, Math.max(1, Math.ceil((this.vel.length() * dt) / 1.5)));
+    const sdt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      this.pos.x += this.vel.x * sdt;
+      this.pos.z += this.vel.y * sdt;
+      this.collideStatic();
+    }
 
     // terrain follow / sinking
     const ground = this.city.groundHeight(this.pos.x, this.pos.z);
@@ -406,20 +417,23 @@ export class Vehicle {
       this.vel.multiplyScalar(0.5);
     }
 
-    this.collideStatic();
     this.syncMesh(dt);
   }
 
   collideStatic() {
-    const cols = this.city.queryColliders(this.pos.x, this.pos.z, this.radius + 1.5);
+    const cols = this.city.queryColliders(this.pos.x, this.pos.z, this.boundR + 1.5);
     for (const b of cols) {
-      const hit = circleVsAabb(this.pos.x, this.pos.z, this.radius, b.minX, b.minZ, b.maxX, b.maxZ);
+      if (b.gone) continue;   // knocked-loose prop, collider being retired
+      const hit = obbVsAabb(this.pos.x, this.pos.z, this.hw, this.hl, this.heading,
+        b.minX, b.minZ, b.maxX, b.maxZ);
       if (!hit) continue;
-      this.pos.x = hit.x;
-      this.pos.z = hit.z;
       const vn = this.vel.x * hit.nx + this.vel.y * hit.nz;
+      const impact = vn < 0 ? -vn : 0;
+      // knockable props break away instead of stopping the car
+      if (this.onCrash && this.onCrash(this, b, impact) === true) continue;
+      this.pos.x += hit.nx * hit.depth;
+      this.pos.z += hit.nz * hit.depth;
       if (vn < 0) {
-        const impact = -vn;
         this.vel.x -= hit.nx * vn * 1.4;   // bounce
         this.vel.y -= hit.nz * vn * 1.4;
         if (impact > 4) {

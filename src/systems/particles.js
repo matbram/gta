@@ -323,4 +323,18 @@ export class ParticleSystem {
       });
     }
   }
+
+  // broken-hydrant water column — call every frame while the geyser is live
+  geyser(x, y, z, strength = 1) {
+    for (let i = 0; i < 4; i++) {
+      this.smoke.emit({
+        x: x + (Math.random() - 0.5) * 0.25, y, z: z + (Math.random() - 0.5) * 0.25,
+        vx: (Math.random() - 0.5) * 1.8,
+        vy: (8 + Math.random() * 4.5) * strength,
+        vz: (Math.random() - 0.5) * 1.8,
+        life: 0.9 + Math.random() * 0.4, s0: 0.3, s1: 1.3, a: 0.75,
+        r: 0.68, g: 0.82, b: 0.95, grav: -15, drag: 0.995,
+      });
+    }
+  }
 }

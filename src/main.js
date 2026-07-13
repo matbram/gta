@@ -147,6 +147,8 @@ class Game {
       this.dispatch = new dispatch.Dispatch(this);
       const interiors = await import('./systems/interiors.js');
       this.interiors = new interiors.Interiors(this);
+      const knock = await import('./systems/knockables.js');
+      this.knockables = new knock.Knockables(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -372,6 +374,7 @@ class Game {
     this.worldlife?.update(dt);
     this.particles?.update(dt);
     this.gore?.update(dt);
+    this.knockables?.update(dt);
     this.audio?.update(dt);
 
     // camera follows player or vehicle (re-read: enter/exit can happen mid-frame)

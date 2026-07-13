@@ -223,6 +223,21 @@ export class AudioEngine {
     [392, 330, 262].forEach((f, i) => this.tone({ freq: f, dur: 0.4, gain: 0.22, type: 'triangle', delay: i * 0.16 }));
   }
   splash(x, z) { if (this.buffers?.has('splash')) return void this.playBuffer('splash', { x, z, gain: 0.7, range: 90 }); if (this.ctx) this.burst({ dur: 0.45, gain: 0.5 * this.spatialGain(x, z, 1, 80), filterFrom: 1500, filterTo: 200 }); }
+  // vehicle impact — intensity is closing speed (m/s), scales volume + pitch
+  crash(intensity, x, z) {
+    this.crashCount = (this.crashCount || 0) + 1;   // test hook
+    if (!this.ctx) return;
+    const v = clamp(intensity / 14, 0.25, 1);
+    if (this.buffers?.has('car_crash')) {
+      return void this.playBuffer('car_crash', {
+        x, z, gain: 0.85 * v, range: 140, rate: 0.9 + Math.random() * 0.25 + (1 - v) * 0.2,
+      });
+    }
+    const g = (x !== undefined ? this.spatialGain(x, z, 1, 140) : 1) * v;
+    if (g < 0.03) return;
+    this.burst({ dur: 0.28, gain: 0.7 * g, filterFrom: 2400, filterTo: 200 });
+    this.tone({ freq: 90, freqTo: 45, dur: 0.22, gain: 0.4 * g, type: 'sine' });
+  }
   horn(x, z) {
     if (!this.ctx) return;
     if (this.buffers?.has('car_horn')) return void this.playBuffer('car_horn', { x, z, gain: 0.6, range: 120 });

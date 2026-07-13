@@ -503,7 +503,7 @@ export class CombatSystem {
     }
     for (const v of game.vehicles?.vehicles || []) {
       if (v === game.player.vehicle) continue;
-      consider(sphereHit(v.pos.x, v.pos.y + 0.8, v.pos.z, v.radius + 0.35), 'vehicle', v);
+      consider(sphereHit(v.pos.x, v.pos.y + 0.8, v.pos.z, v.boundR * 0.8 + 0.35), 'vehicle', v);
     }
 
     // static: march the ray until inside a collider or below ground

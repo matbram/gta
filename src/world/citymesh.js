@@ -43,6 +43,7 @@ function instancedFromModel(model, list, city, group, { targetH = null, targetW 
       dummy.scale.setScalar(s * (p.s || 1));
       dummy.updateMatrix();
       im.setMatrixAt(k, dummy.matrix);
+      (p._slots = p._slots || []).push({ mesh: im, idx: k });
     }
     im.instanceMatrix.needsUpdate = true;
     group.add(im);
@@ -258,6 +259,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       dummy.scale.set(s, extraScaleY ? s * (0.85 + ((k * 37) % 10) * 0.05) : s, s);
       dummy.updateMatrix();
       im.setMatrixAt(k, dummy.matrix);
+      (p._slots = p._slots || []).push({ mesh: im, idx: k });
     }
     im.instanceMatrix.needsUpdate = true;
     propGroup.add(im);
@@ -303,6 +305,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       pools.setMatrixAt(k, dummy.matrix);
+      (p._slots = p._slots || []).push({ mesh: pools, idx: k, noDebris: true });
     }
     pools.instanceMatrix.needsUpdate = true;
     propGroup.add(pools);
