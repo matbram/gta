@@ -26,6 +26,7 @@ export class Hud {
       crosshair: $('crosshair'), vignette: $('vignette'), fader: $('fader'),
     };
     this.shownMoney = 0;
+    this.damageFlashT = 0;
     this.zoneTimer = 0;
     this.vehTimer = 0;
     this.toastTimer = 0;
@@ -67,9 +68,20 @@ export class Hud {
       this.el.stars.innerHTML = html;
     }
 
-    // vignette when hurt
+    // vignette when hurt + brief flash on damage
     const hurt = 1 - p.health / p.maxHealth;
-    this.el.vignette.style.opacity = hurt > 0.55 ? (hurt - 0.55) * 1.8 : 0;
+    let vig = hurt > 0.55 ? (hurt - 0.55) * 1.8 : 0;
+    if (this.damageFlashT > 0) {
+      this.damageFlashT -= dt;
+      vig = Math.max(vig, this.damageFlashT * 2.2);
+    }
+    this.el.vignette.style.opacity = vig;
+
+    // stamina shown as the blue bar while it's not full
+    if (p.stamina < 0.98 && !p.vehicle) {
+      this.el.breath.classList.remove('hidden');
+      this.el.breathFill.style.width = `${p.stamina * 100}%`;
+    } else this.el.breath.classList.add('hidden');
 
     // timers for transient labels
     if (this.zoneTimer > 0) { this.zoneTimer -= dt; if (this.zoneTimer <= 0) this.el.zone.style.opacity = 0; }
@@ -143,6 +155,8 @@ export class Hud {
     this.el.timerBox.classList.toggle('urgent', !!urgent);
     this.el.timerText.textContent = formatTimer(seconds);
   }
+
+  damageFlash() { this.damageFlashT = 0.28; }
 
   setCrosshair(visible, hit = false) {
     this.el.crosshair.style.display = visible ? 'block' : 'none';

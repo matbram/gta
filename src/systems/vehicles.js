@@ -85,6 +85,7 @@ export class VehicleSystem {
     this.game.traffic?.releaseVehicle(v);
     this.game.audio?.carDoor();
     this.game.audio?.startEngine();
+    if (this.game.audio?.radio?.station >= 0) this.game.audio.radio.start();
     this.game.hud?.showVehicleName(v.spec.name);
     this.game.cameraRig.snapBehind(v.heading, 0.16);
     if (v.type === 'taxi') this.game.hud?.showToast('Press T to pick up fares.', 4);
@@ -102,6 +103,7 @@ export class VehicleSystem {
     player.setVisible(true);
     this.game.audio?.carDoor();
     this.game.audio?.stopEngine();
+    this.game.audio?.radio?.stop();
     this.game.cameraRig.snapBehind(v.heading, 0.24);
   }
 
@@ -124,6 +126,11 @@ export class VehicleSystem {
           game.audio?.horn(v.pos.x, v.pos.z);
         }
       }
+      // radio
+      if (input.wasPressed('KeyR')) {
+        const name = game.audio?.radio?.cycle();
+        if (name) game.hud?.showRadio(name);
+      }
       if (v.dead) {
         // burning or drowned → force out
         this.exitVehicleForced();
@@ -133,10 +140,13 @@ export class VehicleSystem {
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;
         // engine audio
         game.audio?.setEngine(clamp(Math.abs(v.speed) / v.spec.maxSpeed, 0, 1), this.playerControl.throttle > 0);
-        // tyre screech on hard lateral slip
+        // tyre screech + rubber smoke on hard lateral slip
         if (Math.abs(v.lateral) > 3.5 && Math.abs(v.speed) > 6) {
           game.audio?.screech(v.pos.x, v.pos.z, clamp(Math.abs(v.lateral) / 8, 0, 1));
-          game.particles?.dust(v.pos.x, v.pos.y + 0.1, v.pos.z, 1);
+          // smoke at the rear wheels
+          const bx = -Math.sin(v.heading) * v.spec.l * 0.32;
+          const bz = -Math.cos(v.heading) * v.spec.l * 0.32;
+          game.particles?.dust(v.pos.x + bx, v.pos.y + 0.15, v.pos.z + bz, 2);
         }
         // sinking in water → dump the player swimming
         if (v.sinking > 0.3) this.exitVehicleForced();
@@ -266,6 +276,7 @@ export class VehicleSystem {
     player.teleport(door.x, door.z, v.heading);
     player.setVisible(true);
     this.game.audio?.stopEngine();
+    this.game.audio?.radio?.stop();
   }
 
   explodeFx(v) {
@@ -301,10 +312,10 @@ export class VehicleSystem {
   }
 
   setNight(night) {
+    this.night = night;
     const on = night > 0.45;
     if (this._lightsOn === on) return;
     this._lightsOn = on;
-    this.night = night;
     for (const v of this.vehicles) v.setNightLights(on);
   }
 }

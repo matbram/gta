@@ -111,6 +111,8 @@ class Game {
       this.worldlife = new world.WorldLife(this);
       const audio = await import('./core/audio.js');
       this.audio = new audio.AudioEngine(this);
+      const radio = await import('./core/radio.js');
+      this.audio.radio = new radio.Radio(this.audio);
       const fx = await import('./systems/particles.js');
       this.particles = new fx.ParticleSystem(this);
       const save = await import('./core/save.js');
@@ -167,6 +169,7 @@ class Game {
     this.setMode('play');
     // death / arrest hooks
     this.player.onDied = () => this.beginDeathFlow('wasted');
+    this.player.onDamaged = () => this.hud.damageFlash();
     this.deathFlow = null;
   }
 

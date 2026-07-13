@@ -247,6 +247,25 @@ export class WorldLife {
   openBigMap() { this.drawBigMap(); }
   updateBigMap() { /* redrawn on interaction; static otherwise */ }
 
+  districtLabels() {
+    if (this._labels) return this._labels;
+    // average the cell centres per district for label placement
+    const sums = {};
+    for (const c of this.game.city.cells) {
+      if (!sums[c.district]) sums[c.district] = { x: 0, z: 0, n: 0 };
+      sums[c.district].x += c.cx; sums[c.district].z += c.cz; sums[c.district].n++;
+    }
+    const names = {
+      crown: 'Crown Center', oldtown: 'Old Coronet', midtown: 'Midtown',
+      suburbs: 'Sunset Flats', docks: 'Ironhook Docks', beach: 'Verdemar Beach',
+      park: 'Palmera Park', heights: 'Bayvale Heights', farm: 'Northfields',
+    };
+    this._labels = Object.entries(sums)
+      .filter(([k, v]) => names[k] && v.n > 3)
+      .map(([k, v]) => ({ name: names[k], x: v.x / v.n, z: v.z / v.n }));
+    return this._labels;
+  }
+
   drawBigMap() {
     const game = this.game;
     const ctx = this.bigmapCanvas.getContext('2d');
@@ -254,6 +273,16 @@ export class WorldLife {
     const px = (x) => ((x + game.city.HALF) / game.city.SPAN) * S;
     ctx.clearRect(0, 0, S, S);
     ctx.drawImage(game.minimap.mapCanvas, 0, 0, S, S);
+
+    // district names
+    ctx.save();
+    ctx.font = 'italic bold 13px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(60,50,40,0.85)';
+    ctx.shadowColor = 'rgba(255,250,235,0.7)';
+    ctx.shadowBlur = 3;
+    for (const l of this.districtLabels()) ctx.fillText(l.name.toUpperCase(), px(l.x), px(l.z));
+    ctx.restore();
 
     // route
     if (this.route) {

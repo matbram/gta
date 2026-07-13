@@ -30,6 +30,7 @@ export class AudioEngine {
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
+      this.onReady?.();
     } catch { this.enabled = false; }
   }
 
