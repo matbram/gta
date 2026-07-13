@@ -28,8 +28,10 @@ export class Goon extends Ped {
   }
 
   update(dt, game) {
+    this.game = game;
     if (this.dead) {
-      this.rig.update(dt, 0);
+      if (this.ragdoll) this.ragdoll.update(dt);
+      else this.rig.update(dt, 0);
       this.removeTimer += dt;
       return;
     }
@@ -96,6 +98,11 @@ export class Goon extends Ped {
     if (this.health <= 0) {
       this.dead = true;
       this.rig.die();
+      this.rig.interiorY = this.interiorY ?? null;
+      const dx = this.pos.x - game.player.pos.x, dz = this.pos.z - game.player.pos.z;
+      const l = Math.hypot(dx, dz) || 1;
+      this.ragdoll = game.gore?.makeRagdoll(this.rig, { dx: dx / l, dz: dz / l, force: 2.5, up: 1, spin: (Math.random() - 0.5) * 3 });
+      game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
       game.audio?.scream(this.pos.x, this.pos.z);
       game.state.stats.kills++;
       this.onDeath?.();

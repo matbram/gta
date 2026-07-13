@@ -25,8 +25,10 @@ export class Cop extends Ped {
   }
 
   update(dt, game) {
+    this.game = game;
     if (this.dead) {
-      this.rig.update(dt, 0);
+      if (this.ragdoll) this.ragdoll.update(dt);
+      else this.rig.update(dt, 0);
       this.removeTimer += dt;
       return;
     }
@@ -146,6 +148,12 @@ export class Cop extends Ped {
     this.dead = true;
     this.state = 'dead';
     this.rig.die();
+    // ragdoll honors ground/interior height (plain rig.die sinks to y≈0.1)
+    this.rig.interiorY = this.interiorY ?? null;
+    const dx = this.pos.x - game.player.pos.x, dz = this.pos.z - game.player.pos.z;
+    const l = Math.hypot(dx, dz) || 1;
+    this.ragdoll = game.gore?.makeRagdoll(this.rig, { dx: dx / l, dz: dz / l, force: 2.5, up: 1, spin: (Math.random() - 0.5) * 3 });
+    game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.audio?.scream(this.pos.x, this.pos.z);
     game.state.stats.kills++;
     game.peds?.panicAt(this.pos.x, this.pos.z, 26);

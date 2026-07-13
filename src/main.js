@@ -223,6 +223,10 @@ class Game {
     if (this.deathFlow) return;
     this.deathFlow = { kind, t: 0, failedMission: this.missions?.active?.def.title ?? null };
     this.missions?.onPlayerDown?.(kind);
+    // clean up transient states that a death would otherwise strand
+    this.timeScale = 1;
+    if (this.combat?.wheelOpen) { this.combat.wheelOpen = false; $('weaponwheel')?.classList.add('hidden'); }
+    if (this.interiors?.current) this.interiors.forceExit();
     if (kind === 'wasted') {
       this.hud.showCenter('WASTED', 'wasted', '', 5);
       this.audio?.missionFailed?.();
@@ -377,7 +381,7 @@ class Game {
       driving: !!veh, speed, aimMode: aiming,
     });
     // hide the player body in on-foot first-person so it doesn't clip the camera
-    if (!veh && !this.player.dead && !this.interiors?.current) {
+    if (!veh && !this.player.dead) {
       this.player.rig.group.visible = !this.cameraRig.firstPerson;
     }
 

@@ -324,6 +324,22 @@ export class Interiors {
     if (game.headless) place(); else setTimeout(place, 420);
   }
 
+  // hard reset (called on death while inside): clear interior state so the
+  // respawn lands on real ground and doors/minimap work again
+  forceExit() {
+    const game = this.game;
+    if (!this.current) return;
+    const tpl = this.templates[this.current];
+    if (tpl) tpl.light.intensity = 0;
+    game.player.interiorY = null;
+    this.exitMarker.visible = false;
+    this.current = null;
+    this.pendingHeat = 0;
+    this.exitLock = null;
+    this.transitionCD = 0.5;
+    document.getElementById('minimap-wrap').style.visibility = '';
+  }
+
   exit() {
     const game = this.game;
     const tpl = this.templates[this.current];
@@ -420,12 +436,12 @@ export class Interiors {
       });
     }
 
-    // counter shop
-    if (tpl.counterAction && tpl.register &&
-        dist2d(player.pos.x, player.pos.z, tpl.register.x, tpl.register.z) < 2.4 &&
-        game.state.mode === 'play' && !tpl.keeper?.provoked) {
-      if (!this.shopCooldown || t - this.shopCooldown > 4) {
-        this.shopCooldown = t;
+    // counter shop — opens once per approach; must step away to reopen
+    if (tpl.counterAction && tpl.register) {
+      const atCounter = dist2d(player.pos.x, player.pos.z, tpl.register.x, tpl.register.z) < 2.4;
+      if (!atCounter) this.counterArmed = true;
+      if (atCounter && this.counterArmed && game.state.mode === 'play' && !tpl.keeper?.provoked) {
+        this.counterArmed = false;
         game.worldlife.openShop(tpl.counterAction);
       }
     }

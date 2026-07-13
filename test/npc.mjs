@@ -72,5 +72,33 @@ const medic = await page.evaluate(() => {
 console.log('medic dispatch:', JSON.stringify(medic),
   medic.spawned ? 'MEDIC OK' : 'MEDIC FAIL');
 
+// regression: panic() must reach the real game (not the <canvas id=game>) and
+// cops/goons must ragdoll on death (not sink to y=0.1)
+const bark = await page.evaluate(() => {
+  const g = window.__game.game;
+  let barked = false;
+  const orig = g.audio.bark.bind(g.audio);
+  g.audio.bark = (name, x, z) => { barked = true; };
+  const ped = g.peds.peds.find((p) => !p.dead && !p.panicked);
+  if (ped) { ped.panicked = false; ped.personality.civic = 0.1; for (let i=0;i<10 && !barked;i++){ ped.panicked=false; ped.panic(g.player.pos.x+5, g.player.pos.z); } }
+  g.audio.bark = orig;
+  return { barked, gameNotCanvas: typeof g.peds.peds[0].game?.audio === 'object' };
+});
+console.log('panic reaches game:', JSON.stringify(bark),
+  bark.barked && bark.gameNotCanvas ? 'BARK OK' : 'BARK FAIL');
+
+const copRag = await page.evaluate(() => {
+  const g = window.__game.game;
+  window.__game.setWanted(3);
+  window.__game.tick(6);
+  const cop = g.wanted.footCops.find((c) => !c.dead);
+  if (!cop) return { skip: true };
+  cop.damage(999, g, 'gun');
+  window.__game.tick(0.5);
+  return { hasRagdoll: !!cop.ragdoll, y: +cop.rig.group.position.y.toFixed(2) };
+});
+console.log('cop ragdoll:', JSON.stringify(copRag),
+  copRag.skip || copRag.hasRagdoll ? 'COP-RAG OK' : 'COP-RAG FAIL');
+
 console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 10).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();

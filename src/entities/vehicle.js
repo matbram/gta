@@ -148,20 +148,23 @@ export class Vehicle {
     }
 
     // lights: emissive add-ons placed from the bounding box
+    // track geometries we create so dispose() frees them (asset geometry is shared)
+    this._ownGeo = new Set();
+    const own = (geo) => { this._ownGeo.add(geo); return geo; };
     const W = S.w, L2 = S.l;
     this.headMat = new THREE.MeshLambertMaterial({ color: headlightOff, emissive: 0xfff2cc, emissiveIntensity: 0 });
     this.tailMat = new THREE.MeshLambertMaterial({ color: 0x551512, emissive: 0xff2a1a, emissiveIntensity: 0 });
     const ly = this.wheelR + S.h * 0.28;
     for (const sx of [-1, 1]) {
-      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.05), this.headMat);
+      const hl = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.1, 0.05)), this.headMat);
       hl.position.set(sx * (W / 2 - 0.32), ly, L2 / 2 - 0.04);
       g.add(hl);
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.05), this.tailMat);
+      const tl = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.1, 0.05)), this.tailMat);
       tl.position.set(sx * (W / 2 - 0.32), ly, -L2 / 2 + 0.04);
       g.add(tl);
     }
     if (this.type === 'taxi') {
-      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.28),
+      const sign = new THREE.Mesh(own(new THREE.BoxGeometry(0.6, 0.2, 0.28)),
         new THREE.MeshLambertMaterial({ color: 0xe8c84a, emissive: 0xe8c84a, emissiveIntensity: 0.25 }));
       sign.position.set(0, S.h + 0.12, 0);
       g.add(sign);
@@ -169,10 +172,10 @@ export class Vehicle {
     if (this.type === 'police') {
       this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
       this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x223377, emissive: 0x2244ff, emissiveIntensity: 0 });
-      const lb1 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.26), this.lightbarR);
+      const lb1 = new THREE.Mesh(own(new THREE.BoxGeometry(0.36, 0.12, 0.26)), this.lightbarR);
       lb1.position.set(-0.2, S.h + 0.06, -0.1);
       g.add(lb1);
-      const lb2 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.26), this.lightbarB);
+      const lb2 = new THREE.Mesh(own(new THREE.BoxGeometry(0.36, 0.12, 0.26)), this.lightbarB);
       lb2.position.set(0.2, S.h + 0.06, -0.1);
       g.add(lb2);
     }
@@ -494,8 +497,10 @@ export class Vehicle {
   dispose() {
     this.group.traverse((o) => {
       if (o.isMesh) {
-        // asset clones share geometry with the cached original — never free those
-        if (!this.fromAsset) o.geometry?.dispose();
+        // asset clones share geometry with the cached original, EXCEPT the
+        // per-instance light/sign boxes we build fresh — those we made and own
+        const ownGeo = !this.fromAsset || this._ownGeo?.has(o.geometry);
+        if (ownGeo) o.geometry?.dispose();
         if (o.material !== glassMatShared && o.material !== tireMatShared) o.material?.dispose();
       }
     });

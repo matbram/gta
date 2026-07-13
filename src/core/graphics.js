@@ -60,6 +60,10 @@ export class Graphics {
 
   disposeComposer() {
     if (this.composer) {
+      // EffectComposer.dispose() only frees its render targets, not the passes;
+      // dispose each pass's own GPU resources (bloom render targets, FXAA
+      // fsquad material, etc.) so quality changes don't leak.
+      for (const pass of this.composer.passes || []) pass.dispose?.();
       this.composer.dispose?.();
       this.composer = null;
     }

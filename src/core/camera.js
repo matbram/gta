@@ -18,6 +18,7 @@ export class CameraRig {
     this.baseFov = 62;
     this.fovKick = 0;
     this.shakeAmp = 0;
+    this.recoilPitch = 0;        // FP branch reads this before the damp/reset runs
     this.pos = new THREE.Vector3();
     this.look = new THREE.Vector3();
     this.smoothTarget = new THREE.Vector3();

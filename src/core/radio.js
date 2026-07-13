@@ -88,8 +88,23 @@ export class Radio {
     if (this.bus) this.bus.gain.setTargetAtTime(0, this.audio.now(), 0.1);
   }
 
+  // resume the current station after re-entering a vehicle — prefers the
+  // generated track, else the synth sequencer
+  resume() {
+    if (this.station < 0) return;
+    const track = this.trackFor(this.station);
+    if (this.audio.buffers?.has(track)) {
+      this.playing = true;
+      this.stopSynth();
+      this.startTrack(track);
+    } else this.start();
+  }
+
   start() {
     this.playing = true;
+    this.usingTrack = false;
+    // starting the synth sequencer means any generated track must stop first
+    if (this._trackNode) { const n = this._trackNode; try { n.src.stop(); } catch {} this._trackNode = null; }
     this.nextStep = 0;
     this.stepTime = this.audio.ctx.currentTime + 0.1;
     this.bus.gain.cancelScheduledValues(this.audio.ctx.currentTime);

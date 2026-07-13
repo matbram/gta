@@ -260,6 +260,9 @@ export class AudioEngine {
   // looped ambient bed, crossfaded by district/time (one active at a time)
   setAmbient(name) {
     if (!this.ctx) return;
+    // don't commit the name until the buffer exists (they decode async, so an
+    // early call would otherwise latch the name and stay silent all session)
+    if (name && !this.buffers?.has(name)) { this._ambientName = null; return; }
     if (this._ambientName === name) return;
     this._ambientName = name;
     // fade out old
@@ -269,7 +272,7 @@ export class AudioEngine {
       setTimeout(() => { try { old.src.stop(); } catch {} }, 1500);
       this._ambient = null;
     }
-    if (name && this.buffers?.has(name)) {
+    if (name) {
       const node = this.playBuffer(name, { gain: 0.0001, loop: true });
       if (node) { node.gain.gain.setTargetAtTime(0.28, this.now(), 0.8); this._ambient = node; }
     }

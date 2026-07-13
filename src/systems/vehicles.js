@@ -89,7 +89,7 @@ export class VehicleSystem {
     this.game.wanted?.releaseCruiser(v);
     this.game.audio?.carDoor();
     this.game.audio?.startEngine();
-    if (this.game.audio?.radio?.station >= 0) this.game.audio.radio.start();
+    if (this.game.audio?.radio?.station >= 0) this.game.audio.radio.resume();
     this.game.hud?.showVehicleName(v.spec.name);
     this.game.cameraRig.snapBehind(v.heading, 0.16);
     if (v.type === 'taxi') this.game.hud?.showToast('Press T to pick up fares.', 4);
@@ -293,6 +293,16 @@ export class VehicleSystem {
           this.game.particles?.puffSmoke(v.pos.x, v.pos.y + 1.6, v.pos.z, 0.08);
         }
       }
+      // cull orphaned alive vehicles: not the player's, not AI-owned (traffic /
+      // wanted / dispatch), not parked, not mission-held, far from the player.
+      // These are cars you jacked and abandoned, or spawned then left.
+      if (!v.dead && v !== player.vehicle && !v.aiControlled && !v.parked &&
+          !v.missionKeep && !v.missionDriven && !v.emergency && v.driver == null) {
+        const d = dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
+        v._orphanT = d > 240 ? (v._orphanT || 0) + dt : 0;
+        if (v._orphanT > 4) { this.remove(v); continue; }
+      }
+
       // wreck lifecycle: burn out, then clear the hulk away
       if (v.dead) {
         v.deadT = (v.deadT ?? 0) + dt;

@@ -129,17 +129,19 @@ export class Ped {
       : reactToThreat(this, d, directlyTargeted);
     this.panicked = true;
     this.stateT = 0;
+    // NOTE: use this.game (set every update) — a bare `game` here would resolve
+    // to the <canvas id="game"> element via named-global access, not the game.
     switch (reaction) {
-      case 'fight': this.state = 'fight'; this.bark(game, 'bark_backoff'); break;
-      case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); this.bark(game, 'bark_help'); break;
-      case 'film': this.state = 'film'; this.bark(game, 'bark_photo'); break;
-      case 'call': this.state = 'call'; this.callT = 0; this.bark(game, 'bark_help'); break;
-      default: this.state = 'flee'; this.bark(game, Math.random() < 0.5 ? 'bark_run' : 'bark_help');
+      case 'fight': this.state = 'fight'; this.bark('bark_backoff'); break;
+      case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); this.bark('bark_help'); break;
+      case 'film': this.state = 'film'; this.bark('bark_photo'); break;
+      case 'call': this.state = 'call'; this.callT = 0; this.bark('bark_help'); break;
+      default: this.state = 'flee'; this.bark(Math.random() < 0.5 ? 'bark_run' : 'bark_help');
     }
   }
 
-  bark(game, name) {
-    if (game && Math.random() < 0.6) game.audio?.bark(name, this.pos.x, this.pos.z);
+  bark(name) {
+    if (this.game && Math.random() < 0.6) this.game.audio?.bark(name, this.pos.x, this.pos.z);
   }
 
   damage(amount, game, source = 'player', impact = null) {
@@ -190,6 +192,7 @@ export class Ped {
   }
 
   update(dt, game) {
+    this.game = game;             // panic()/bark() reach the game through this
     if (this.dead) {
       if (this.ragdoll) this.ragdoll.update(dt);
       else this.rig.update(dt, 0);
