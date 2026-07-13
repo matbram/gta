@@ -231,10 +231,12 @@ export function generateCity(seed = 1337) {
   // ---------------------------------------------------------------- colliders (spatial hash)
   const BUCKET = 38;
   const buckets = new Map();
-  const boxes = [];   // {minX,minZ,maxX,maxZ,h,kind}
+  const boxes = [];   // {id,minX,minZ,maxX,maxZ,h,kind,owner}
+  let nextBoxId = 1;
+  let queryStamp = 0;
   function bucketKey(bx, bz) { return bx + '|' + bz; }
-  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building') {
-    const box = { minX, minZ, maxX, maxZ, h, kind };
+  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building', owner = null) {
+    const box = { id: nextBoxId++, minX, minZ, maxX, maxZ, h, kind, owner, _stamp: 0 };
     boxes.push(box);
     const b0x = Math.floor((minX + HALF) / BUCKET), b1x = Math.floor((maxX + HALF) / BUCKET);
     const b0z = Math.floor((minZ + HALF) / BUCKET), b1z = Math.floor((maxZ + HALF) / BUCKET);
@@ -246,13 +248,27 @@ export function generateCity(seed = 1337) {
     }
     return box;
   }
+  function removeBox(box) {
+    if (!box) return;
+    const b0x = Math.floor((box.minX + HALF) / BUCKET), b1x = Math.floor((box.maxX + HALF) / BUCKET);
+    const b0z = Math.floor((box.minZ + HALF) / BUCKET), b1z = Math.floor((box.maxZ + HALF) / BUCKET);
+    for (let bx = b0x; bx <= b1x; bx++) for (let bz = b0z; bz <= b1z; bz++) {
+      const arr = buckets.get(bucketKey(bx, bz));
+      if (!arr) continue;
+      const i = arr.indexOf(box);
+      if (i !== -1) arr.splice(i, 1);
+    }
+    const i = boxes.indexOf(box);
+    if (i !== -1) boxes.splice(i, 1);
+  }
   function queryColliders(x, z, r = 2) {
     const out = [];
+    const stamp = ++queryStamp;
     const b0x = Math.floor((x - r + HALF) / BUCKET), b1x = Math.floor((x + r + HALF) / BUCKET);
     const b0z = Math.floor((z - r + HALF) / BUCKET), b1z = Math.floor((z + r + HALF) / BUCKET);
     for (let bx = b0x; bx <= b1x; bx++) for (let bz = b0z; bz <= b1z; bz++) {
       const arr = buckets.get(bucketKey(bx, bz));
-      if (arr) for (const b of arr) if (!out.includes(b)) out.push(b);
+      if (arr) for (const b of arr) if (b._stamp !== stamp) { b._stamp = stamp; out.push(b); }
     }
     return out;
   }
@@ -263,8 +279,10 @@ export function generateCity(seed = 1337) {
   const doors = [];     // enterable shopfronts: {id, x, z, face} (face = outward z sign)
 
   function addBuilding(kind, style, x, z, w, d, h, district, collide = true) {
-    buildings.push({ kind, style, x, z, w, d, h, district });
-    if (collide) addBox(x - w / 2, z - d / 2, x + w / 2, z + d / 2, h);
+    const b = { kind, style, x, z, w, d, h, district, box: null };
+    buildings.push(b);
+    if (collide) b.box = addBox(x - w / 2, z - d / 2, x + w / 2, z + d / 2, h, 'building', b);
+    return b;
   }
 
   const cellRng = (c, salt) => new RNG(rand2i(c.i * 13 + salt, c.j * 31 + salt, seed + 77) * 4294967296);
@@ -595,7 +613,7 @@ export function generateCity(seed = 1337) {
     nodes, edges, cells,
     buildings, props, pois, doors,
     trafficLights, parkingSlots,
-    addBox, queryColliders, boxes,
+    addBox, removeBox, queryColliders, boxes,
     nearestNode, nearestEdgePoint,
     roadHalf,
   };

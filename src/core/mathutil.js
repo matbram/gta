@@ -57,6 +57,97 @@ export function circleVsAabb(x, z, r, minX, minZ, maxX, maxZ) {
   return { x, z: maxZ + r, nx: 0, nz: 1, depth: far + r };
 }
 
+// 2D oriented-box helpers. An OBB is (cx, cz, hw, hl, heading) where heading is
+// the yaw of the +length axis (matches vehicle.heading: forward = (sin h, cos h)).
+
+export function obbCorners(cx, cz, hw, hl, heading, out = new Array(8)) {
+  const s = Math.sin(heading), c = Math.cos(heading);
+  // length axis L = (s, c), width axis W = (c, -s)
+  const lx = s * hl, lz = c * hl;
+  const wx = c * hw, wz = -s * hw;
+  out[0] = cx + lx + wx; out[1] = cz + lz + wz;
+  out[2] = cx + lx - wx; out[3] = cz + lz - wz;
+  out[4] = cx - lx - wx; out[5] = cz - lz - wz;
+  out[6] = cx - lx + wx; out[7] = cz - lz + wz;
+  return out;
+}
+
+// project 4 corners onto axis (ax, az), return [min, max]
+function projectCorners(corners, ax, az) {
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < 8; i += 2) {
+    const p = corners[i] * ax + corners[i + 1] * az;
+    if (p < mn) mn = p;
+    if (p > mx) mx = p;
+  }
+  return [mn, mx];
+}
+
+// OBB vs axis-aligned box via SAT (4 axes). Returns null or {nx, nz, depth}
+// with the normal pointing from the AABB toward the OBB centre.
+export function obbVsAabb(cx, cz, hw, hl, heading, minX, minZ, maxX, maxZ) {
+  const s = Math.sin(heading), c = Math.cos(heading);
+  const corners = obbCorners(cx, cz, hw, hl, heading);
+  let bestDepth = Infinity, bestNx = 0, bestNz = 0;
+  const bcx = (minX + maxX) / 2, bcz = (minZ + maxZ) / 2;
+
+  // world axes: use the OBB corners vs box extents
+  {
+    let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity;
+    for (let i = 0; i < 8; i += 2) {
+      if (corners[i] < mnx) mnx = corners[i];
+      if (corners[i] > mxx) mxx = corners[i];
+      if (corners[i + 1] < mnz) mnz = corners[i + 1];
+      if (corners[i + 1] > mxz) mxz = corners[i + 1];
+    }
+    const oxDepth = Math.min(mxx, maxX) - Math.max(mnx, minX);
+    if (oxDepth <= 0) return null;
+    if (oxDepth < bestDepth) { bestDepth = oxDepth; bestNx = cx >= bcx ? 1 : -1; bestNz = 0; }
+    const ozDepth = Math.min(mxz, maxZ) - Math.max(mnz, minZ);
+    if (ozDepth <= 0) return null;
+    if (ozDepth < bestDepth) { bestDepth = ozDepth; bestNx = 0; bestNz = cz >= bcz ? 1 : -1; }
+  }
+
+  // OBB axes: project the AABB corners onto L and W
+  const aabb = [minX, minZ, maxX, minZ, maxX, maxZ, minX, maxZ];
+  const axes = [[s, c, hl], [c, -s, hw]];
+  for (const [ax, az, half] of axes) {
+    const co = cx * ax + cz * az;
+    const [mn, mx] = projectCorners(aabb, ax, az);
+    const depth = Math.min(co + half, mx) - Math.max(co - half, mn);
+    if (depth <= 0) return null;
+    if (depth < bestDepth) {
+      bestDepth = depth;
+      const sign = co >= (mn + mx) / 2 ? 1 : -1;
+      bestNx = ax * sign; bestNz = az * sign;
+    }
+  }
+  return { nx: bestNx, nz: bestNz, depth: bestDepth };
+}
+
+// OBB vs OBB via SAT (4 axes). a/b: {x, z, hw, hl, heading}. Returns null or
+// {nx, nz, depth} with the normal pointing from b toward a.
+export function obbVsObb(a, b) {
+  const ca = obbCorners(a.x, a.z, a.hw, a.hl, a.heading);
+  const cb = obbCorners(b.x, b.z, b.hw, b.hl, b.heading);
+  const sa = Math.sin(a.heading), caH = Math.cos(a.heading);
+  const sb = Math.sin(b.heading), cbH = Math.cos(b.heading);
+  const axes = [[sa, caH], [caH, -sa], [sb, cbH], [cbH, -sb]];
+  let bestDepth = Infinity, bestNx = 0, bestNz = 0;
+  for (const [ax, az] of axes) {
+    const [amn, amx] = projectCorners(ca, ax, az);
+    const [bmn, bmx] = projectCorners(cb, ax, az);
+    const depth = Math.min(amx, bmx) - Math.max(amn, bmn);
+    if (depth <= 0) return null;
+    if (depth < bestDepth) {
+      bestDepth = depth;
+      const sign = (a.x - b.x) * ax + (a.z - b.z) * az >= 0 ? 1 : -1;
+      bestNx = ax * sign; bestNz = az * sign;
+    }
+  }
+  return { nx: bestNx, nz: bestNz, depth: bestDepth };
+}
+
 export function formatMoney(n) {
   const sign = n < 0 ? '-' : '';
   return sign + '$' + Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');

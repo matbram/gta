@@ -103,7 +103,7 @@ class Game {
     await prog(100, 'done');
     this.showMenu();
 
-    this.clock = new THREE.Clock();
+    this.timer = new THREE.Timer();
     this.renderer.setAnimationLoop(() => this.frame());
 
     this.exposeDebug();
@@ -301,7 +301,8 @@ class Game {
 
   // ------------------------------------------------------------- main loop
   frame() {
-    let dt = clamp(this.clock.getDelta(), 0, 0.05);
+    this.timer.update();
+    let dt = clamp(this.timer.getDelta(), 0, 0.05);
     if (this.timeScale && this.timeScale !== 1) dt *= this.timeScale;   // weapon-wheel slow-mo
     if (this.hitStopT > 0) { this.hitStopT -= dt; dt *= 0.15; }         // melee hit-stop
     this.time += dt;
