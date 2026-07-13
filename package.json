@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "An original open-world action game for the browser - Three.js, zero asset files",
   "scripts": {
-    "start": "http-server -p 8080 -s",
+    "start": "node server.js",
     "test:boot": "node test/boot.mjs",
     "test:drive": "node test/drive.mjs",
     "test:combat": "node test/combat.mjs",

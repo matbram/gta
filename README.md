@@ -12,13 +12,14 @@ three radio stations) is synthesized live with WebAudio.
 ## Run it
 
 ```bash
-npm install        # vendors are committed; this just ensures three.js exists
-npx http-server -p 8080
+npm start          # zero-dependency Node server, respects $PORT (default 8080)
 # open http://localhost:8080
 ```
 
-Any static file server works — there is no build step. Chrome/Edge/Firefox,
-desktop recommended (keyboard + mouse).
+No build step and no runtime dependencies — `server.js` uses only Node
+built-ins, so it also works as-is on container platforms that run `npm start`.
+Any other static server works too (e.g. `npx http-server -p 8080`).
+Chrome/Edge/Firefox, desktop recommended (keyboard + mouse).
 
 ## The game
 
