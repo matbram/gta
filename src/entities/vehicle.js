@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { clamp, damp, lerp, obbVsAabb, wrapAngle } from '../core/mathutil.js';
+import { buildVehicleMesh, SHARED_MATS, SHARED_GEOS } from './vehiclemesh.js';
 
 // All vehicle names are original.
 export const VEHICLE_TYPES = {
@@ -18,23 +19,11 @@ export const VEHICLE_TYPES = {
   firetruck: { name: 'BFD Engine 3', w: 2.4, l: 7.6, h: 2.9, maxSpeed: 27, accel: 7, grip: 6.5, steer: 1.7, mass: 2.6, colors: [0xb02318] },
 };
 
-const glassMatShared = new THREE.MeshLambertMaterial({ color: 0x1a2732 });
-const tireMatShared = new THREE.MeshLambertMaterial({ color: 0x14161a });
-const headlightOff = new THREE.Color(0xd8d8c8);
-
 let nextVehicleId = 1;
 
-// which fetched model each type uses (fallback: procedural boxes)
-const MODEL_FOR_TYPE = {
-  sedan: 'car_sedan', taxi: 'car_taxi', police: 'car_police',
-  pickup: 'vehicle-truck-red', moto: 'vehicle-motorcycle', sports: 'sports',
-};
-// civilian sedans get visual variety from sibling models
-const SEDAN_VARIANTS = ['car_sedan', 'car_hatchback', 'car_stationwagon'];
-
-// game-wide asset registry, set once at boot by main.js
-export let vehicleAssets = null;
-export function setVehicleAssets(a) { vehicleAssets = a; }
+// clearcoat paint needs the env map — main.js turns it off on low quality
+let paintPhysical = true;
+export function setPaintQuality(physical) { paintPhysical = !!physical; }
 
 export class Vehicle {
   constructor(typeKey, city, scene, colorOverride = null) {
@@ -73,265 +62,20 @@ export class Vehicle {
   }
 
   buildMesh(colorOverride) {
-    if (this.buildFromAsset(colorOverride)) return;
-    this.buildProcedural(colorOverride);
-  }
-
-  // ---- GLB path -------------------------------------------------------
-  buildFromAsset(colorOverride) {
-    if (!vehicleAssets) return false;
-    let key = MODEL_FOR_TYPE[this.type];
-    if (this.type === 'sedan') {
-      const pool = SEDAN_VARIANTS.filter((k) => vehicleAssets.has(k));
-      if (pool.length) key = pool[Math.floor(Math.random() * pool.length)];
-    }
-    if (!key || !vehicleAssets.has(key)) return false;
-
     const S = this.spec;
-    const model = vehicleAssets.model(key);
-    if (!model) return false;
-
-    // scale to spec length, sit wheels on y=0, face +z
-    model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const modelLen = Math.max(size.x, size.z);
-    const s = S.l / modelLen;
-    model.scale.setScalar(s);
-    // kenney/kaykit vehicles face +z already; ferrari faces +z too
-    model.updateMatrixWorld(true);
-    const box2 = new THREE.Box3().setFromObject(model);
-    model.position.y = -box2.min.y;
-    if (size.x > size.z) model.rotation.y = Math.PI / 2;   // length was along x
-
-    const g = new THREE.Group();
-    g.add(model);
-
-    // clone materials so tint/damage don't leak across instances; find paint
     const color = colorOverride ?? S.colors[Math.floor(Math.random() * S.colors.length)];
     this.baseColor = new THREE.Color(color);
-    this.bodyMat = null;
-    const tintable = ['main', 'body', 'paint', 'colormap', 'citybits'];
-    let biggest = null, biggestCount = 0;
-    model.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = true;
-      o.material = o.material.clone();
-      o.material.envMapIntensity = 0.45;    // keep windows from nuking to white
-      const n = (o.material.name || o.name || '').toLowerCase();
-      const count = o.geometry?.attributes?.position?.count ?? 0;
-      if (tintable.some((t) => n.includes(t)) && count > biggestCount) { biggest = o; biggestCount = count; }
-      else if (!biggest && count > biggestCount) { biggest = o; biggestCount = count; }
-    });
-    if (biggest) {
-      this.bodyMat = biggest.material;
-      // atlas-textured models tint multiplicatively — keep it gentle
-      if (this.type !== 'police' && this.type !== 'taxi' && colorOverride !== null) {
-        this.bodyMat.color = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45);
-      }
-    } else {
-      this.bodyMat = new THREE.MeshLambertMaterial({ color });
-    }
-
-    // wheels: nodes named *wheel*; front wheels get a steering pivot
-    this.wheels = [];
-    this.frontPivots = [];
-    const wheelNodes = [];
-    model.traverse((o) => { if (/wheel/i.test(o.name)) wheelNodes.push(o); });
-    this.wheelR = 0.34 * (S.l / 4.5);
-    for (const w of wheelNodes) {
-      const isFront = /front/i.test(w.name);
-      if (isFront) {
-        // wrap in a pivot group at the wheel's position for steering
-        const pivot = new THREE.Group();
-        w.parent.add(pivot);
-        pivot.position.copy(w.position);
-        w.position.set(0, 0, 0);
-        pivot.add(w);
-        this.frontPivots.push(pivot);
-      }
-      this.wheels.push(w);
-    }
-
-    // lights: emissive add-ons placed from the bounding box
-    // track geometries we create so dispose() frees them (asset geometry is shared)
-    this._ownGeo = new Set();
-    const own = (geo) => { this._ownGeo.add(geo); return geo; };
-    const W = S.w, L2 = S.l;
-    this.headMat = new THREE.MeshLambertMaterial({ color: headlightOff, emissive: 0xfff2cc, emissiveIntensity: 0 });
-    this.tailMat = new THREE.MeshLambertMaterial({ color: 0x551512, emissive: 0xff2a1a, emissiveIntensity: 0 });
-    const ly = this.wheelR + S.h * 0.28;
-    for (const sx of [-1, 1]) {
-      const hl = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.1, 0.05)), this.headMat);
-      hl.position.set(sx * (W / 2 - 0.32), ly, L2 / 2 - 0.04);
-      g.add(hl);
-      const tl = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.1, 0.05)), this.tailMat);
-      tl.position.set(sx * (W / 2 - 0.32), ly, -L2 / 2 + 0.04);
-      g.add(tl);
-    }
-    if (this.type === 'taxi') {
-      const sign = new THREE.Mesh(own(new THREE.BoxGeometry(0.6, 0.2, 0.28)),
-        new THREE.MeshLambertMaterial({ color: 0xe8c84a, emissive: 0xe8c84a, emissiveIntensity: 0.25 }));
-      sign.position.set(0, S.h + 0.12, 0);
-      g.add(sign);
-    }
-    if (this.type === 'police') {
-      this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
-      this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x223377, emissive: 0x2244ff, emissiveIntensity: 0 });
-      const lb1 = new THREE.Mesh(own(new THREE.BoxGeometry(0.36, 0.12, 0.26)), this.lightbarR);
-      lb1.position.set(-0.2, S.h + 0.06, -0.1);
-      g.add(lb1);
-      const lb2 = new THREE.Mesh(own(new THREE.BoxGeometry(0.36, 0.12, 0.26)), this.lightbarB);
-      lb2.position.set(0.2, S.h + 0.06, -0.1);
-      g.add(lb2);
-    }
-
-    this.fromAsset = true;
-    this.group = g;
-    this.scene.add(g);
-    return true;
-  }
-
-  // ---- procedural fallback ---------------------------------------------
-  buildProcedural(colorOverride) {
-    const S = this.spec;
-    const g = new THREE.Group();
-    const color = colorOverride ?? S.colors[Math.floor(Math.random() * S.colors.length)];
-    this.bodyMat = new THREE.MeshLambertMaterial({ color });
-    this.baseColor = new THREE.Color(color);
-
-    const W = S.w, L = S.l, H = S.h;
-    const wheelR = this.type === 'moto' ? 0.34 : 0.36;
-    this.wheelR = wheelR;
-
-    if (this.type === 'moto') {
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 1.5), this.bodyMat);
-      frame.position.y = wheelR + 0.25;
-      frame.castShadow = true;
-      g.add(frame);
-      const tank = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.6), this.bodyMat);
-      tank.position.set(0, wheelR + 0.5, 0.25);
-      g.add(tank);
-      const bars = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.08), tireMatShared);
-      bars.position.set(0, wheelR + 0.72, 0.72);
-      g.add(bars);
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.55), tireMatShared);
-      seat.position.set(0, wheelR + 0.52, -0.3);
-      g.add(seat);
-      this.wheels = [];
-      for (const zOff of [0.82, -0.82]) {
-        const wm = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, 0.14, 12), tireMatShared);
-        wm.rotation.z = Math.PI / 2;
-        wm.position.set(0, wheelR, zOff);
-        wm.castShadow = true;
-        g.add(wm);
-        this.wheels.push(wm);
-      }
-    } else {
-      // body: lower slab + cabin
-      const bodyH = H * 0.52, cabinH = H * 0.46;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(W, bodyH, L), this.bodyMat);
-      body.position.y = wheelR + bodyH / 2 - 0.05;
-      body.castShadow = true;
-      g.add(body);
-      this.bodyMesh = body;
-
-      const isBoxy = ['van', 'bus', 'ambulance', 'pickup'].includes(this.type);
-      const cabinL = this.type === 'pickup' ? L * 0.42 : isBoxy ? L * 0.9 : L * 0.55;
-      const cabinZ = this.type === 'pickup' ? L * 0.12 : 0;
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(W * 0.88, cabinH, cabinL), this.bodyMat);
-      cabin.position.set(0, wheelR + bodyH + cabinH / 2 - 0.08, cabinZ);
-      cabin.castShadow = true;
-      g.add(cabin);
-
-      // glass band around cabin
-      const glass = new THREE.Mesh(new THREE.BoxGeometry(W * 0.9, cabinH * 0.55, cabinL * 0.98), glassMatShared);
-      glass.position.copy(cabin.position);
-      glass.position.y += cabinH * 0.1;
-      g.add(glass);
-
-      // wheels
-      this.wheels = [];
-      const wx = W / 2 - 0.12, wz = L * 0.32;
-      for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-        const wm = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, 0.24, 12), tireMatShared);
-        wm.rotation.z = Math.PI / 2;
-        wm.position.set(sx * wx, wheelR, sz * wz);
-        wm.castShadow = true;
-        g.add(wm);
-        this.wheels.push(wm);
-      }
-
-      // head/tail lights
-      this.headMat = new THREE.MeshLambertMaterial({ color: headlightOff, emissive: 0xfff2cc, emissiveIntensity: 0 });
-      this.tailMat = new THREE.MeshLambertMaterial({ color: 0x551512, emissive: 0xff2a1a, emissiveIntensity: 0 });
-      for (const sx of [-1, 1]) {
-        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), this.headMat);
-        hl.position.set(sx * (W / 2 - 0.3), wheelR + bodyH * 0.6, L / 2 + 0.02);
-        g.add(hl);
-        const tl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.06), this.tailMat);
-        tl.position.set(sx * (W / 2 - 0.3), wheelR + bodyH * 0.6, -L / 2 - 0.02);
-        g.add(tl);
-      }
-
-      // type extras
-      if (this.type === 'taxi') {
-        const sign = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 0.3),
-          new THREE.MeshLambertMaterial({ color: 0xe8c84a, emissive: 0xe8c84a, emissiveIntensity: 0.25 }));
-        sign.position.set(0, wheelR + bodyH + cabinH + 0.06, 0);
-        g.add(sign);
-      }
-      if (this.type === 'police') {
-        this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
-        this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x223377, emissive: 0x2244ff, emissiveIntensity: 0 });
-        const lb1 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.3), this.lightbarR);
-        lb1.position.set(-0.24, wheelR + bodyH + cabinH + 0.02, 0);
-        g.add(lb1);
-        const lb2 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.3), this.lightbarB);
-        lb2.position.set(0.24, wheelR + bodyH + cabinH + 0.02, 0);
-        g.add(lb2);
-        // white doors
-        const stripe = new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, bodyH * 0.5, L * 0.3),
-          new THREE.MeshLambertMaterial({ color: 0xe8e4dc }));
-        stripe.position.set(0, wheelR + bodyH / 2, 0.2);
-        g.add(stripe);
-      }
-      if (this.type === 'ambulance') {
-        const stripe = new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, 0.3, L * 0.85),
-          new THREE.MeshLambertMaterial({ color: 0xb03a2e }));
-        stripe.position.set(0, wheelR + bodyH * 0.75, -0.2);
-        g.add(stripe);
-      }
-      if (this.type === 'bus') {
-        // windows along the side
-        const band = new THREE.Mesh(new THREE.BoxGeometry(W + 0.04, 0.8, L * 0.86), glassMatShared);
-        band.position.set(0, wheelR + bodyH + cabinH * 0.4, 0);
-        g.add(band);
-      }
-      if (this.type === 'firetruck') {
-        // silver ladder on the roof + white stripe
-        const ladder = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, L * 0.62),
-          new THREE.MeshLambertMaterial({ color: 0xb8bec4 }));
-        ladder.position.set(0, wheelR + bodyH + cabinH + 0.12, -L * 0.08);
-        g.add(ladder);
-        const stripe = new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, 0.24, L * 0.8),
-          new THREE.MeshLambertMaterial({ color: 0xe8e4dc }));
-        stripe.position.set(0, wheelR + bodyH * 0.65, 0);
-        g.add(stripe);
-        this.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
-        this.lightbarB = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff4422, emissiveIntensity: 0 });
-        const lb1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.28), this.lightbarR);
-        lb1.position.set(-0.25, wheelR + bodyH + cabinH + 0.05, L * 0.32);
-        g.add(lb1);
-        const lb2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.28), this.lightbarB);
-        lb2.position.set(0.25, wheelR + bodyH + cabinH + 0.05, L * 0.32);
-        g.add(lb2);
-      }
-    }
-
-    g.traverse((o) => { if (o.isMesh) o.receiveShadow = false; });
-    this.group = g;
-    this.scene.add(g);
+    const built = buildVehicleMesh(this.type, S, color, { physical: paintPhysical });
+    this.group = built.group;
+    this.bodyMat = built.bodyMat;
+    this.bodyMesh = built.bodyMesh ?? null;
+    this.wheels = built.wheels;
+    this.frontPivots = built.frontPivots;
+    this.wheelR = built.wheelR;
+    this.headMat = built.headMat;
+    this.tailMat = built.tailMat;
+    if (built.lightbarR) { this.lightbarR = built.lightbarR; this.lightbarB = built.lightbarB; }
+    this.scene.add(this.group);
   }
 
   get maxHealthSpeedFactor() { return clamp(this.health / 100, 0.45, 1); }
@@ -479,19 +223,11 @@ export class Vehicle {
     const pitch = Math.atan2(behind - ahead, 3.2);
     this.group.rotation.set(pitch, this.heading, this.type === 'moto' ? -this.steerVis * clamp(Math.abs(this.speed) / 12, 0, 1) * 0.45 : 0, 'YXZ');
 
-    // wheels spin + front steer
+    // wheels spin + front steering pivots
     const spin = this.speed * dt / this.wheelR;
-    if (this.fromAsset) {
-      for (const w of this.wheels) w.rotation.x += spin;
-      for (const p of this.frontPivots) p.rotation.y = this.steerVis * 0.45;
-    } else {
-      for (let i = 0; i < this.wheels.length; i++) {
-        const w = this.wheels[i];
-        w.rotation.x += spin;
-        if (this.type !== 'moto' && i < 2) w.rotation.y = this.steerVis * 0.45;
-        if (this.type === 'moto' && i === 0) w.rotation.y = this.steerVis * 0.5;
-      }
-    }
+    for (const w of this.wheels) w.rotation.x += spin;
+    const steer = this.steerVis * (this.type === 'moto' ? 0.5 : 0.45);
+    for (const p of this.frontPivots) p.rotation.y = steer;
   }
 
   setNightLights(on) {
@@ -511,11 +247,8 @@ export class Vehicle {
   dispose() {
     this.group.traverse((o) => {
       if (o.isMesh) {
-        // asset clones share geometry with the cached original, EXCEPT the
-        // per-instance light/sign boxes we build fresh — those we made and own
-        const ownGeo = !this.fromAsset || this._ownGeo?.has(o.geometry);
-        if (ownGeo) o.geometry?.dispose();
-        if (o.material !== glassMatShared && o.material !== tireMatShared) o.material?.dispose();
+        if (!SHARED_GEOS.has(o.geometry)) o.geometry?.dispose();
+        if (!SHARED_MATS.has(o.material)) o.material?.dispose();
       }
     });
     this.group.removeFromParent();
