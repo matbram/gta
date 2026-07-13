@@ -142,6 +142,8 @@ class Game {
       this.parkedCars = new parked.ParkedCars(this);
       const dispatch = await import('./systems/dispatch.js');
       this.dispatch = new dispatch.Dispatch(this);
+      const interiors = await import('./systems/interiors.js');
+      this.interiors = new interiors.Interiors(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -354,6 +356,7 @@ class Game {
     this.combat?.update(dt, aiming);
     this.wanted?.update(dt);
     this.dispatch?.update(dt);
+    this.interiors?.update(dt);
     this.missions?.update(dt);
     this.worldlife?.update(dt);
     this.particles?.update(dt);
@@ -367,8 +370,9 @@ class Game {
       driving: !!veh, speed, aimMode: aiming,
     });
 
-    // zone popups
-    const zone = districtName(this.city.districtAt(this.player.pos.x, this.player.pos.z));
+    // zone popups (streets only)
+    const zone = this.interiors?.current ? this.state.zone
+      : districtName(this.city.districtAt(this.player.pos.x, this.player.pos.z));
     if (zone && zone !== this.state.zone) {
       this.state.zone = zone;
       this.hud.showZone(zone);
@@ -429,6 +433,7 @@ class Game {
       drawCalls: () => game.renderer.info.render.calls,
       // fast-forward simulation without rendering (headless tests)
       tick: (seconds, step = 1 / 30) => {
+        game.headless = true;    // interiors transition instantly under the sim clock
         const n = Math.floor(seconds / step);
         for (let i = 0; i < n; i++) {
           game.time += step;

@@ -408,13 +408,8 @@ export class WorldLife {
       if (m.cooldown > 0 || game.player.vehicle || game.player.dead || game.state.mode !== 'play') continue;
       if (dist2d(p.x, p.z, m.x, m.z) < 1.7) {
         m.cooldown = 3;
-        if (m.kind === 'safehouse') {
-          game.player.heal(100);
-          const ok = game.save?.save();
-          game.hud.showToast(ok ? 'Game saved. You feel rested.' : 'Rested — but saving failed (storage blocked).', 3.5);
-          game.audio?.pickup();
-        } else if (m.kind === 'gunshop') this.openShop('gunshop');
-        else if (m.kind === 'food') this.openShop('food');
+        // gun shop / food / safehouse entrances are handled by the interiors
+        // system now — these markers remain as map blips only
       }
     }
 

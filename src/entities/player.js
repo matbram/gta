@@ -29,6 +29,7 @@ export class Player {
     this.dead = false;
 
     this.vehicle = null;           // set by vehicle system when driving
+    this.interiorY = null;         // interiors override terrain height
     this.aiming = false;
     this.speed2d = 0;
 
@@ -53,7 +54,7 @@ export class Player {
         if (!blocked) { fx = tx; fz = tz; break outer; }
       }
     }
-    this.pos.set(fx, this.city.groundHeight(fx, fz), fz);
+    this.pos.set(fx, this.interiorY ?? this.city.groundHeight(fx, fz), fz);
     this.vel.set(0, 0, 0);
     this.heading = heading;
     this.rig.group.visible = true;
@@ -102,8 +103,8 @@ export class Player {
       mx /= len; mz /= len;
     }
 
-    const ground = this.city.groundHeight(this.pos.x, this.pos.z);
-    const inWater = ground < this.city.WATER_Y - 0.15;
+    const ground = this.interiorY ?? this.city.groundHeight(this.pos.x, this.pos.z);
+    const inWater = this.interiorY == null && ground < this.city.WATER_Y - 0.15;
 
     // --- swimming ---
     if (inWater && this.pos.y <= this.city.WATER_Y + 0.4) {
@@ -150,7 +151,7 @@ export class Player {
     this.pos.z += this.vel.z * dt;
     this.pos.y += this.vel.y * dt;
 
-    const g2 = this.city.groundHeight(this.pos.x, this.pos.z);
+    const g2 = this.interiorY ?? this.city.groundHeight(this.pos.x, this.pos.z);
     if (this.pos.y <= g2) {
       if (this.vel.y < -13) this.damage((-this.vel.y - 13) * 6, 'fall');
       this.pos.y = g2;
@@ -199,10 +200,12 @@ export class Player {
         }
       }
     }
-    // world bounds
-    const lim = this.city.HALF - 6;
-    this.pos.x = clamp(this.pos.x, -lim, lim);
-    this.pos.z = clamp(this.pos.z, -lim, lim);
+    // world bounds (not while inside an interior room)
+    if (this.interiorY == null) {
+      const lim = this.city.HALF - 6;
+      this.pos.x = clamp(this.pos.x, -lim, lim);
+      this.pos.z = clamp(this.pos.z, -lim, lim);
+    }
   }
 
   syncRig() {

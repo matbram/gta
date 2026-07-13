@@ -223,6 +223,7 @@ export function generateCity(seed = 1337) {
         x0, z0, x1, z1,
         lot: { x0: x0 + insetW, z0: z0 + insetN, x1: x1 - insetE, z1: z1 - insetS },
         hasRoad: rN || rS || rW || rE,
+        rN, rS, rW, rE,
       });
     }
   }
@@ -259,6 +260,7 @@ export function generateCity(seed = 1337) {
   // ---------------------------------------------------------------- buildings & props
   const buildings = []; // {kind, style, x, z, w, d, h, district}   axis-aligned
   const props = [];     // {kind, x, z, rot, s}
+  const doors = [];     // enterable shopfronts: {id, x, z, face} (face = outward z sign)
 
   function addBuilding(kind, style, x, z, w, d, h, district, collide = true) {
     buildings.push({ kind, style, x, z, w, d, h, district });
@@ -302,12 +304,14 @@ export function generateCity(seed = 1337) {
         for (const seg of rows) {
           const d = r.float(12, Math.min(20, ld * 0.42));
           const h = r.float(8, c.district === 'oldtown' ? 17 : 24);
-          // north strip
+          // north strip — enterable store door on the street face
           addBuilding('block', r.int(0, 3), seg.x, lot.z0 + d / 2, seg.w, d, h, c.district);
+          if (c.rN) doors.push({ id: doors.length, x: seg.x, z: lot.z0 - 0.6, face: -1 });
           // south strip (sometimes)
           if (ld > 34 && r.chance(0.85)) {
             const d2 = r.float(12, Math.min(20, ld * 0.42));
             addBuilding('block', r.int(0, 3), seg.x, lot.z1 - d2 / 2, seg.w, d2, r.float(8, 20), c.district);
+            if (c.rS) doors.push({ id: doors.length, x: seg.x, z: lot.z1 + 0.6, face: 1 });
           }
         }
         if (r.chance(0.4)) props.push({ kind: 'tree', x: cx, z: cz, rot: r.float(0, 6.28), s: r.float(0.8, 1.2) });
@@ -589,7 +593,7 @@ export function generateCity(seed = 1337) {
     landAt, districtAt, groundHeight, shoreDepth, hillMask,
     H, V, nodeX, nodeZ,
     nodes, edges, cells,
-    buildings, props, pois,
+    buildings, props, pois, doors,
     trafficLights, parkingSlots,
     addBox, queryColliders, boxes,
     nearestNode, nearestEdgePoint,

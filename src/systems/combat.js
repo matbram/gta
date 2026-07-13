@@ -314,6 +314,9 @@ export class CombatSystem {
       if (goon.dead) continue;
       consider(sphereHit(goon.pos.x, goon.pos.y + 1.0, goon.pos.z, 0.55), 'goon', goon);
     }
+    for (const keeper of game.interiors?.keepers?.() || []) {
+      consider(sphereHit(keeper.pos.x, keeper.pos.y + 1.0, keeper.pos.z, 0.55), 'goon', keeper);
+    }
     for (const v of game.vehicles?.vehicles || []) {
       if (v === game.player.vehicle) continue;
       consider(sphereHit(v.pos.x, v.pos.y + 0.8, v.pos.z, v.radius + 0.35), 'vehicle', v);

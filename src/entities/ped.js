@@ -49,7 +49,7 @@ export class Ped {
   }
 
   place(x, z) {
-    this.pos.set(x, this.city.groundHeight(x, z), z);
+    this.pos.set(x, this.interiorY ?? this.city.groundHeight(x, z), z);
     this.homeX = x;
     this.homeZ = z;
     this.pickWanderTarget();
@@ -310,7 +310,7 @@ export class Ped {
       this.pos.z -= mz * 2;
       this.pickWanderTarget();
     }
-    this.pos.y = this.city.groundHeight(this.pos.x, this.pos.z);
+    this.pos.y = this.interiorY ?? this.city.groundHeight(this.pos.x, this.pos.z);
   }
 
   syncRig() {
