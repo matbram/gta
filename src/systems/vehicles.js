@@ -81,8 +81,9 @@ export class VehicleSystem {
     v.driver = 'player';
     v.aiControlled = false;
     v.missionDriven = false;
+    v.parked = false;
     player.vehicle = v;
-    player.setVisible(false);
+    player.rig.setAnim('drive');
     player.pos.set(v.pos.x, v.pos.y, v.pos.z);
     this.game.traffic?.releaseVehicle(v);
     this.game.wanted?.releaseCruiser(v);
@@ -146,6 +147,11 @@ export class VehicleSystem {
       } else {
         v.updatePhysics(dt, this.playerControl);
         player.pos.set(v.pos.x, v.pos.y, v.pos.z);
+        // visible seated driver
+        player.rig.group.visible = true;
+        player.rig.group.position.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
+        player.rig.group.rotation.y = v.heading;
+        player.rig.update(dt, 0);
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;
         // engine audio
         game.audio?.setEngine(clamp(Math.abs(v.speed) / v.spec.maxSpeed, 0, 1), this.playerControl.throttle > 0);

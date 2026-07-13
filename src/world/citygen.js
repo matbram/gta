@@ -395,18 +395,128 @@ export function generateCity(seed = 1337) {
     }
   }
 
-  // street lamps + palms along arterial roads
+  // street furniture + greenery along every road (reference look: green streets)
+  const TREE_DISTRICTS = { crown: 0.5, oldtown: 0.6, midtown: 0.55, suburbs: 0.85, heights: 0.5, park: 0.9, docks: 0.15, farm: 0.3, beach: 0 };
   for (const e of edges) {
-    if (!e.artery) continue;
-    const beach = districtAt((e.a.x + e.b.x) / 2, (e.a.z + e.b.z) / 2) === 'beach';
-    const off = roadHalf(true) + 1.6;
-    for (let t = 0.2; t < 0.9; t += 0.3) {
-      const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
-      const side = t < 0.5 ? 1 : -1;
-      const px = e.horizontal ? x : x + off * side;
-      const pz = e.horizontal ? z + off * side : z;
-      if (!landAt(px, pz)) continue;
-      props.push({ kind: beach ? 'palm' : 'lamp', x: px, z: pz, rot: 0, s: 1 });
+    const mx = (e.a.x + e.b.x) / 2, mz = (e.a.z + e.b.z) / 2;
+    const dist = districtAt(mx, mz);
+    const beach = dist === 'beach';
+    const lampOff = roadHalf(e.artery) + 1.6;
+    const treeOff = roadHalf(e.artery) + SIDEWALK + 1.8;
+
+    // lamps/palms on arterials (as before)
+    if (e.artery) {
+      for (let t = 0.2; t < 0.9; t += 0.3) {
+        const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
+        const side = t < 0.5 ? 1 : -1;
+        const px = e.horizontal ? x : x + lampOff * side;
+        const pz = e.horizontal ? z + lampOff * side : z;
+        if (!landAt(px, pz)) continue;
+        props.push({ kind: beach ? 'palm' : 'lamp', x: px, z: pz, rot: 0, s: 1 });
+      }
+    }
+
+    // street trees / palms lining both sides
+    const treeDens = TREE_DISTRICTS[dist] ?? 0.3;
+    if (treeDens > 0.05) {
+      for (let t = 0.14; t < 0.92; t += 0.19) {
+        for (const side of [-1, 1]) {
+          if (rand2i(e.id * 17 + Math.round(t * 100), side * 3, seed + 41) > treeDens) continue;
+          const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
+          const px = e.horizontal ? x : x + treeOff * side;
+          const pz = e.horizontal ? z + treeOff * side : z;
+          if (!landAt(px, pz)) continue;
+          const palmy = dist === 'crown' || dist === 'midtown'
+            ? rand2i(e.id, side * 7, seed + 43) < 0.35 : false;
+          props.push({
+            kind: beach || palmy ? 'palm' : 'tree',
+            x: px, z: pz, rot: rand2i(e.id, side, seed + 44) * 6.28,
+            s: 0.85 + rand2i(e.id * 3, side, seed + 45) * 0.4,
+          });
+        }
+      }
+    }
+
+    // beach palms line the shore road densely
+    if (beach) {
+      for (let t = 0.1; t < 0.95; t += 0.13) {
+        const side = rand2i(e.id, Math.round(t * 50), seed + 46) < 0.5 ? 1 : -1;
+        const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
+        const px = e.horizontal ? x : x + treeOff * side;
+        const pz = e.horizontal ? z + treeOff * side : z;
+        if (landAt(px, pz)) props.push({ kind: 'palm', x: px, z: pz, rot: t * 20, s: 0.9 + rand2i(e.id, t * 99 | 0, seed + 47) * 0.5 });
+      }
+    }
+  }
+
+  // sidewalk clutter: hydrants near intersections, trash by shopfronts,
+  // planters downtown, hedges along suburb lots, dumpsters in docks/midtown
+  for (const n of nodes.values()) {
+    if (rand2i(n.i, n.j, seed + 51) < 0.3 && n.edges.length >= 3) {
+      const off = roadHalf(true) + 1.2;
+      props.push({ kind: 'hydrant', x: n.x + off, z: n.z + off, rot: 0, s: 1 });
+    }
+  }
+  for (const c of cells) {
+    const r2 = cellRng(c, 9);
+    if ((c.district === 'oldtown' || c.district === 'midtown') && c.hasRoad) {
+      if (r2.chance(0.6)) props.push({ kind: 'trash', x: c.lot.x0 + r2.float(1, 4), z: c.lot.z0 - 1.6, rot: 0, s: 1 });
+      if (r2.chance(0.3)) {
+        const dx = c.lot.x1 - 2, dz = c.lot.z1 - 2.5;
+        props.push({ kind: 'dumpster', x: dx, z: dz, rot: r2.chance(0.5) ? 0 : Math.PI / 2, s: 1 });
+        addBox(dx - 1.2, dz - 0.8, dx + 1.2, dz + 0.8, 1.4, 'prop');
+      }
+    }
+    if (c.district === 'crown' && c.hasRoad && r2.chance(0.5)) {
+      props.push({ kind: 'planter', x: (c.lot.x0 + c.lot.x1) / 2, z: c.lot.z0 - 1.8, rot: 0, s: 1 });
+    }
+    if (c.district === 'suburbs' && r2.chance(0.55)) {
+      // hedge row along the lot front
+      const n = Math.floor((c.lot.x1 - c.lot.x0) / 2.6);
+      for (let k = 0; k < Math.min(n, 8); k++) {
+        props.push({ kind: 'bush', x: c.lot.x0 + 1.5 + k * 2.6, z: c.lot.z0 + 0.6, rot: 0, s: 0.9 + r2.float(0, 0.4) });
+      }
+    }
+  }
+
+  // traffic lights at arterial×arterial intersections (rendered + obeyed by AI)
+  const trafficLights = [];
+  for (const n of nodes.values()) {
+    const arts = n.edges.filter((e) => e.artery);
+    if (arts.length < 3 || n.i % ART_EVERY !== 0 || n.j % ART_EVERY !== 0) continue;
+    const off = roadHalf(true) + 1.0;
+    // one pole per approach corner, facing incoming traffic
+    trafficLights.push({ node: n, x: n.x + off, z: n.z + off, rot: Math.PI });
+    trafficLights.push({ node: n, x: n.x - off, z: n.z - off, rot: 0 });
+    props.push({ kind: 'trafficlight', x: n.x + off, z: n.z + off, rot: Math.PI, s: 1 });
+    props.push({ kind: 'trafficlight', x: n.x - off, z: n.z - off, rot: 0, s: 1 });
+    n.hasSignal = true;
+  }
+
+  // curb parking slots (consumed by the parked-car system)
+  const parkingSlots = [];
+  {
+    const PARK_DIST = { crown: 0.22, oldtown: 0.3, midtown: 0.28, suburbs: 0.3, docks: 0.18, beach: 0.22, heights: 0.14, farm: 0.06 };
+    let slotId = 0;
+    for (const e of edges) {
+      const mx = (e.a.x + e.b.x) / 2, mz = (e.a.z + e.b.z) / 2;
+      const dens = PARK_DIST[districtAt(mx, mz)] ?? 0;
+      if (dens <= 0) continue;
+      const curb = roadHalf(e.artery) - 1.25;
+      for (let t = 0.12; t < 0.9; t += 0.105) {
+        for (const side of [-1, 1]) {
+          if (rand2i(e.id * 29 + Math.round(t * 200), side * 11, seed + 61) > dens) continue;
+          const x = lerp(e.a.x, e.b.x, t), z = lerp(e.a.z, e.b.z, t);
+          const px = e.horizontal ? x : x + curb * side;
+          const pz = e.horizontal ? z + curb * side : z;
+          if (!landAt(px, pz)) continue;
+          parkingSlots.push({
+            id: slotId++,
+            x: px, z: pz,
+            heading: e.horizontal ? Math.PI / 2 : 0,
+          });
+        }
+      }
     }
   }
 
@@ -480,6 +590,7 @@ export function generateCity(seed = 1337) {
     H, V, nodeX, nodeZ,
     nodes, edges, cells,
     buildings, props, pois,
+    trafficLights, parkingSlots,
     addBox, queryColliders, boxes,
     nearestNode, nearestEdgePoint,
     roadHalf,

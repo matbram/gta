@@ -182,7 +182,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w, 0.45, b.d), b.x, baseY + H + 0.22, b.z));
         // street-level shopfront band, slightly proud of the facade
         const sf = facadeBox(b.w + 0.5, 3.2, b.d + 0.5, FACADE_TILE, 3.2);
-        push(ck, 'shopfront', translated(sf, b.x, ground + 1.6, b.z));
+        push(ck, 'shopfront' + (Math.abs(Math.round(b.x * 7 + b.z * 3)) % 3), translated(sf, b.x, ground + 1.6, b.z));
         break;
       }
       case 'house': {
@@ -391,6 +391,46 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     const jib = new THREE.BoxGeometry(14, 1.1, 1.1); jib.translate(4.5, 18, 0);
     const counter = new THREE.BoxGeometry(3, 2, 2); counter.translate(-3.5, 17.6, 0);
     instanced(mergeGeometries([tower, jib, counter]), new THREE.MeshLambertMaterial({ color: 0xa85f2a }), byKind.crane);
+  }
+
+  // ---- kaykit street clutter (procedural stand-ins when assets are absent)
+  const glbOr = (key, list, opts, fallback) => {
+    if (!list?.length) return;
+    const m = assets?.model(key);
+    if (m) instancedFromModel(m, list, city, propGroup, opts);
+    else fallback?.();
+  };
+  glbOr('firehydrant', byKind.hydrant, { targetH: 0.75 }, () => {
+    const g = new THREE.CylinderGeometry(0.14, 0.16, 0.7, 8); g.translate(0, 0.35, 0);
+    instanced(g, new THREE.MeshLambertMaterial({ color: 0xb03a2e }), byKind.hydrant);
+  });
+  glbOr('trash_A', byKind.trash, { targetH: 0.9 }, () => {
+    const g = new THREE.CylinderGeometry(0.3, 0.26, 0.85, 8); g.translate(0, 0.42, 0);
+    instanced(g, darkGrey, byKind.trash);
+  });
+  glbOr('dumpster', byKind.dumpster, { targetW: 2.3 }, () => {
+    const g = new THREE.BoxGeometry(2.3, 1.3, 1.4); g.translate(0, 0.65, 0);
+    instanced(g, new THREE.MeshLambertMaterial({ color: 0x3e5e46 }), byKind.dumpster);
+  });
+  glbOr('bush', byKind.bush, { targetH: 1.0 }, () => {
+    const g = new THREE.IcosahedronGeometry(0.55, 1); g.translate(0, 0.5, 0);
+    instanced(g, leafMat, byKind.bush);
+  });
+  glbOr('trafficlight_A', byKind.trafficlight, { targetH: 5.6 }, () => {
+    const pole = new THREE.CylinderGeometry(0.08, 0.1, 5.4, 6); pole.translate(0, 2.7, 0);
+    const box = new THREE.BoxGeometry(0.3, 0.8, 0.25); box.translate(0, 5.0, 0);
+    instanced(mergeGeometries([pole, box]), darkGrey, byKind.trafficlight);
+  });
+  if (byKind.planter?.length) {
+    // concrete box + shrub
+    const boxG = new THREE.BoxGeometry(1.6, 0.5, 0.7); boxG.translate(0, 0.25, 0);
+    instanced(boxG, grey, byKind.planter);
+    const shrubModel = assets?.model('bush');
+    if (shrubModel) instancedFromModel(shrubModel, byKind.planter, city, propGroup, { targetH: 0.8, yOffset: 0.4 });
+    else {
+      const s = new THREE.IcosahedronGeometry(0.4, 1); s.translate(0, 0.75, 0);
+      instanced(s, leafMat, byKind.planter);
+    }
   }
 
   scene.add(propGroup);

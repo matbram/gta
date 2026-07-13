@@ -41,11 +41,51 @@ export class Ped {
   }
 
   pickWanderTarget() {
-    // walk along the nearest sidewalk direction: pick a point 15-40 m away
+    // sidewalk-following: aim for a point further along the current edge
+    if (this.sidewalk) { this.advanceSidewalkTarget(); return; }
     const a = Math.random() * Math.PI * 2;
     const d = 15 + Math.random() * 28;
     this.target.x = this.pos.x + Math.cos(a) * d;
     this.target.z = this.pos.z + Math.sin(a) * d;
+  }
+
+  // assign a sidewalk lane: edge + travel direction + side of the road
+  setSidewalk(edge, dir = Math.random() < 0.5 ? 1 : -1, side = Math.random() < 0.5 ? 1 : -1) {
+    this.sidewalk = { edge, dir, side };
+    this.advanceSidewalkTarget();
+  }
+
+  sidewalkPoint(edge, t, side) {
+    const off = edge.width / 2 + this.city.SIDEWALK * 0.55;
+    const x = edge.a.x + (edge.b.x - edge.a.x) * t;
+    const z = edge.a.z + (edge.b.z - edge.a.z) * t;
+    return edge.horizontal ? { x, z: z + off * side } : { x: x + off * side, z };
+  }
+
+  advanceSidewalkTarget() {
+    const sw = this.sidewalk;
+    if (!sw) return;
+    const e = sw.edge;
+    // project current position onto the edge
+    let t = e.horizontal
+      ? (this.pos.x - e.a.x) / (e.b.x - e.a.x)
+      : (this.pos.z - e.a.z) / (e.b.z - e.a.z);
+    t = Math.max(0, Math.min(1, t));
+    const tNext = t + sw.dir * 0.3;
+    if (tNext > 1 || tNext < 0) {
+      // reached the corner: pick a connecting edge, occasionally cross the street
+      const node = sw.dir > 0 ? e.b : e.a;
+      const options = node.edges.filter((n2) => n2 !== e);
+      const next = options.length ? options[Math.floor(Math.random() * options.length)] : e;
+      sw.edge = next;
+      sw.dir = next.a === node ? 1 : -1;
+      if (Math.random() < 0.18) sw.side = -sw.side;
+      const p = this.sidewalkPoint(next, sw.dir > 0 ? 0.15 : 0.85, sw.side);
+      this.target.x = p.x; this.target.z = p.z;
+    } else {
+      const p = this.sidewalkPoint(e, Math.max(0, Math.min(1, tNext)), sw.side);
+      this.target.x = p.x; this.target.z = p.z;
+    }
   }
 
   panic(fromX, fromZ) {

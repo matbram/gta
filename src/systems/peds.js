@@ -4,7 +4,7 @@
 import { Ped, randomLook } from '../entities/ped.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
 
-const TARGET_PEDS = 26;
+const TARGET_PEDS = 40;
 const SPAWN_MIN = 55, SPAWN_MAX = 150, DESPAWN = 230;
 
 export class PedSystem {
@@ -48,23 +48,27 @@ export class PedSystem {
 
   trySpawn(p) {
     const city = this.game.city;
-    // pick a random point on a road edge in the ring, offset to the sidewalk
-    const edge = city.edges[Math.floor(Math.random() * city.edges.length)];
-    const t = Math.random();
-    const ex = edge.a.x + (edge.b.x - edge.a.x) * t;
-    const ez = edge.a.z + (edge.b.z - edge.a.z) * t;
-    const side = Math.random() < 0.5 ? 1 : -1;
-    const off = edge.width / 2 + city.SIDEWALK * 0.5;
-    const x = edge.horizontal ? ex : ex + off * side;
-    const z = edge.horizontal ? ez + off * side : ez;
-    const d = dist2d(x, z, p.x, p.z);
-    if (d < SPAWN_MIN || d > SPAWN_MAX) return;
-    if (!city.landAt(x, z)) return;
-    if (Math.random() > this.densityAt(x, z)) return;
+    // sample several random edges — most are outside the spawn ring
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const edge = city.edges[Math.floor(Math.random() * city.edges.length)];
+      const t = Math.random();
+      const ex = edge.a.x + (edge.b.x - edge.a.x) * t;
+      const ez = edge.a.z + (edge.b.z - edge.a.z) * t;
+      const side = Math.random() < 0.5 ? 1 : -1;
+      const off = edge.width / 2 + city.SIDEWALK * 0.5;
+      const x = edge.horizontal ? ex : ex + off * side;
+      const z = edge.horizontal ? ez + off * side : ez;
+      const d = dist2d(x, z, p.x, p.z);
+      if (d < SPAWN_MIN || d > SPAWN_MAX) continue;
+      if (!city.landAt(x, z)) continue;
+      if (Math.random() > this.densityAt(x, z)) continue;
 
-    const ped = new Ped(city, this.game.scene, randomLook(Math.random));
-    ped.place(x, z);
-    this.peds.push(ped);
+      const ped = new Ped(city, this.game.scene, randomLook(Math.random));
+      ped.place(x, z);
+      ped.setSidewalk(edge, Math.random() < 0.5 ? 1 : -1, side);
+      this.peds.push(ped);
+      return;
+    }
   }
 
   // --- interactions -------------------------------------------------

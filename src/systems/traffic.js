@@ -4,7 +4,7 @@
 import { Ped, randomLook } from '../entities/ped.js';
 import { clamp, dist2d, distSq2d, wrapAngle, lerp } from '../core/mathutil.js';
 
-const TARGET_CARS = 14;
+const TARGET_CARS = 20;
 const SPAWN_MIN = 90, SPAWN_MAX = 200, DESPAWN = 280;
 const LANE = 0.24;            // lane offset as fraction of road width
 
@@ -19,11 +19,20 @@ function pickType(r) {
   return 'sedan';
 }
 
+const SIGNAL_CYCLE = 14;   // seconds: 6 green NS, 1 all-red, 6 green EW, 1 all-red
+
 export class TrafficSystem {
   constructor(game) {
     this.game = game;
     this.cars = [];              // { vehicle, edge, dir, t, targetSpeed, waitT, honkT, panicT }
     this.spawnTimer = 0;
+  }
+
+  // shared traffic-light phase (also drives the rendered light colours)
+  signalGreenFor(horizontal) {
+    const t = this.game.time % SIGNAL_CYCLE;
+    if (horizontal) return t >= 7 && t < 13;
+    return t < 6;
   }
 
   update(dt) {
@@ -75,12 +84,16 @@ export class TrafficSystem {
 
   trySpawn(p) {
     const city = this.game.city;
-    const edge = city.edges[Math.floor(Math.random() * city.edges.length)];
-    const t = 0.2 + Math.random() * 0.6;
-    const ex = lerp(edge.a.x, edge.b.x, t);
-    const ez = lerp(edge.a.z, edge.b.z, t);
-    const d = dist2d(ex, ez, p.x, p.z);
-    if (d < SPAWN_MIN || d > SPAWN_MAX) return;
+    let edge = null, ex = 0, ez = 0, t = 0;
+    for (let attempt = 0; attempt < 10 && !edge; attempt++) {
+      const cand = city.edges[Math.floor(Math.random() * city.edges.length)];
+      t = 0.2 + Math.random() * 0.6;
+      ex = lerp(cand.a.x, cand.b.x, t);
+      ez = lerp(cand.a.z, cand.b.z, t);
+      const d = dist2d(ex, ez, p.x, p.z);
+      if (d >= SPAWN_MIN && d <= SPAWN_MAX) edge = cand;
+    }
+    if (!edge) return;
 
     // don't spawn on top of another car
     for (const c of this.game.vehicles.vehicles) {
@@ -97,11 +110,11 @@ export class TrafficSystem {
     };
     v.aiControlled = true;
 
-    // put an AI driver figure in the car (visible through glass, used on carjack)
+    // put a visible AI driver figure at the wheel (pulled out on carjack)
     const ped = new Ped(city, this.game.scene, randomLook(Math.random));
     ped.state = 'driver';
     ped.inVehicle = v;
-    ped.rig.group.visible = false;
+    ped.rig.setAnim('drive');
     car.driverPed = ped;
     v.driver = ped;
 
@@ -170,9 +183,15 @@ export class TrafficSystem {
     // desired speed with obstacle checks
     let want = car.targetSpeed * (car.panicT > 0 ? 1.5 : 1);
 
-    // slow near intersections
+    // slow near intersections; stop for red lights at signalled crossings
     const distToEnd = (car.dir > 0 ? (1 - car.t) : car.t) * e.len;
-    if (distToEnd < 14 && car.panicT <= 0) want = Math.min(want, 5.5);
+    const nextNode = car.dir > 0 ? e.b : e.a;
+    if (nextNode.hasSignal && car.panicT <= 0 && !this.signalGreenFor(e.horizontal)) {
+      if (distToEnd < 7) want = 0;
+      else if (distToEnd < 16) want = Math.min(want, 3);
+    } else if (distToEnd < 14 && car.panicT <= 0) {
+      want = Math.min(want, 5.5);
+    }
 
     // car-following: check ahead for vehicles / player / peds
     const fx = Math.sin(v.heading), fz = Math.cos(v.heading);
@@ -228,6 +247,16 @@ export class TrafficSystem {
     else if (want < speedNow - 0.6) throttle = clamp((want - speedNow) / 8, -1, -0.2);
 
     v.updatePhysics(dt, { throttle, steer, handbrake: false });
+
+    // keep the visible driver seated
+    if (car.driverPed && car.driverPed.state === 'driver') {
+      const dp = car.driverPed;
+      dp.pos.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
+      dp.heading = v.heading;
+      dp.rig.group.position.copy(dp.pos);
+      dp.rig.group.rotation.y = dp.heading;
+      dp.rig.update(dt, 0);
+    }
 
     // unstick: if barely moving against a wall for a while, nudge to lane
     if (Math.abs(v.speed) < 0.4 && !blocked && want > 2) {

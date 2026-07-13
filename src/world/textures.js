@@ -100,16 +100,25 @@ function paintGlassTower(size, tint, rng) {
   return { canvas: c, rects };
 }
 
-function paintShopfront(size, rng) {
+const SHOP_WORDS = [
+  'CAFE', 'MARKET', 'PAWN', 'DINER', 'BOOKS', 'TOOLS', 'BAR', 'LAUNDRY',
+  'TACOS', 'RECORDS', 'BARBER', 'FLOWERS', 'PIZZA', 'NOODLES', 'GYM',
+  'TATTOO', 'PHONES', 'SHOES', 'BAKERY', 'DELI', 'GALLERY', 'SURF SHOP',
+  'VINYL', 'JEWELERS',
+];
+
+function paintShopfront(size, rng, variant = 0) {
   // one tile = a row of 3 storefronts, 3.2 m tall band stretched over tile
   const c = makeCanvas(size, size / 2);
   const ctx = c.getContext('2d');
   const H = size / 2;
-  const words = ['CAFE', 'MARKET', 'PAWN', 'DINER', 'BOOKS', 'TOOLS', 'BAR', 'LAUNDRY', 'TACOS', 'RECORDS'];
-  const awn = ['#7a4030', '#3e5e46', '#46507a', '#7a6a34', '#6a3a5e'];
-  ctx.fillStyle = '#4c4640';
+  const awn = ['#7a4030', '#3e5e46', '#46507a', '#7a6a34', '#6a3a5e', '#2e6470', '#804828'];
+  const walls = ['#4c4640', '#3e3a36', '#564a42'];
+  const signCols = ['#efe6d2', '#e8c84a', '#c8e0e8', '#e8b0a0'];
+  ctx.fillStyle = walls[variant % walls.length];
   ctx.fillRect(0, 0, size, H);
   const w = size / 3;
+  const salt = rng.int(0, 9999) + variant * 313;
   for (let i = 0; i < 3; i++) {
     const x = i * w;
     // window
@@ -120,14 +129,20 @@ function paintShopfront(size, rng) {
     // door
     ctx.fillStyle = '#241d18';
     ctx.fillRect(x + w * 0.74, H * 0.34, w * 0.18, H * 0.58);
-    // awning
-    ctx.fillStyle = awn[hash2i(i, 3, rng.int(0, 9999)) % awn.length];
+    // awning — striped half the time
+    const awnCol = awn[hash2i(i, 3, salt) % awn.length];
+    ctx.fillStyle = awnCol;
     ctx.fillRect(x + w * 0.04, H * 0.16, w * 0.7, H * 0.14);
+    if (hash2i(i, 11, salt) % 2) {
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (let sx = 0; sx < w * 0.7; sx += w * 0.1)
+        ctx.fillRect(x + w * 0.04 + sx, H * 0.16, w * 0.05, H * 0.14);
+    }
     // sign
-    ctx.fillStyle = '#efe6d2';
+    ctx.fillStyle = signCols[hash2i(i, 5, salt) % signCols.length];
     ctx.font = `bold ${Math.floor(H * 0.13)}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText(words[hash2i(i, 7, rng.int(0, 9999)) % words.length], x + w * 0.4, H * 0.12);
+    ctx.fillText(SHOP_WORDS[hash2i(i, 7, salt) % SHOP_WORDS.length], x + w * 0.4, H * 0.12);
   }
   return c;
 }
@@ -223,9 +238,9 @@ export function buildFacadeMaterials(seed = 1) {
     mats.barnred = m;
   }
 
-  // shopfront band
-  {
-    const canvas = paintShopfront(512, rng);
+  // shopfront bands — three variants so streets don't repeat
+  for (let variant = 0; variant < 3; variant++) {
+    const canvas = paintShopfront(512, rng, variant);
     const night = makeCanvas(512, 256);
     const nctx = night.getContext('2d');
     nctx.fillStyle = '#000'; nctx.fillRect(0, 0, 512, 256);
@@ -235,7 +250,8 @@ export function buildFacadeMaterials(seed = 1) {
       nctx.fillRect(i * w + w * 0.08, 256 * 0.30, w * 0.62, 256 * 0.62);
     }
     const m = new THREE.MeshStandardMaterial({ map: tex(canvas), emissive: 0xffffff, emissiveMap: tex(night), emissiveIntensity: 0, roughness: 0.8 });
-    mats.shopfront = m;
+    mats['shopfront' + variant] = m;
+    if (variant === 0) mats.shopfront = m;   // legacy key
     nightMats.push(m);
   }
 
@@ -293,6 +309,17 @@ export function makeGroundCanvas(city, size = 4096) {
     const x = Math.random() * size, y = Math.random() * size;
     ctx.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.03)';
     ctx.fillRect(x, y, 3, 3);
+  }
+
+  // suburb lawns + driveways
+  for (const cell of city.cells) {
+    if (cell.district !== 'suburbs') continue;
+    ctx.fillStyle = 'rgba(96,140,72,0.55)';
+    ctx.fillRect(px(cell.lot.x0), px(cell.lot.z0), px(cell.lot.x1) - px(cell.lot.x0), px(cell.lot.z1) - px(cell.lot.z0));
+    // driveway strip to the street
+    ctx.fillStyle = 'rgba(150,146,138,0.8)';
+    const dw = 3 * scale;
+    ctx.fillRect(px(cell.lot.x0 + 4), px(cell.z0), dw, px(cell.lot.z0) - px(cell.z0) + 6 * scale);
   }
 
   // farm furrows
@@ -375,6 +402,19 @@ export function makeGroundCanvas(city, size = 4096) {
       }
       ctx.setLineDash([]);
     }
+  }
+
+  // --- stop lines at signalled intersections ---
+  for (const n of city.nodes.values()) {
+    if (!n.hasSignal) continue;
+    const rw = city.ROAD_W_ART / 2;
+    const stop = rw + 2.6;
+    ctx.fillStyle = 'rgba(235,235,235,0.7)';
+    // bars across the right-hand approach lane of each arm
+    ctx.fillRect(px(n.x + 0.5), px(n.z + stop), (rw - 0.5) * scale, 0.5 * scale);          // south approach (northbound)
+    ctx.fillRect(px(n.x - rw), px(n.z - stop - 0.5), (rw - 0.5) * scale, 0.5 * scale);     // north approach
+    ctx.fillRect(px(n.x + stop), px(n.z - rw), 0.5 * scale, (rw - 0.5) * scale);           // east approach
+    ctx.fillRect(px(n.x - stop - 0.5), px(n.z + 0.5), 0.5 * scale, (rw - 0.5) * scale);    // west approach
   }
 
   // --- crosswalks at arterial intersections ---

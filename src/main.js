@@ -138,6 +138,8 @@ class Game {
       this.particles = new fx.ParticleSystem(this);
       const save = await import('./core/save.js');
       this.save = new save.SaveSystem(this);
+      const parked = await import('./systems/parkedcars.js');
+      this.parkedCars = new parked.ParkedCars(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -345,6 +347,7 @@ class Game {
     this.player.update(dt, this.input, this.cameraRig.yaw, aiming);
     this.vehicles?.update(dt);
     this.traffic?.update(dt);
+    this.parkedCars?.update(dt);
     this.peds?.update(dt);
     this.combat?.update(dt, aiming);
     this.wanted?.update(dt);

@@ -88,6 +88,32 @@ export function buildTerrain(city, scene, assets = null) {
   deep.position.y = WATER_Y - 1.5;
   scene.add(deep);
 
+  // ---- drifting billboard clouds ----
+  const cloudGroup = new THREE.Group();
+  {
+    const cc = document.createElement('canvas');
+    cc.width = cc.height = 128;
+    const cctx = cc.getContext('2d');
+    const grad = cctx.createRadialGradient(64, 64, 8, 64, 64, 62);
+    grad.addColorStop(0, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.4)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    cctx.fillStyle = grad;
+    cctx.fillRect(0, 0, 128, 128);
+    const cloudTex = new THREE.CanvasTexture(cc);
+    for (let i = 0; i < 18; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: cloudTex, transparent: true, opacity: 0.35 + Math.random() * 0.3, depthWrite: false,
+      });
+      const spr = new THREE.Sprite(mat);
+      const sc = 180 + Math.random() * 260;
+      spr.scale.set(sc, sc * 0.38, 1);
+      spr.position.set((Math.random() - 0.5) * SPAN * 2, 250 + Math.random() * 130, (Math.random() - 0.5) * SPAN * 2);
+      cloudGroup.add(spr);
+    }
+    scene.add(cloudGroup);
+  }
+
   // ---- stars (visible at night) ----
   const starGeo = new THREE.BufferGeometry();
   const starCount = 700;
@@ -114,6 +140,11 @@ export function buildTerrain(city, scene, assets = null) {
       // gentle shimmer + two-direction normal scroll
       waterMat.opacity = 0.85 + Math.sin(t * 0.8) * 0.03;
       waterNormal.offset.set(t * 0.008, t * 0.0045);
+      // clouds drift east, wrapping around the island
+      for (const c of cloudGroup.children) {
+        c.position.x += dt * 3.5;
+        if (c.position.x > SPAN * 1.4) c.position.x = -SPAN * 1.4;
+      }
     },
     setStarAlpha(a) { starMat.opacity = a; },
   };
