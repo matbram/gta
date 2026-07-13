@@ -67,11 +67,6 @@ class Game {
       $('loadbar').firstElementChild.style.width = (5 + f * 18) + '%';
     });
 
-    // HDRI environment lighting (day sky drives ambient/reflections; the
-    // day/night cycle scales its intensity)
-    const dayHdri = this.assets.hdri('day');
-    if (dayHdri) this.gfx.setEnvironmentFromEquirect(dayHdri);
-
     // entities pull their models from the shared registry
     const vehMod = await import('./entities/vehicle.js');
     vehMod.setPaintQuality(this.gfx.quality !== 'low');
@@ -89,6 +84,12 @@ class Game {
 
     await prog(74, 'wiring the streetlights…');
     this.dayNight = new DayNight(this.scene, this.gfx);
+
+    // real sun/moon sky dome; its PMREM bake replaces the old HDRIs as the
+    // scene environment and re-bakes as the light changes
+    const { SkyDome } = await import('./world/sky.js');
+    this.sky = new SkyDome(this.scene);
+    this.dayNight.sky = this.sky;
 
     await prog(84, 'waking up the city…');
     this.input = new Input(canvas);
@@ -149,6 +150,8 @@ class Game {
       this.interiors = new interiors.Interiors(this);
       const knock = await import('./systems/knockables.js');
       this.knockables = new knock.Knockables(this);
+      const weather = await import('./systems/weather.js');
+      this.weather = new weather.Weather(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -332,14 +335,26 @@ class Game {
     if (mode === 'play' || mode === 'menu') {
       const focus = this.player?.pos ?? new THREE.Vector3();
       const night = this.dayNight.update(dt, focus);
+      this.weather?.update(dt);
+      if (this.weather) this.dayNight.cloud = this.weather.cloud;
       this.cityMeshes.setNight(night);
-      this.terrain.setStarAlpha(night * 0.9);
+      this.terrain.setStarAlpha(night * 0.9 * (1 - (this.weather?.cloud ?? 0)));
       this.terrain.update(dt, this.time);
       this.vehicles?.setNight?.(night);
+      this.refreshEnv();
     }
 
     this.gfx.render(dt);
     this.input?.endFrame();
+  }
+
+  // re-bake the procedural sky into scene.environment when the light or
+  // weather moves enough (every 30 game-minutes bucket / cloud step)
+  refreshEnv() {
+    if (!this.sky) return;
+    const key = Math.floor(this.dayNight.minutes / 30) + '|' +
+      Math.round((this.weather?.cloud ?? 0) * 4);
+    this.sky.refreshEnv(this.gfx, key);
   }
 
   updateMenu(dt) {
@@ -470,10 +485,21 @@ class Game {
           game.time += step;
           if (game.state.mode === 'play') game.updatePlay(step);
           const night = game.dayNight.update(step, game.player.pos);
+          game.weather?.update(step);
+          if (game.weather) game.dayNight.cloud = game.weather.cloud;
           game.cityMeshes.setNight(night);
+          game.terrain.setStarAlpha(night * 0.9 * (1 - (game.weather?.cloud ?? 0)));
           game.vehicles?.setNight?.(night);
           game.input.endFrame();
         }
+        game.refreshEnv();
+      },
+      setWeather: (s) => {
+        const w = game.weather;
+        if (!w) return;
+        w.set(s);   // snap for tests: skip the gradual transition
+        w.cloud = s === 'rain' ? 1 : s === 'overcast' ? 0.72 : 0.08;
+        w.rain = s === 'rain' ? 1 : 0;
       },
       newGame: () => game.newGame(),
       city: () => ({ nodes: game.city.nodes.size, edges: game.city.edges.length, buildings: game.city.buildings.length }),

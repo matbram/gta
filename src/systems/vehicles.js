@@ -67,6 +67,7 @@ export class VehicleSystem {
     if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
       veh._lastCrashSfxT = this.game.time;
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
+      if (impact > 12) this.game.particles?.glassBurst(veh.pos.x, veh.pos.y + 1.0, veh.pos.z);
       if (veh.driver === 'player') this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
     }
     return false;
@@ -191,13 +192,14 @@ export class VehicleSystem {
             }
           }
         }
-        // tyre screech + rubber smoke on hard lateral slip
-        if (Math.abs(v.lateral) > 3.5 && Math.abs(v.speed) > 6) {
-          game.audio?.screech(v.pos.x, v.pos.z, clamp(Math.abs(v.lateral) / 8, 0, 1));
-          // smoke at the rear wheels
+        // tyre screech + rubber smoke + skid marks on hard slip or burnout
+        const burnout = this.playerControl.handbrake && Math.abs(v.speed) > 7;
+        if ((Math.abs(v.lateral) > 3.5 && Math.abs(v.speed) > 6) || burnout) {
+          game.audio?.screech(v.pos.x, v.pos.z, clamp(Math.abs(v.lateral) / 8, 0.3, 1));
           const bx = -Math.sin(v.heading) * v.spec.l * 0.32;
           const bz = -Math.cos(v.heading) * v.spec.l * 0.32;
-          game.particles?.dust(v.pos.x + bx, v.pos.y + 0.15, v.pos.z + bz, 2);
+          game.particles?.dust(v.pos.x + bx, v.pos.y + 0.15, v.pos.z + bz, burnout ? 4 : 2);
+          game.particles?.skid(v.pos.x + bx, v.pos.z + bz, v.heading);
         }
         // sinking in water → dump the player swimming
         if (v.sinking > 0.3) this.exitVehicleForced();
@@ -256,6 +258,7 @@ export class VehicleSystem {
                 b.applyDamage(impact * 1.2, 'crash');
                 this.game.particles?.sparks((a.pos.x + b.pos.x) / 2, a.pos.y + 0.6, (a.pos.z + b.pos.z) / 2, 6);
                 this.game.audio?.crash?.(impact, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2);
+                if (impact > 12) this.game.particles?.glassBurst((a.pos.x + b.pos.x) / 2, a.pos.y + 1.0, (a.pos.z + b.pos.z) / 2);
                 if (a.driver === 'player' || b.driver === 'player') {
                   this.game.cameraRig.addShake(clamp(impact / 20, 0, 0.7));
                   this.game.wanted?.crime('crash', a.pos.x, a.pos.z);

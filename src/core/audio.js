@@ -223,6 +223,12 @@ export class AudioEngine {
     [392, 330, 262].forEach((f, i) => this.tone({ freq: f, dur: 0.4, gain: 0.22, type: 'triangle', delay: i * 0.16 }));
   }
   splash(x, z) { if (this.buffers?.has('splash')) return void this.playBuffer('splash', { x, z, gain: 0.7, range: 90 }); if (this.ctx) this.burst({ dur: 0.45, gain: 0.5 * this.spatialGain(x, z, 1, 80), filterFrom: 1500, filterTo: 200 }); }
+  thunder() {
+    if (!this.ctx) return;
+    this.burst({ dur: 1.7, gain: 0.5, filterFrom: 420, filterTo: 40 });
+    this.tone({ freq: 55, freqTo: 28, dur: 1.3, gain: 0.3, type: 'sine', delay: 0.08 });
+  }
+
   // vehicle impact — intensity is closing speed (m/s), scales volume + pitch
   crash(intensity, x, z) {
     this.crashCount = (this.crashCount || 0) + 1;   // test hook

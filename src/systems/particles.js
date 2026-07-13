@@ -324,6 +324,51 @@ export class ParticleSystem {
     }
   }
 
+  // shattered glass on a hard crash: glittering shards
+  glassBurst(x, y, z) {
+    for (let i = 0; i < 14; i++) {
+      this.glow.emit({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 6, vy: 1.5 + Math.random() * 4, vz: (Math.random() - 0.5) * 6,
+        life: 0.4 + Math.random() * 0.35, s0: 0.16, s1: 0.05, a: 0.9,
+        r: 0.8, g: 0.9, b: 1.0, grav: -16, drag: 0.98,
+      });
+    }
+  }
+
+  // rubber skid marks: ring-buffer of dark ground quads
+  skid(x, z, heading) {
+    if (!this._skidPool) {
+      const geo = new THREE.PlaneGeometry(0.24, 1.0);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x0c0c0e, transparent: true, opacity: 0.4, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2,
+      });
+      this._skidPool = new THREE.InstancedMesh(geo, mat, 220);
+      this._skidPool.frustumCulled = false;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < 220; i++) this._skidPool.setMatrixAt(i, zero);
+      this._skidIdx = 0;
+      this._skidDummy = new THREE.Object3D();
+      this.game.scene.add(this._skidPool);
+    }
+    if (this.game.time - (this._skidT ?? -1) < 0.045) return;
+    this._skidT = this.game.time;
+    const g = this.game.city.groundHeight(x, z);
+    // two stripes, one per rear tyre
+    const rx = Math.cos(heading) * 0.72, rz = -Math.sin(heading) * 0.72;
+    for (const s of [-1, 1]) {
+      this._skidDummy.position.set(x + rx * s, g + 0.025, z + rz * s);
+      this._skidDummy.rotation.set(0, heading, 0);
+      this._skidDummy.scale.set(1, 1, 1);
+      this._skidDummy.updateMatrix();
+      this._skidPool.setMatrixAt(this._skidIdx % 220, this._skidDummy.matrix);
+      this._skidIdx++;
+    }
+    this._skidPool.instanceMatrix.needsUpdate = true;
+  }
+
   // broken-hydrant water column — call every frame while the geyser is live
   geyser(x, y, z, strength = 1) {
     for (let i = 0; i < 4; i++) {

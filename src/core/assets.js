@@ -5,21 +5,18 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../../vendor/jsm/loaders/DRACOLoader.js';
-import { RGBELoader } from '../../vendor/jsm/loaders/RGBELoader.js';
 import { clone as skeletonClone } from '../../vendor/jsm/utils/SkeletonUtils.js';
 
 export class Assets {
   constructor() {
     this.models = new Map();      // key → { scene, animations }
     this.textureSets = new Map(); // key → { map, normalMap, roughnessMap }
-    this.hdris = new Map();       // key → DataTexture (equirect)
     this.manifest = null;
 
     this.gltfLoader = new GLTFLoader();
     const draco = new DRACOLoader();
     draco.setDecoderPath('./vendor/draco/');
     this.gltfLoader.setDRACOLoader(draco);
-    this.rgbeLoader = new RGBELoader();
     this.texLoader = new THREE.TextureLoader();
   }
 
@@ -36,7 +33,7 @@ export class Assets {
     const jobs = [];
     const modelKeys = Object.keys(this.manifest.models || {});
     let done = 0;
-    const total = modelKeys.length + (this.manifest.textures?.length || 0) + (this.manifest.hdri?.length || 0);
+    const total = modelKeys.length + (this.manifest.textures?.length || 0);
     const tick = () => onProgress(++done / Math.max(total, 1));
 
     for (const key of modelKeys) {
@@ -48,14 +45,8 @@ export class Assets {
     for (const name of this.manifest.textures || []) {
       jobs.push(this.loadTextureSet(name).finally(tick));
     }
-    for (const name of this.manifest.hdri || []) {
-      jobs.push(this.rgbeLoader.loadAsync(`./assets/hdri/${name}.hdr`)
-        .then((t) => { t.mapping = THREE.EquirectangularReflectionMapping; this.hdris.set(name, t); })
-        .catch((e) => console.warn('[assets] hdri failed:', name, e.message))
-        .finally(tick));
-    }
     await Promise.all(jobs);
-    console.log(`[assets] loaded ${this.models.size} models, ${this.textureSets.size} texture sets, ${this.hdris.size} hdris`);
+    console.log(`[assets] loaded ${this.models.size} models, ${this.textureSets.size} texture sets`);
     return this;
   }
 
@@ -115,5 +106,4 @@ export class Assets {
   }
 
   textureSet(name) { return this.textureSets.get(name) ?? null; }
-  hdri(name) { return this.hdris.get(name) ?? null; }
 }

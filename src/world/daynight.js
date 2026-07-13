@@ -54,6 +54,10 @@ export class DayNight {
     scene.background = this.skyColor;
 
     this.nightIntensity = 0;   // 0 day → 1 night, consumed by citymesh/vehicles
+    this.sky = null;           // SkyDome, attached by main.js
+    this.cloud = 0;            // weather feeds this back for the env bake
+    this.sunDir = new THREE.Vector3(0, 1, 0);
+    this.day = 0;              // whole days elapsed (moon phase)
   }
 
   get hours() { return (this.minutes / 60) % 24; }
@@ -61,7 +65,9 @@ export class DayNight {
   setTime(h) { this.minutes = ((h * 60) % 1440 + 1440) % 1440; }
 
   update(dt, focus) {
+    const prev = this.minutes;
     this.minutes = (this.minutes + dt * this.speed) % 1440;
+    if (this.minutes < prev) this.day++;
     const h = this.hours;
 
     // interpolate stops
@@ -79,12 +85,15 @@ export class DayNight {
     this.hemi.intensity = amb;
     this.sun.intensity = sunI;
 
-    // sun path: rises 6h, sets 20h
+    // sun path: rises 6h, sets 20h (keeps moving below the horizon at night
+    // so the sky dome's sun side and the moon stay coherent)
     const dayT = clamp((h - 6) / 14, 0, 1);
-    const ang = dayT * Math.PI;
+    const nightT = h >= 20 ? (h - 20) / 10 : h < 6 ? (h + 4) / 10 : 0;
+    const ang = dayT > 0 && dayT < 1 && h >= 6 ? dayT * Math.PI : Math.PI + nightT * Math.PI;
     const sx = Math.cos(ang), sy = Math.sin(ang) * 0.9 + 0.06, sz = 0.35;
+    this.sunDir.set(sx, sy, sz).normalize();
     if (focus) {
-      this.sun.position.set(focus.x + sx * 220, sy * 260, focus.z + sz * 220);
+      this.sun.position.set(focus.x + sx * 220, Math.max(sy, 0.03) * 260, focus.z + sz * 220);
       this.sun.target.position.set(focus.x, 0, focus.z);
       this.sun.target.updateMatrixWorld();
     }
@@ -99,6 +108,13 @@ export class DayNight {
     }
 
     this.nightIntensity = night;
+
+    // drive the sky dome: zenith/horizon colours, sunset warmth, sun + moon
+    if (this.sky && focus) {
+      const warm = clamp(1 - Math.abs(this.sunDir.y) * 3.4, 0, 1) * (night < 0.85 ? 1 : 0.2);
+      this.sky.setSkyColors(this.skyColor, this.fogColor);
+      this.sky.update(focus, this.sunDir, { warm, night, cloud: this.cloud, day: this.day });
+    }
 
     // cinematic exposure + bloom curve: bright warm noon, dim blue night,
     // slightly crushed golden hours; emissives bloom harder after dark

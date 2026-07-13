@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { makeGroundCanvas } from './textures.js';
+import { lerp } from '../core/mathutil.js';
 
 export function buildTerrain(city, scene, assets = null) {
   const { SPAN, HALF, WATER_Y } = city;
@@ -105,6 +106,7 @@ export function buildTerrain(city, scene, assets = null) {
       const mat = new THREE.SpriteMaterial({
         map: cloudTex, transparent: true, opacity: 0.35 + Math.random() * 0.3, depthWrite: false,
       });
+      mat.userData.baseOpacity = mat.opacity;
       const spr = new THREE.Sprite(mat);
       const sc = 180 + Math.random() * 260;
       spr.scale.set(sc, sc * 0.38, 1);
@@ -147,5 +149,20 @@ export function buildTerrain(city, scene, assets = null) {
       }
     },
     setStarAlpha(a) { starMat.opacity = a; },
+    // weather hooks
+    setCloudCover(cover, rain = 0) {
+      const tint = 1 - rain * 0.55;
+      for (const c of cloudGroup.children) {
+        c.material.opacity = c.material.userData.baseOpacity * (0.5 + cover * 1.7);
+        c.material.color.setScalar(tint);
+      }
+    },
+    setWet(t) {
+      // rain glosses the streets: tighter reflections + stronger env pickup
+      if (mat.roughness !== undefined) {
+        mat.roughness = lerp(0.94, 0.42, t);
+        mat.envMapIntensity = lerp(1, 2.1, t);
+      }
+    },
   };
 }
