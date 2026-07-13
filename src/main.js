@@ -255,11 +255,12 @@ class Game {
     this.particles?.update(dt);
     this.audio?.update(dt);
 
-    // camera follows player or vehicle
-    const camTarget = driving ? this.player.vehicle.pos : this.player.pos;
-    const speed = driving ? this.player.vehicle.speed : this.player.speed2d;
-    this.cameraRig.update(dt, camTarget, driving ? 2.1 : 1.55, {
-      driving, speed, aimMode: aiming,
+    // camera follows player or vehicle (re-read: enter/exit can happen mid-frame)
+    const veh = this.player.vehicle;
+    const camTarget = veh ? veh.pos : this.player.pos;
+    const speed = veh ? veh.speed : this.player.speed2d;
+    this.cameraRig.update(dt, camTarget, veh ? 2.1 : 1.55, {
+      driving: !!veh, speed, aimMode: aiming,
     });
 
     // zone popups
@@ -313,10 +314,27 @@ class Game {
       setWanted: (n) => game.wanted?.setStars(n),
       giveWeapon: (id, ammo) => game.combat?.give(id, ammo),
       spawnVehicle: (type) => game.vehicles?.debugSpawnNear(type),
+      spawnVehicleOnRoad: (type) => {
+        const v = game.vehicles?.spawnOnRoadNear(game.player.pos.x, game.player.pos.z, type);
+        if (v) game.player.teleport(v.pos.x + 2.2, v.pos.z, v.heading);
+        return v?.id;
+      },
       enterNearestVehicle: () => game.vehicles?.tryEnterExit(true),
       startMission: (id) => game.missions?.debugStart(id),
       missionState: () => game.missions?.debugState(),
       drawCalls: () => game.renderer.info.render.calls,
+      // fast-forward simulation without rendering (headless tests)
+      tick: (seconds, step = 1 / 30) => {
+        const n = Math.floor(seconds / step);
+        for (let i = 0; i < n; i++) {
+          game.time += step;
+          if (game.state.mode === 'play') game.updatePlay(step);
+          const night = game.dayNight.update(step, game.player.pos);
+          game.cityMeshes.setNight(night);
+          game.vehicles?.setNight?.(night);
+          game.input.endFrame();
+        }
+      },
       newGame: () => game.newGame(),
       city: () => ({ nodes: game.city.nodes.size, edges: game.city.edges.length, buildings: game.city.buildings.length }),
     };
