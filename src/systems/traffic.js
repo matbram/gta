@@ -131,7 +131,7 @@ export class TrafficSystem {
 
   seatDriver(car, dt) {
     const dp = car.driverPed, v = car.vehicle;
-    dp.pos.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
+    dp.pos.set(v.pos.x, v.pos.y - (0.32 + (1.6 - v.spec.h) * 0.35), v.pos.z);
     dp.heading = v.heading;
     dp.rig.group.position.copy(dp.pos);
     dp.rig.group.rotation.y = dp.heading;

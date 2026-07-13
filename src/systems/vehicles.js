@@ -147,9 +147,10 @@ export class VehicleSystem {
       } else {
         v.updatePhysics(dt, this.playerControl);
         player.pos.set(v.pos.x, v.pos.y, v.pos.z);
-        // visible seated driver
+        // visible seated driver — sink deeper into low cars so they sit in-seat
         player.rig.group.visible = true;
-        player.rig.group.position.set(v.pos.x, v.pos.y - 0.32, v.pos.z);
+        const seatDrop = 0.32 + (1.6 - v.spec.h) * 0.35;
+        player.rig.group.position.set(v.pos.x, v.pos.y - seatDrop, v.pos.z);
         player.rig.group.rotation.y = v.heading;
         player.rig.update(dt, 0);
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;
