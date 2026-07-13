@@ -155,6 +155,19 @@ export class VehicleSystem {
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;
         // engine audio
         game.audio?.setEngine(clamp(Math.abs(v.speed) / v.spec.maxSpeed, 0, 1), this.playerControl.throttle > 0);
+        // near-miss whoosh: fast pass close to another car
+        if (Math.abs(v.speed) > 14) {
+          for (const o of this.vehicles) {
+            if (o === v || o.dead) continue;
+            const d2 = distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z);
+            if (d2 < 12 && d2 > 5 && game.time - (this._nearMissT || -9) > 0.7) {
+              this._nearMissT = game.time;
+              game.audio?.whoosh?.();
+              game.cameraRig.addShake(0.12);
+              break;
+            }
+          }
+        }
         // tyre screech + rubber smoke on hard lateral slip
         if (Math.abs(v.lateral) > 3.5 && Math.abs(v.speed) > 6) {
           game.audio?.screech(v.pos.x, v.pos.z, clamp(Math.abs(v.lateral) / 8, 0, 1));

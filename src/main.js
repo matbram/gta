@@ -37,6 +37,7 @@ class Game {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(innerWidth, innerHeight);
 
+    this.THREE = THREE;            // shared reference for systems that build meshes
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 3200);
 

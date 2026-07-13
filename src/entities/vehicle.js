@@ -346,7 +346,7 @@ export class Vehicle {
     let vl = this.vel.x * -fz + this.vel.y * fx;     // lateral speed (right positive)
 
     // engine / brakes
-    const top = S.maxSpeed * this.maxHealthSpeedFactor;
+    const top = S.maxSpeed * this.maxHealthSpeedFactor * (this.chaseBoost || 1);
     if (control.throttle > 0) {
       const t = control.throttle * S.accel * (1 - clamp(vf / top, 0, 1) * 0.75);
       vf += t * dt;

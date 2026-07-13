@@ -70,7 +70,14 @@ export class WantedSystem {
     const h = this.state.heat;
     let stars = 0;
     for (let i = 6; i >= 1; i--) if (h >= STAR_TH[i]) { stars = i; break; }
-    if (stars > this.state.stars && !silent) this.game.audio?.wantedUp();
+    if (stars > this.state.stars && !silent) {
+      this.game.audio?.wantedUp();
+      // police scanner call-out on first wanted + escalations
+      if (this.state.stars === 0) {
+        const p = this.game.player.pos;
+        setTimeout(() => this.game.audio?.bark?.('scanner1', p.x, p.z), 400);
+      }
+    }
     if (stars > this.state.stars) this.unseenT = 0;
     this.state.stars = stars;
   }
@@ -190,6 +197,12 @@ export class WantedSystem {
       }
     }
 
+    // helicopter from 5 stars: circles overhead with a searchlight
+    // (hysteresis: stays airborne until you drop below 4 so it doesn't flicker)
+    if (stars >= 5 && !this.chopper) this.spawnChopper();
+    else if (stars < 4 && this.chopper) this.despawnChopper();
+    if (this.chopper) this.updateChopper(dt);
+
     // ---- run cops ----
     for (const cop of [...this.footCops]) {
       cop.update(dt, game);
@@ -212,6 +225,16 @@ export class WantedSystem {
         this.cruisers.splice(this.cruisers.indexOf(cr), 1);
       }
     }
+
+    // periodic police-scanner chatter while actively wanted
+    if (stars >= 1) {
+      this.scannerT = (this.scannerT ?? 12) - dt;
+      if (this.scannerT <= 0) {
+        this.scannerT = 14 + Math.random() * 12;
+        const p = player.pos;
+        this.game.audio?.playBuffer?.(Math.random() < 0.5 ? 'scanner1' : 'scanner2', { gain: 0.5 });
+      }
+    } else this.scannerT = 8;
 
     // stars gone → stand down
     if (stars === 0 && (this.footCops.length || this.cruisers.length)) {
@@ -307,12 +330,22 @@ export class WantedSystem {
       return;
     }
 
-    // pursue: simple pursuit steering toward the player
-    const wantHeading = Math.atan2(px - v.pos.x, pz - v.pos.z);
+    // pursue: intercept-lead the player's car, PIT when alongside
+    let aimX = px, aimZ = pz;
+    if (player.vehicle) {
+      // lead the target by its velocity for a proper intercept
+      const lead = clamp(d / 30, 0, 1.4);
+      aimX = px + player.vehicle.vel.x * lead;
+      aimZ = pz + player.vehicle.vel.y * lead;
+    }
+    const wantHeading = Math.atan2(aimX - v.pos.x, aimZ - v.pos.z);
     let err = wantHeading - v.heading;
     while (err > Math.PI) err -= Math.PI * 2;
     while (err < -Math.PI) err += Math.PI * 2;
-    const steer = clamp(err * 2, -1, 1);
+    let steer = clamp(err * 2, -1, 1);
+
+    // rubber-band: cruisers a bit faster when far behind so chases stay tense
+    v.chaseBoost = player.vehicle ? clamp(1 + (d - 20) / 120, 0.9, 1.25) : 1;
 
     let throttle = 1;
     if (!player.vehicle) {
@@ -322,8 +355,14 @@ export class WantedSystem {
         if (!cr.unloaded && d < 20) this.unloadCops(cr);
       }
     } else {
-      // ram the player's car
-      if (d < 7) throttle = 1;
+      // PIT maneuver: when close and roughly alongside, swerve into the rear quarter
+      const relX = px - v.pos.x, relZ = pz - v.pos.z;
+      const fwd = Math.sin(v.heading) * relX + Math.cos(v.heading) * relZ;
+      const side = Math.cos(v.heading) * relX - Math.sin(v.heading) * relZ;
+      if (d < 6.5 && Math.abs(fwd) < 3 && Math.abs(side) < 3.5 && Math.abs(v.speed) > 8) {
+        steer = clamp(side * 0.9, -1, 1);       // nudge into their side
+        cr.pitT = 0.5;
+      } else if (d < 7) throttle = 1;
       else if (d < 30 && Math.abs(err) > 1.2) throttle = 0.3;
     }
 
@@ -359,7 +398,55 @@ export class WantedSystem {
     }
   }
 
+  // ---------------- helicopter (5★+) ----------------
+  spawnChopper() {
+    const game = this.game;
+    if (!game.THREE) return;
+    // build a simple chopper from primitives
+    const g = new game.THREE.Group();
+    const body = new game.THREE.Mesh(new game.THREE.BoxGeometry(1.4, 1.3, 4),
+      new game.THREE.MeshStandardMaterial({ color: 0x16181d, metalness: 0.5, roughness: 0.5 }));
+    g.add(body);
+    const tail = new game.THREE.Mesh(new game.THREE.BoxGeometry(0.4, 0.4, 3), body.material);
+    tail.position.set(0, 0.2, -3); g.add(tail);
+    const rotor = new game.THREE.Mesh(new game.THREE.BoxGeometry(9, 0.08, 0.4), new game.THREE.MeshBasicMaterial({ color: 0x333333 }));
+    rotor.position.y = 1; g.add(rotor);
+    this.chopperRotor = rotor;
+    const spot = new game.THREE.SpotLight(0xffffff, 0, 120, 0.35, 0.4, 1.5);
+    spot.position.set(0, 0, 0);
+    g.add(spot); g.add(spot.target);
+    this.chopperSpot = spot;
+    game.scene.add(g);
+    this.chopper = g;
+    this.chopperAngle = 0;
+    game.audio?.startSiren?.('chopper', () => ({ x: this.chopper.position.x, z: this.chopper.position.z }));
+  }
+
+  updateChopper(dt) {
+    const game = this.game;
+    const p = game.player.pos;
+    this.chopperAngle += dt * 0.5;
+    const r = 32;
+    const cx = p.x + Math.cos(this.chopperAngle) * r;
+    const cz = p.z + Math.sin(this.chopperAngle) * r;
+    this.chopper.position.set(cx, 45, cz);
+    this.chopper.lookAt(p.x, 45, p.z);
+    this.chopperRotor.rotation.y += dt * 40;
+    // searchlight tracks the player
+    this.chopperSpot.intensity = game.dayNight?.nightIntensity > 0.3 ? 8 : 2;
+    this.chopperSpot.target.position.set(p.x, 0, p.z);
+    this.chopperSpot.target.updateMatrixWorld();
+  }
+
+  despawnChopper() {
+    if (!this.chopper) return;
+    this.game.audio?.stopSiren?.('chopper');
+    this.chopper.removeFromParent();
+    this.chopper = null;
+  }
+
   despawnAll(instant = false) {
+    this.despawnChopper();
     for (const c of this.footCops) c.dispose();
     this.footCops.length = 0;
     for (const cr of [...this.cruisers]) {

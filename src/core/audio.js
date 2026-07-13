@@ -186,6 +186,12 @@ export class AudioEngine {
     this.burst({ dur: run ? 0.08 : 0.06, gain: run ? 0.09 : 0.05, filterFrom: 900, filterTo: 200, q: 1.5 });
   }
 
+  whoosh() {
+    if (!this.ctx) return;
+    if (this.buffers?.has('whoosh')) return void this.playBuffer('whoosh', { gain: 0.5 });
+    this.burst({ dur: 0.25, gain: 0.25, filterFrom: 1800, filterTo: 400, type: 'bandpass', q: 2 });
+  }
+
   punch() {
     if (!this.ctx) return;
     if (this.buffers?.has('punch')) return void this.playBuffer('punch', { gain: 0.7 });
