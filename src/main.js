@@ -165,6 +165,63 @@ class Game {
     this.hud.show();
     this.hud.fade(false);
     this.setMode('play');
+    // death / arrest hooks
+    this.player.onDied = () => this.beginDeathFlow('wasted');
+    this.deathFlow = null;
+  }
+
+  onBusted() {
+    if (this.deathFlow || this.player.dead) return;
+    this.beginDeathFlow('busted');
+  }
+
+  beginDeathFlow(kind) {
+    if (this.deathFlow) return;
+    this.deathFlow = { kind, t: 0 };
+    this.missions?.onPlayerDown?.(kind);
+    if (kind === 'wasted') {
+      this.hud.showCenter('WASTED', 'wasted', '', 5);
+      this.audio?.missionFailed?.();
+    } else {
+      this.hud.showCenter('BUSTED', 'busted', '', 5);
+      this.player.dead = true;   // freeze controls during arrest
+    }
+  }
+
+  updateDeathFlow(dt) {
+    const f = this.deathFlow;
+    if (!f) return;
+    f.t += dt;
+    if (f.t > 2.2 && !f.faded) {
+      f.faded = true;
+      this.hud.fade(true);
+    }
+    if (f.t > 3.2 && !f.done) {
+      f.done = true;
+      // respawn
+      if (this.player.vehicle) this.vehicles?.exitVehicleForced();
+      const poi = f.kind === 'wasted' ? this.city.pois.hospital : this.city.pois.policeHQ;
+      const cost = f.kind === 'wasted'
+        ? Math.min(100, Math.floor(this.state.money * 0.1))
+        : Math.min(500, Math.floor(this.state.money * 0.15));
+      this.state.money = Math.max(0, this.state.money - cost);
+      this.wanted?.clear();
+      this.player.dead = false;
+      this.player.health = this.player.maxHealth;
+      this.player.rig.dead = false;
+      this.player.rig.deadT = 0;
+      this.player.rig.group.rotation.x = 0;
+      this.player.teleport(poi.x, poi.z - 3, 0);
+      this.cameraRig.snapBehind(this.player.heading);
+      this.hud.showToast(
+        f.kind === 'wasted'
+          ? `St. Aurora patched you up. -$${cost}`
+          : `They took a cut and let you walk. -$${cost}`, 5);
+    }
+    if (f.t > 4.0) {
+      this.hud.fade(false);
+      this.deathFlow = null;
+    }
   }
 
   setMode(m) {
@@ -244,6 +301,7 @@ class Game {
     if (this.input.wasPressed('KeyV')) this.cameraRig.cycleDistance();
 
     // gameplay systems
+    this.updateDeathFlow(dt);
     this.player.update(dt, this.input, this.cameraRig.yaw, aiming);
     this.vehicles?.update(dt);
     this.traffic?.update(dt);
