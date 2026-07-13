@@ -97,15 +97,6 @@ export class Graphics {
     light.shadow.mapSize.set(q.shadow, q.shadow);
   }
 
-  // HDRI/env plumbing (textures arrive in the asset phase)
-  setEnvironmentFromEquirect(texture, intensity = 1) {
-    const env = this.pmrem.fromEquirectangular(texture);
-    texture.dispose();
-    this.scene.environment = env.texture;
-    this.scene.environmentIntensity = intensity;
-    return env.texture;
-  }
-
   setEnvironmentIntensity(v) {
     this.scene.environmentIntensity = v;
   }

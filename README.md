@@ -1,16 +1,18 @@
 # BAYVALE
 
 An original open-world action game for the browser, built from scratch with
-Three.js — a living stylized-realistic city with cinematic lighting, real
-rigged characters, ten vehicle types, a six-star wanted system, enterable
-shops, intelligent role-based NPCs, first-person and third-person combat with
-ragdolls, a 12-mission story, and a full generated soundtrack.
+Three.js — a living city with a real sun and moon, weather, true collision
+physics, walk-in interiors with no loading screens, original generated
+characters and vehicles, a six-star wanted system, intelligent role-based
+NPCs, first-person and third-person combat with ragdolls, a 12-mission
+story, and a full generated soundtrack.
 
-The city, story, characters and design are **100% original**. Real 3D models,
-PBR textures and HDRIs come from CC0/MIT sources (see `ATTRIBUTION.md`); every
-sound effect, voice line and radio track was **generated** with the ElevenLabs
-API. The game degrades gracefully to procedural geometry/textures/audio if any
-asset is missing, so it always runs.
+The city, story, characters and design are **100% original** — and so are
+the models: **every visible 3D asset (people, cars, buildings, street
+furniture, palms, sky) is generated at runtime by the game's own code.**
+The only third-party inputs are CC0 surface textures, an MIT animation-clip
+source that is never rendered (see `ATTRIBUTION.md`), and audio that was
+**generated** with the ElevenLabs API.
 
 ![Bayvale](screenshots/g1-vehicles.png)
 
@@ -33,29 +35,40 @@ away, working your way up from taxi errands for your cousin **Rosa** to
 dismantling **Ray Corvo**'s grip on the city, one mission at a time.
 
 - **Open world** — a 1.8 km × 1.8 km island city with nine palm-lined
-  districts, ACES-tone-mapped cinematic lighting with bloom, HDRI sky, a
-  day/night cycle that drives exposure and lit windows, parked cars on every
-  block, working traffic lights, and drifting clouds over the bay.
-- **Vehicles** — ten types (sedans, sports cars, taxis, pickups, vans, buses,
-  bikes, ambulances, police cruisers, fire engines) using real 3D models with
-  spinning/steering wheels, arcade drift handling, damage → smoke → fire →
-  explosion, headlights, horns, carjacking and drive-bys.
-- **Living NPCs** — rigged, animated pedestrians with six roles (commuters,
-  tourists, joggers, elderly, vendors, gangsters), each with a personality
-  that decides how they react: flee, cower, film you on their phone, fight
-  back, or call the police. Beat cops patrol; firefighters respond to street
-  fires; paramedics revive the wounded. Everyone reacts differently.
-- **Enterable interiors** — walk into stores, diners, laundromats, the gun
-  shop, the burger joint, a nightclub with dancers, and your safehouse.
-  Hold a gun on a clerk to rob the register (heat rises when you step out).
+  districts, murals, utility poles with sagging wires, parked cars on every
+  block, working traffic lights, and rooftop clutter over the bay.
+- **A real sky** — visible sun disc with flare, a cratered moon with live
+  phases, stars, drifting clouds, and a procedural sky dome that re-bakes
+  the scene's environment lighting every half game-hour. Weather rolls
+  between clear, overcast and rain — rain slicks the streets glossy, closes
+  the fog in, and flashes lightning at night.
+- **Real collision** — cars are true oriented boxes that can't pass through
+  each other, trees, or poles. Lamp posts and traffic lights snap and topple
+  on hard hits, hydrants burst into 20-second water geysers, trash cans
+  tumble, crashes shatter glass and leave skid marks.
+- **Walk-in interiors** — no loading screens, no teleports: buildings hollow
+  out as you approach and you walk through a swinging glass door into
+  stores, diners, laundromats, the gun shop, the burger joint, a nightclub
+  with dancers, and your safehouse. Hold a gun on a clerk to rob the
+  register — the heat lands when you step back onto the street, and ducking
+  indoors breaks police line of sight.
+- **Original people** — every pedestrian is a generated human: men and
+  women of all ages and builds, with faces, hairstyles, beards, gray hair
+  and wrinkles for the elderly, hoodies and floral shirts and uniforms —
+  cops with caps and badges, firefighters in turnout gear and helmets,
+  medics with the cross, keepers in aprons — all driven by real animation
+  clips and six personality-driven roles that decide how they react: flee,
+  cower, film you on their phone, fight back, or call the police.
+- **Original vehicles** — ten types, each a profile-extruded body with real
+  wheel arches, smoked-glass greenhouse, clearcoat paint, license plates,
+  mirrors, and working lightbars/sirens/liveries for the services.
 - **Combat 2.0** — first-person and third-person, six weapons with recoil,
   tracers, ejected shells and muzzle flashes; melee combos with lunges,
   hit-stop and knockdowns; hard lock-on (Tab), dodge rolls, a weapon wheel;
   ragdoll physics and blood pools on every takedown.
 - **Wanted system** — six stars: foot patrols → cruisers (with PIT maneuvers
   and rubber-banding) → roadblocks → tactical units → a searchlight
-  helicopter. Break line of sight, or respray. **BUSTED** or **WASTED** on
-  capture/death.
+  helicopter. Break line of sight, duck into a store, or respray.
 - **Missions** — 12 story missions across three contacts (drive, chase, tail,
   escort, defend, assault), plus taxi fares and 30 hidden lucky coins.
 - **Audio** — generated weapon/vehicle/world SFX with distance + stereo pan,
@@ -85,16 +98,15 @@ dismantling **Ray Corvo**'s grip on the city, one mission at a time.
 | V | camera: near / mid / far / first-person |
 | Esc / P | pause (quality settings here) |
 
-Walk into a glowing yellow door to enter a shop; the cyan marker inside is
-the exit.
+Glowing yellow markers on the sidewalk are enterable doors — just walk in.
 
 ## Regenerating assets
 
-Models, textures, HDRIs and audio are committed, so the game runs as-is.
-To re-fetch or regenerate them:
+Textures, the animation source and all audio are committed, so the game runs
+as-is. To re-fetch or regenerate them:
 
 ```bash
-node tools/fetch-assets.mjs                 # CC0/MIT models, textures, HDRIs
+node tools/fetch-assets.mjs                 # CC0 textures + MIT animation source
 ELEVENLABS_API_KEY=sk_... node tools/gen-audio.mjs --all   # SFX, voice, music
 ```
 
@@ -103,36 +115,36 @@ committed. If you were handed a key in chat, rotate it after use.
 
 ## Testing
 
-Headless smoke tests (Playwright + the game's `window.__game` debug API):
+Headless verification (Playwright + the game's `window.__game` debug API):
 
 ```bash
 npm start &                   # server on :8080
-node test/boot.mjs            # boot, walk, day/night, draw calls
-node test/drive.mjs           # vehicle entry, driving, traffic, peds
-node test/combat.mjs          # weapons, wanted stars, police, wasted flow
-node test/missions.mjs        # mission chain, shops, save/load, routing
-node test/deep.mjs            # 6-star escalation, respray, soak
-node test/npc.mjs             # archetypes, witnesses, fire/medic dispatch
-node test/interiors.mjs       # enter/exit, robbery, bed save, counters
-node test/g6.mjs              # first-person, ragdoll, lock-on, combos
-node test/audio.mjs           # audio manifest + buffer playback
-node test/chase.mjs           # PIT chase, helicopter
+npm test                      # all 14 suites
 ```
 
-The tests fast-forward the simulation deterministically (`__game.tick`), so
-they pass even on slow software renderers.
+Suites: boot, drive, **collision** (OBB cars, knockables, geysers),
+**people** (character variety, uniforms, clip binding), **sky** (sun/moon,
+env re-bake, rain), combat, missions, deep (6-star, respray, soak), npc
+(archetypes, witnesses, dispatch), **interiors** (continuous-position
+walk-in, robbery, bed, counters), g6 (first-person, ragdolls, lock-on,
+streetscape), audio, chase (PIT, helicopter), and a full continuous
+playthrough. Tests fast-forward the simulation deterministically
+(`__game.tick`), so they pass even on slow software renderers.
 
 ## Architecture
 
 ```
 index.html            HUD DOM + import map (three.js vendored, no bundler)
 src/main.js           boot, game loop, mode state machine, debug API
-src/core/             input, third-person camera, audio synth, radio, save, RNG
+src/core/             input, camera, graphics, animator, audio, radio, save
 src/world/            seeded city generator (road graph → districts → lots),
-                      canvas textures, merged chunk meshes, terrain, day/night
-src/entities/         humanoid rig, player, peds, cops, goons, vehicles
-src/systems/          traffic, pedestrians, combat, wanted, missions,
-                      world-life (shops/pickups/taxi/map), particles
+                      canvas textures, chunk meshes, terrain, sky, day/night,
+                      props + vegetation libraries (all generated geometry)
+src/entities/         character factory (mesh+atlas), player, peds, cops,
+                      goons, vehicle factory + physics
+src/systems/          traffic, pedestrians, combat, wanted, missions, gore,
+                      knockables, weather, dispatch, walk-in interiors,
+                      world-life, particles
 src/ui/               HUD, rotating minimap
 ```
 

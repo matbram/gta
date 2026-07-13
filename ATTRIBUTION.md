@@ -1,28 +1,23 @@
 # Asset Attribution
 
 Bayvale's code, city, story, characters and design are original work created
-for this project. Third-party **assets** are used under the licenses below.
-All were downloaded from their official sources by `tools/fetch-assets.mjs`.
+for this project. **Every visible 3D model in the game is generated at
+runtime by the project's own code** — people, vehicles, buildings, street
+furniture, vegetation, sky, sun and moon included. The remaining third-party
+inputs are listed below.
 
-## 3D Models
+## Animation source
 
-- **KayKit — City Builder Bits** (cars, streetlights, hydrants, benches,
-  dumpsters, trash, bushes) — CC0 1.0 (public domain). By Kay Lousberg.
-  https://kaylousberg.itch.io/kaykit-city-builder-bits
-- **Kenney — Racing Kit & City Builder Kit** (truck, motorcycle, tree
-  clusters) — CC0 1.0. By Kenney. https://kenney.nl
-- **three.js example models** (Soldier.glb rigged character, Ferrari) —
-  MIT license, © three.js authors. https://github.com/mrdoob/three.js
+- **three.js example `Soldier.glb`** — MIT license, © three.js authors.
+  https://github.com/mrdoob/three.js — used **solely as the animation and
+  skeleton source** (Idle/Walk/Run clips + Mixamo-style bone hierarchy) for
+  Bayvale's own generated character bodies. The GLB's mesh is stripped at
+  load and never rendered. Stored at `assets/anim/soldier-rig.glb`.
 
-## Textures
+## Surface textures
 
 - **ambientCG** (asphalt, sidewalk, brick, concrete, plaster, grass, sand,
   metal PBR sets) — CC0 1.0. https://ambientcg.com
-
-## HDRIs
-
-- **Poly Haven** (day / dusk / night sky environment maps) — CC0 1.0.
-  https://polyhaven.com
 
 ## Audio
 

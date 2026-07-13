@@ -4,7 +4,6 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from '../../vendor/jsm/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from '../../vendor/jsm/utils/SkeletonUtils.js';
 
 export class Assets {
@@ -14,9 +13,6 @@ export class Assets {
     this.manifest = null;
 
     this.gltfLoader = new GLTFLoader();
-    const draco = new DRACOLoader();
-    draco.setDecoderPath('./vendor/draco/');
-    this.gltfLoader.setDRACOLoader(draco);
     this.texLoader = new THREE.TextureLoader();
   }
 

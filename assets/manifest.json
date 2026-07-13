@@ -1,30 +1,8 @@
 {
   "generated": "rebuild",
+  "note": "Soldier is used ONLY as the animation/skeleton source \u2014 its mesh is never rendered. All visible 3D content is generated at runtime.",
   "models": {
-    "Soldier": "assets/models/chars/Soldier.glb",
-    "Xbot": "assets/models/chars/Xbot.glb",
-    "trafficlight_A": "assets/models/kaykit/trafficlight_A.gltf",
-    "car_taxi": "assets/models/kaykit/car_taxi.gltf",
-    "car_stationwagon": "assets/models/kaykit/car_stationwagon.gltf",
-    "dumpster": "assets/models/kaykit/dumpster.gltf",
-    "firehydrant": "assets/models/kaykit/firehydrant.gltf",
-    "watertower": "assets/models/kaykit/watertower.gltf",
-    "bench": "assets/models/kaykit/bench.gltf",
-    "trash_B": "assets/models/kaykit/trash_B.gltf",
-    "streetlight": "assets/models/kaykit/streetlight.gltf",
-    "car_sedan": "assets/models/kaykit/car_sedan.gltf",
-    "trash_A": "assets/models/kaykit/trash_A.gltf",
-    "bush": "assets/models/kaykit/bush.gltf",
-    "car_hatchback": "assets/models/kaykit/car_hatchback.gltf",
-    "trafficlight_C": "assets/models/kaykit/trafficlight_C.gltf",
-    "car_police": "assets/models/kaykit/car_police.gltf",
-    "vehicle-motorcycle": "assets/models/kenney-racing/vehicle-motorcycle.glb",
-    "vehicle-truck-green": "assets/models/kenney-racing/vehicle-truck-green.glb",
-    "vehicle-truck-red": "assets/models/kenney-racing/vehicle-truck-red.glb",
-    "pavement-fountain": "assets/models/kenney-city/pavement-fountain.glb",
-    "grass-trees-tall": "assets/models/kenney-city/grass-trees-tall.glb",
-    "grass-trees": "assets/models/kenney-city/grass-trees.glb",
-    "sports": "assets/models/vehicles/sports.glb"
+    "Soldier": "assets/anim/soldier-rig.glb"
   },
   "textures": [
     "brick",
@@ -35,10 +13,5 @@
     "sand",
     "plaster",
     "asphalt"
-  ],
-  "hdri": [
-    "dusk",
-    "day",
-    "night"
   ]
 }

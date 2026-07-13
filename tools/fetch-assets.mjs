@@ -1,17 +1,18 @@
-// One-time asset fetcher. Downloads free game assets into assets/ (committed).
-// Sources: KayKit City Builder Bits (CC0), Kenney starter kits (MIT/CC0),
-// three.js example models, ambientCG PBR textures (CC0), Poly Haven HDRIs (CC0).
-// Every category is optional — the game falls back to procedural assets for
-// anything missing. Uses curl so the environment proxy is honoured.
+#!/usr/bin/env node
+// Downloads the two things Bayvale still fetches from the internet:
+//  - ambientCG PBR surface textures (CC0) for ground/facade materials
+//  - the three.js example Soldier.glb (MIT), used ONLY as the animation +
+//    skeleton source for our own generated characters (never rendered)
+// Everything else in the game — characters, vehicles, props, vegetation,
+// sky — is generated at runtime. Run: node tools/fetch-assets.mjs
 
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+import { mkdirSync, existsSync, renameSync, readdirSync, rmSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const A = (p) => path.join(ROOT, 'assets', p);
+const A = (p) => join(ROOT, 'assets', p);
 
-let ok = 0, fail = 0;
 function dl(url, dest, tries = 2) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dest) && fs.statSync(dest).size > 500) { ok++; return true; }
@@ -44,38 +45,6 @@ for n in z.namelist():
   execFileSync('python3', ['-c', script, zipPath, outDir, wanted ? wanted.join('|') : ''], { stdio: 'pipe' });
 }
 
-// ---------------------------------------------------------------- KayKit city bits (CC0)
-console.log('\n[KayKit City Builder Bits — CC0]');
-const KAYKIT_BASE = 'https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits/main/addons/kaykit_city_builder_bits/Assets/gltf/';
-const KAYKIT_ITEMS = [
-  'car_sedan', 'car_taxi', 'car_police', 'car_hatchback', 'car_stationwagon',
-  'trafficlight_A', 'trafficlight_C', 'streetlight', 'firehydrant', 'dumpster',
-  'bench', 'trash_A', 'trash_B', 'bush', 'watertower',
-];
-for (const item of KAYKIT_ITEMS) {
-  dl(KAYKIT_BASE + item + '.gltf', A('models/kaykit/' + item + '.gltf'));
-  dl(KAYKIT_BASE + item + '.bin', A('models/kaykit/' + item + '.bin'));
-}
-dl(KAYKIT_BASE + 'citybits_texture.png', A('models/kaykit/citybits_texture.png'));
-
-// ---------------------------------------------------------------- Kenney kits (MIT/CC0)
-console.log('\n[Kenney starter kits]');
-const KENNEY_RACING = 'https://raw.githubusercontent.com/KenneyNL/Starter-Kit-Racing/main/models/';
-for (const m of ['vehicle-truck-red', 'vehicle-truck-green', 'vehicle-motorcycle'])
-  dl(KENNEY_RACING + m + '.glb', A('models/kenney-racing/' + m + '.glb'));
-dl(KENNEY_RACING + 'Textures/colormap.png', A('models/kenney-racing/Textures/colormap.png'));
-const KENNEY_CITY = 'https://raw.githubusercontent.com/KenneyNL/Starter-Kit-City-Builder/main/models/';
-for (const m of ['grass-trees', 'grass-trees-tall', 'pavement-fountain'])
-  dl(KENNEY_CITY + m + '.glb', A('models/kenney-city/' + m + '.glb'));
-dl(KENNEY_CITY + 'Textures/colormap.png', A('models/kenney-city/Textures/colormap.png'));
-
-// ---------------------------------------------------------------- three.js example models
-console.log('\n[three.js example models]');
-const THREE_BASE = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/';
-dl(THREE_BASE + 'Soldier.glb', A('models/chars/Soldier.glb'));
-dl(THREE_BASE + 'Xbot.glb', A('models/chars/Xbot.glb'));
-dl(THREE_BASE + 'ferrari.glb', A('models/vehicles/sports.glb'));
-
 // ---------------------------------------------------------------- ambientCG PBR textures (CC0)
 console.log('\n[ambientCG PBR textures — CC0]');
 const TEXTURES = {
@@ -99,42 +68,15 @@ for (const [name, id] of Object.entries(TEXTURES)) {
   }
 }
 
-// ---------------------------------------------------------------- Poly Haven HDRIs (CC0)
-console.log('\n[Poly Haven HDRIs — CC0]');
-const HDRIS = {
-  day: 'kloofendal_48d_partly_cloudy_puresky',
-  dusk: 'kiara_1_dawn',
-  night: 'moonless_golf',
-};
-for (const [name, id] of Object.entries(HDRIS)) {
-  try {
-    const meta = JSON.parse(execFileSync('curl', ['-sL', '--max-time', '30', `https://api.polyhaven.com/files/${id}`], { encoding: 'utf8' }));
-    const url = meta?.hdri?.['1k']?.hdr?.url;
-    if (url) dl(url, A(`hdri/${name}.hdr`));
-    else console.log('  ✗ no 1k hdr for', id);
-  } catch (e) { console.log('  ✗ polyhaven meta failed', id); }
+
+// ---------------------------------------------------------------- animation source (MIT)
+console.log('\n[three.js Soldier.glb — MIT — animation/skeleton source only]');
+{
+  const dest = A('anim/soldier-rig.glb');
+  mkdirSync(dirname(dest), { recursive: true });
+  if (!existsSync(dest)) {
+    dl('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/Soldier.glb', dest);
+  } else console.log('  soldier-rig.glb already present');
 }
 
-// ---------------------------------------------------------------- manifest
-console.log('\n[manifest]');
-const manifest = { generated: new Date().toISOString(), models: {}, textures: [], hdri: [] };
-const walk = (dir, cb) => {
-  if (!fs.existsSync(dir)) return;
-  for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, f.name);
-    if (f.isDirectory()) walk(p, cb);
-    else cb(p);
-  }
-};
-walk(A('models'), (p) => {
-  if (/\.(glb|gltf)$/.test(p)) {
-    const rel = path.relative(A(''), p).replace(/\\/g, '/');
-    manifest.models[path.basename(p).replace(/\.(glb|gltf)$/, '')] = 'assets/' + rel;
-  }
-});
-walk(A('textures'), (p) => { if (p.endsWith('color.jpg')) manifest.textures.push(path.basename(path.dirname(p))); });
-walk(A('hdri'), (p) => { if (p.endsWith('.hdr')) manifest.hdri.push(path.basename(p, '.hdr')); });
-fs.rmSync(A('_tmp'), { recursive: true, force: true });
-fs.writeFileSync(A('manifest.json'), JSON.stringify(manifest, null, 2));
-console.log(`\nDone: ${ok} downloaded, ${fail} failed`);
-console.log('models:', Object.keys(manifest.models).length, '| texture sets:', manifest.textures.length, '| hdris:', manifest.hdri.length);
+console.log('\nDone. Manifest is checked in at assets/manifest.json.');
