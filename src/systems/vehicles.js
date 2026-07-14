@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { Vehicle, VEHICLE_TYPES } from '../entities/vehicle.js';
-import { clamp, dist2d, distSq2d, obbVsObb } from '../core/mathutil.js';
+import { clamp, dist2d, distSq2d, lerp, obbVsObb } from '../core/mathutil.js';
 
 // scratch OBBs for the pair loop (no per-pair garbage)
 const _oa = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
@@ -115,7 +115,11 @@ export class VehicleSystem {
     v.missionDriven = false;
     v.parked = false;
     player.vehicle = v;
-    player.rig.setAnim('drive');
+    player.rig.setAnim(v.spec.seat?.pose ?? 'drive');
+    // slide into the seat over a beat instead of teleporting
+    this._mountT = 0.35;
+    this._mountFrom = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+    player.rig.reachGesture?.(0.4);
     player.pos.set(v.pos.x, v.pos.y, v.pos.z);
     this.game.traffic?.releaseVehicle(v);
     this.game.wanted?.releaseCruiser(v);
@@ -179,10 +183,20 @@ export class VehicleSystem {
       } else {
         v.updatePhysics(dt, this.playerControl);
         player.pos.set(v.pos.x, v.pos.y, v.pos.z);
-        // visible seated driver — sink deeper into low cars so they sit in-seat
+        // visible seated driver at the per-type seat (driver's side, straddle
+        // on bikes), lerping in from the door during the mount beat
         player.rig.group.visible = true;
-        const seatDrop = 0.32 + (1.6 - v.spec.h) * 0.35;
-        player.rig.group.position.set(v.pos.x, v.pos.y - seatDrop, v.pos.z);
+        const seat = v.seatRigWorld();
+        if (this._mountT > 0) {
+          this._mountT -= dt;
+          const k = clamp(1 - this._mountT / 0.35, 0, 1);
+          player.rig.group.position.set(
+            lerp(this._mountFrom.x, seat.x, k),
+            lerp(this._mountFrom.y, seat.y, k),
+            lerp(this._mountFrom.z, seat.z, k));
+        } else {
+          player.rig.group.position.set(seat.x, seat.y, seat.z);
+        }
         player.rig.group.rotation.y = v.heading;
         player.rig.update(dt, 0);
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;

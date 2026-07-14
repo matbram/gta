@@ -39,6 +39,14 @@ const OVERLAY_POSES = {
     foreArmL: [-0.55, 0, 0], foreArmR: [-0.55, 0, 0],
     spine1: [0.08, 0, 0],
   },
+  // motorcycle straddle: knees out and gripping the tank, leaning into the bars
+  ride: {
+    upLegL: [-0.95, 0, 0.55], upLegR: [-0.95, 0, -0.55],
+    legL: [1.15, 0, 0], legR: [1.15, 0, 0],
+    armL: [-0.95, 0, 0.1], armR: [-0.95, 0, -0.1],
+    foreArmL: [-0.25, 0, 0], foreArmR: [-0.25, 0, 0],
+    spine1: [0.32, 0, 0], head: [-0.2, 0, 0],
+  },
   sit: {
     upLegL: [-1.45, 0, 0.1], upLegR: [-1.45, 0, -0.1],
     legL: [1.35, 0, 0], legR: [1.35, 0, 0],
@@ -235,6 +243,22 @@ export const GESTURES = {
     if (bones.spine2) {
       e.set(0, 0.45 * ext, 0); q.setFromEuler(e);
       bones.spine2.quaternion.multiply(q);
+    }
+  },
+  // reach out with the right hand — door handles, pickups
+  reach(bones, q, e, t) {
+    const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.armR) {
+      e.set(-1.05 * ext, 0, -0.2 * ext); q.setFromEuler(e);
+      bones.armR.quaternion.multiply(q);
+    }
+    if (bones.foreArmR) {
+      e.set(-0.3 * ext, 0, 0); q.setFromEuler(e);
+      bones.foreArmR.quaternion.multiply(q);
+    }
+    if (bones.spine1) {
+      e.set(0.16 * ext, -0.12 * ext, 0); q.setFromEuler(e);
+      bones.spine1.quaternion.multiply(q);
     }
   },
   // flinch away from a hit

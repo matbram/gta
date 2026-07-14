@@ -133,7 +133,7 @@ export class TrafficSystem {
     const ped = new Ped(city, this.game.scene, randomLook(Math.random));
     ped.state = 'driver';
     ped.inVehicle = v;
-    ped.rig.setAnim('drive');
+    ped.rig.setAnim(v.spec.seat?.pose ?? 'drive');
     car.driverPed = ped;
     v.driver = ped;
 
@@ -144,7 +144,8 @@ export class TrafficSystem {
 
   seatDriver(car, dt) {
     const dp = car.driverPed, v = car.vehicle;
-    dp.pos.set(v.pos.x, v.pos.y - (0.32 + (1.6 - v.spec.h) * 0.35), v.pos.z);
+    const seat = v.seatRigWorld();
+    dp.pos.set(seat.x, seat.y, seat.z);
     dp.heading = v.heading;
     dp.rig.group.position.copy(dp.pos);
     dp.rig.group.rotation.y = dp.heading;

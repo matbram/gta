@@ -6,17 +6,29 @@ import { clamp, damp, lerp, obbVsAabb, wrapAngle } from '../core/mathutil.js';
 import { buildVehicleMesh, SHARED_MATS, SHARED_GEOS } from './vehiclemesh.js';
 
 // All vehicle names are original.
+// seat: where the driver's rig root sits in local space (x right, z forward,
+// y relative to the vehicle origin) and which pose they hold.
 export const VEHICLE_TYPES = {
-  sedan:   { name: 'Falcon',    w: 1.85, l: 4.5,  h: 1.42, maxSpeed: 31, accel: 9,  grip: 7.5, steer: 2.3, mass: 1.0, colors: [0x8a2f26, 0x2e4a6a, 0x777d85, 0x3e3e42, 0x8a7c58, 0x5b6b5a] },
-  sports:  { name: 'Vespera',   w: 1.9,  l: 4.3,  h: 1.16, maxSpeed: 44, accel: 14, grip: 9.5, steer: 2.7, mass: 0.9, colors: [0xb03a2e, 0xe8c84a, 0x2255aa, 0x111111, 0xd8d8d8] },
-  taxi:    { name: 'Falcon Cab',w: 1.85, l: 4.5,  h: 1.42, maxSpeed: 31, accel: 9,  grip: 7.5, steer: 2.3, mass: 1.0, colors: [0xd8a018] },
-  pickup:  { name: 'Mesa',      w: 2.0,  l: 5.0,  h: 1.75, maxSpeed: 28, accel: 7.5, grip: 6.5, steer: 2.0, mass: 1.35, colors: [0x5a4632, 0x3e4a3e, 0x6b7078, 0x7a3020] },
-  van:     { name: 'Boxer',     w: 2.05, l: 5.2,  h: 2.25, maxSpeed: 26, accel: 6.5, grip: 6,   steer: 1.9, mass: 1.5,  colors: [0xd8d4c8, 0x4a5a6a, 0x7a6a4a] },
-  bus:     { name: 'Bayliner',  w: 2.5,  l: 10.5, h: 3.0,  maxSpeed: 22, accel: 4.5, grip: 5.5, steer: 1.35, mass: 3.2, colors: [0x3a6a8a] },
-  police:  { name: 'Interceptor', w: 1.9, l: 4.7, h: 1.45, maxSpeed: 38, accel: 12, grip: 8.5, steer: 2.5, mass: 1.1, colors: [0x16181d] },
-  moto:    { name: 'Comet 250', w: 0.8,  l: 2.2,  h: 1.1,  maxSpeed: 40, accel: 13, grip: 8,   steer: 3.0, mass: 0.35, colors: [0x8a2f26, 0x22262c, 0x2e4a6a] },
-  ambulance: { name: 'Lifeline', w: 2.1, l: 5.4,  h: 2.4,  maxSpeed: 30, accel: 8,  grip: 6.5, steer: 2.0, mass: 1.6, colors: [0xe8e4dc] },
-  firetruck: { name: 'BFD Engine 3', w: 2.4, l: 7.6, h: 2.9, maxSpeed: 27, accel: 7, grip: 6.5, steer: 1.7, mass: 2.6, colors: [0xb02318] },
+  sedan:   { name: 'Falcon',    w: 1.85, l: 4.5,  h: 1.42, maxSpeed: 31, accel: 9,  grip: 7.5, steer: 2.3, mass: 1.0, colors: [0x8a2f26, 0x2e4a6a, 0x777d85, 0x3e3e42, 0x8a7c58, 0x5b6b5a],
+    seat: { x: -0.38, y: -0.36, z: 0.1, pose: 'drive' } },
+  sports:  { name: 'Vespera',   w: 1.9,  l: 4.3,  h: 1.16, maxSpeed: 44, accel: 14, grip: 9.5, steer: 2.7, mass: 0.9, colors: [0xb03a2e, 0xe8c84a, 0x2255aa, 0x111111, 0xd8d8d8],
+    seat: { x: -0.36, y: -0.46, z: 0.02, pose: 'drive' } },
+  taxi:    { name: 'Falcon Cab',w: 1.85, l: 4.5,  h: 1.42, maxSpeed: 31, accel: 9,  grip: 7.5, steer: 2.3, mass: 1.0, colors: [0xd8a018],
+    seat: { x: -0.38, y: -0.36, z: 0.1, pose: 'drive' } },
+  pickup:  { name: 'Mesa',      w: 2.0,  l: 5.0,  h: 1.75, maxSpeed: 28, accel: 7.5, grip: 6.5, steer: 2.0, mass: 1.35, colors: [0x5a4632, 0x3e4a3e, 0x6b7078, 0x7a3020],
+    seat: { x: -0.42, y: -0.2, z: 0.3, pose: 'drive' } },
+  van:     { name: 'Boxer',     w: 2.05, l: 5.2,  h: 2.25, maxSpeed: 26, accel: 6.5, grip: 6,   steer: 1.9, mass: 1.5,  colors: [0xd8d4c8, 0x4a5a6a, 0x7a6a4a],
+    seat: { x: -0.44, y: -0.08, z: 1.0, pose: 'drive' } },
+  bus:     { name: 'Bayliner',  w: 2.5,  l: 10.5, h: 3.0,  maxSpeed: 22, accel: 4.5, grip: 5.5, steer: 1.35, mass: 3.2, colors: [0x3a6a8a],
+    seat: { x: -0.6, y: 0.12, z: 3.6, pose: 'drive' } },
+  police:  { name: 'Interceptor', w: 1.9, l: 4.7, h: 1.45, maxSpeed: 38, accel: 12, grip: 8.5, steer: 2.5, mass: 1.1, colors: [0x16181d],
+    seat: { x: -0.38, y: -0.35, z: 0.12, pose: 'drive' } },
+  moto:    { name: 'Comet 250', w: 0.8,  l: 2.2,  h: 1.1,  maxSpeed: 40, accel: 13, grip: 8,   steer: 3.0, mass: 0.35, colors: [0x8a2f26, 0x22262c, 0x2e4a6a],
+    seat: { x: 0, y: 0.02, z: -0.24, pose: 'ride' } },
+  ambulance: { name: 'Lifeline', w: 2.1, l: 5.4,  h: 2.4,  maxSpeed: 30, accel: 8,  grip: 6.5, steer: 2.0, mass: 1.6, colors: [0xe8e4dc],
+    seat: { x: -0.46, y: -0.02, z: 1.5, pose: 'drive' } },
+  firetruck: { name: 'BFD Engine 3', w: 2.4, l: 7.6, h: 2.9, maxSpeed: 27, accel: 7, grip: 6.5, steer: 1.7, mass: 2.6, colors: [0xb02318],
+    seat: { x: -0.52, y: 0.1, z: 2.3, pose: 'drive' } },
 };
 
 let nextVehicleId = 1;
@@ -87,6 +99,18 @@ export class Vehicle {
     return {
       x: this.pos.x + lx * (this.spec.w / 2 + 0.7),
       z: this.pos.z + lz * (this.spec.w / 2 + 0.7),
+    };
+  }
+
+  // where the driver's rig root goes, in world space, plus the pose to hold
+  seatRigWorld() {
+    const s = this.spec.seat ?? { x: -0.38, y: -(0.32 + (1.6 - this.spec.h) * 0.35), z: 0, pose: 'drive' };
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    return {
+      x: this.pos.x + fz * s.x + fx * s.z,
+      y: this.pos.y + s.y,
+      z: this.pos.z - fx * s.x + fz * s.z,
+      pose: s.pose,
     };
   }
 

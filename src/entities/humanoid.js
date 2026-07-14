@@ -418,6 +418,7 @@ export class SkinnedHumanoid {
       case 'jump': A.play('idle', { timeScale: 0.2 }); A.setOverlay('jump'); break;
       case 'swim': A.play('idle', { timeScale: 0.6 }); A.setOverlay('swim'); break;
       case 'drive': A.play('idle', { timeScale: 0.12 }); A.setOverlay('drive'); break;
+      case 'ride': A.play('idle', { timeScale: 0.12 }); A.setOverlay('ride'); break;
       case 'aim': A.play('idle', { timeScale: 0.5 }); A.setOverlay('aimPistol'); break;
       case 'aimwalk': A.play('walk'); A.setOverlay('aimPistol'); break;
       // extended poses used by NPC behaviours
@@ -440,6 +441,10 @@ export class SkinnedHumanoid {
 
   flinch() {
     this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t));
+  }
+
+  reachGesture(dur = 0.4) {
+    this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.reach(bones, q, e, t));
   }
 
   die() {
