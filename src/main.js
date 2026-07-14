@@ -118,6 +118,12 @@ class Game {
     // lazy-loaded gameplay systems land here in later phases
     await this.loadSystems(prog);
 
+    await prog(99, 'warming up the shaders…');
+    // every light the game will ever use is in the scene by now (pooled —
+    // adding one later would recompile every material). Pay the full shader
+    // compile cost here on the loading screen instead of as in-game freezes.
+    try { this.renderer.compile(this.scene, this.camera); } catch {}
+
     await prog(100, 'done');
     this.showMenu();
 

@@ -40,6 +40,15 @@ export class WantedSystem {
     this.incognito = false;
     this.playerSeen = false;
     this._proxT = 0;
+    // chopper searchlight lives in the scene permanently (intensity 0 when
+    // grounded) — adding a light mid-game forces every material in the scene
+    // to recompile its shader, which reads as a multi-second freeze at 5★
+    if (game.THREE && game.scene) {
+      const spot = new game.THREE.SpotLight(0xffffff, 0, 120, 0.35, 0.4, 1.5);
+      game.scene.add(spot);
+      game.scene.add(spot.target);
+      this.chopperSpot = spot;
+    }
   }
 
   // ---------------- heat ----------------
@@ -545,10 +554,6 @@ export class WantedSystem {
     const rotor = new game.THREE.Mesh(new game.THREE.BoxGeometry(9, 0.08, 0.4), new game.THREE.MeshBasicMaterial({ color: 0x333333 }));
     rotor.position.y = 1; g.add(rotor);
     this.chopperRotor = rotor;
-    const spot = new game.THREE.SpotLight(0xffffff, 0, 120, 0.35, 0.4, 1.5);
-    spot.position.set(0, 0, 0);
-    g.add(spot); g.add(spot.target);
-    this.chopperSpot = spot;
     game.scene.add(g);
     this.chopper = g;
     this.chopperAngle = 0;
@@ -565,10 +570,13 @@ export class WantedSystem {
     this.chopper.position.set(cx, 45, cz);
     this.chopper.lookAt(p.x, 45, p.z);
     this.chopperRotor.rotation.y += dt * 40;
-    // searchlight tracks the player
-    this.chopperSpot.intensity = game.dayNight?.nightIntensity > 0.3 ? 8 : 2;
-    this.chopperSpot.target.position.set(p.x, 0, p.z);
-    this.chopperSpot.target.updateMatrixWorld();
+    // searchlight tracks the player (scene-level light, follows the chopper)
+    if (this.chopperSpot) {
+      this.chopperSpot.position.set(cx, 45, cz);
+      this.chopperSpot.intensity = game.dayNight?.nightIntensity > 0.3 ? 8 : 2;
+      this.chopperSpot.target.position.set(p.x, 0, p.z);
+      this.chopperSpot.target.updateMatrixWorld();
+    }
   }
 
   despawnChopper() {
@@ -576,6 +584,7 @@ export class WantedSystem {
     this.game.audio?.stopSiren?.('chopper');
     this.chopper.removeFromParent();
     this.chopper = null;
+    if (this.chopperSpot) this.chopperSpot.intensity = 0;   // light stays in scene
   }
 
   despawnAll(instant = false) {

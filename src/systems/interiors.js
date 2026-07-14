@@ -64,8 +64,31 @@ export class Interiors {
     this.couchMat = new THREE.MeshLambertMaterial({ color: 0x3e4e3e });
     this.tvMat = new THREE.MeshLambertMaterial({ color: 0x14161a, emissive: 0x223344, emissiveIntensity: 0.4 });
 
+    // Shared light pool, created ONCE and never removed from the scene.
+    // Adding/removing a light changes the scene's light count and forces
+    // three.js to recompile every material's shader (a multi-second stall),
+    // so rooms borrow these instead of owning lights. Only the room the
+    // player occupies needs light anyway.
+    this.roomLight = new THREE.PointLight(0xffe8c0, 0, 24, 2);
+    this.roomLightRec = null;
+    game.scene.add(this.roomLight);
+    this.clubLights = [0xff3366, 0x33aaff, 0xaaff33].map((c) => {
+      const L = new THREE.PointLight(c, 0, 16, 1.8);
+      game.scene.add(L);
+      return L;
+    });
+
     this.buildRecs();
     this.buildDoorMarkers();
+  }
+
+  // park the shared room light in a rec (world coords) at a given intensity
+  setRoomLight(rec, intensity) {
+    if (!rec?.built) return;
+    this.roomLightRec = rec;
+    this.roomLight.position.set(rec.b.x, rec.built.gy + 2.8, rec.b.z);
+    this.roomLight.distance = Math.max(rec.built.w, rec.built.dep) + 4;
+    this.roomLight.intensity = intensity;
   }
 
   buildRecs() {
@@ -186,11 +209,8 @@ export class Interiors {
     floor.receiveShadow = true;
     mesh(new THREE.BoxGeometry(w, 0.14, dep), this.ceilMat, 0, 3.27, 0);
     mesh(new THREE.BoxGeometry(1.4, 0.08, 1.4), this.lampMat, 0, 3.12, 0);
-    const light = new THREE.PointLight(0xffe8c0, 0, Math.max(w, dep) + 4, 2);
-    light.position.set(0, 2.8, 0);
-    g.add(light);
 
-    rec.built = { group: g, boxes, w, dep, gy, light, face };
+    rec.built = { group: g, boxes, w, dep, gy, face };
     rec.register = null;
     rec.bed = null;
     rec.counterAction = null;
@@ -253,13 +273,7 @@ export class Interiors {
       }
     } else if (t === 'club') {
       addCounter(-hw * 0.55, -hd * 0.5, Math.min(4, w * 0.35));
-      rec.clubLights = [];
-      for (const c of [0xff3366, 0x33aaff, 0xaaff33]) {
-        const spot = new THREE.PointLight(c, 0, 16, 1.8);
-        spot.position.set(Math.random() * 4 - 2, 2.6, Math.random() * 3 - 1.5);
-        rec.built.group.add(spot);
-        rec.clubLights.push(spot);
-      }
+      rec.clubLights = this.clubLights;    // borrow the shared pool (see ctor)
     } else if (t === 'safehouse') {
       solid(-hw * 0.55, mz(-hd * 0.5), 1.7, 2.4, 0.55, this.bedMat);
       mesh(new THREE.BoxGeometry(1.5, 0.18, 0.6), this.pillowMat, -hw * 0.55, 0.62, mz(-hd * 0.5 - 0.8));
@@ -315,6 +329,7 @@ export class Interiors {
   unfurnish(rec) {
     if (!rec.furnished) return;
     rec.furnished = false;
+    if (rec.clubLights) for (const L of rec.clubLights) L.intensity = 0;
     if (rec.keeper) {
       if (rec.keeper.dead) rec.keeperDead = true;
       rec.keeper.dispose();
@@ -331,6 +346,7 @@ export class Interiors {
   teardown(rec) {
     if (!rec.built) return;
     if (this.playerInside === rec) return;   // never yank the room out from under the player
+    if (this.roomLightRec === rec) { this.roomLight.intensity = 0; this.roomLightRec = null; }
     this.unfurnish(rec);
     const city = this.game.city;
     for (const box of rec.built.boxes) city.removeBox(box);
@@ -387,7 +403,7 @@ export class Interiors {
     const game = this.game;
     if (!this.playerInside) return;
     const rec = this.playerInside;
-    if (rec.built) rec.built.light.intensity = 0;
+    this.setRoomLight(rec, 0);
     game.player.interiorY = null;
     game.audio?.setIndoors?.(false);
     this.playerInside = null;
@@ -403,7 +419,7 @@ export class Interiors {
     this.robT = 0;               // robDrops lives on the rec — stepping out
     this.counterArmed = true;    // and back in can't reset a half-done heist
     game.player.interiorY = rec.built.gy;
-    rec.built.light.intensity = 2.2;
+    this.setRoomLight(rec, 2.2);
     game.audio?.chime?.();
     game.audio?.setIndoors?.(true);
     game.hud.showZone(LABELS[rec.template] ?? 'STORE');
@@ -413,7 +429,7 @@ export class Interiors {
   exitState() {
     const game = this.game;
     const rec = this.playerInside;
-    if (rec?.built) rec.built.light.intensity = 0.6;
+    if (rec?.built) this.setRoomLight(rec, 0.6);   // dim spill from the last room
     this.playerInside = null;
     this.current = null;
     game.player.interiorY = null;
@@ -487,12 +503,15 @@ export class Interiors {
         }
       }
 
-      // club lights swirl while anyone's around
+      // club lights swirl while anyone's around (shared pool, world coords)
       if (rec.clubLights && rec.furnished) {
         rec.clubLights.forEach((L, i) => {
           L.intensity = this.playerInside === rec ? 2.6 : 0.8;
-          L.position.x = Math.sin(t * 0.9 + i * 2.1) * 4;
-          L.position.z = Math.cos(t * 1.3 + i * 1.7) * 3;
+          L.position.set(
+            rec.b.x + Math.sin(t * 0.9 + i * 2.1) * 4,
+            rec.built.gy + 2.6,
+            rec.b.z + Math.cos(t * 1.3 + i * 1.7) * 3,
+          );
         });
       }
     }

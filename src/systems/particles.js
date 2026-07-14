@@ -107,6 +107,11 @@ export class ParticleSystem {
     this.game = game;
     this.smoke = new Cloud(game.scene, THREE.NormalBlending);
     this.glow = new Cloud(game.scene, THREE.AdditiveBlending);
+    // created up front, never removed: adding a light later would change the
+    // scene's light count and force a full shader recompile mid-firefight
+    this._mLight = new THREE.PointLight(0xffddaa, 0, 22, 2);
+    this._mLightT = 0;
+    game.scene.add(this._mLight);
   }
 
   update(dt) {
@@ -210,11 +215,6 @@ export class ParticleSystem {
 
   // brief point-light flash at the muzzle (pooled, one shared light)
   muzzleLight(x, y, z) {
-    if (!this._mLight) {
-      this._mLight = new THREE.PointLight(0xffddaa, 0, 22, 2);
-      this.game.scene.add(this._mLight);
-      this._mLightT = 0;
-    }
     this._mLight.position.set(x, y, z);
     this._mLight.intensity = 6;
     this._mLightT = 0.06;
