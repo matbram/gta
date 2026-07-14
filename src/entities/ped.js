@@ -858,6 +858,11 @@ export class Ped {
       }
     }
     want += this._avoid ?? 0;
+    // a drunk weaves — a slow sine wobble on the heading and a lurch now and then
+    if (this.drunk) {
+      want += Math.sin(this.stateT * 1.7 + this.id) * 0.55;
+      speed *= 0.7;
+    }
     this.heading = angleDamp(this.heading, want, 8, dt);
     this.speed = speed;
     const mx = Math.sin(this.heading) * speed * dt;

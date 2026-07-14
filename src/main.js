@@ -174,6 +174,8 @@ class Game {
       this.parkedCars = new parked.ParkedCars(this);
       const dispatch = await import('./systems/dispatch.js');
       this.dispatch = new dispatch.Dispatch(this);
+      const chaos = await import('./systems/chaos.js');
+      this.chaos = new chaos.ChaosDirector(this);
       const interiors = await import('./systems/interiors.js');
       this.interiors = new interiors.Interiors(this);
       // interiors moved some POIs onto their claimed doors — re-sync the
@@ -461,6 +463,7 @@ class Game {
     this.interiors?.update(dt);
     this.missions?.update(dt);
     this.worldlife?.update(dt);
+    this.chaos?.update(dt);
     this.particles?.update(dt);
     this.gore?.update(dt);
     this.knockables?.update(dt);

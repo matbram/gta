@@ -387,8 +387,13 @@ export class WantedSystem {
       this.driveCruiser(cr, dt);
       const v = cr.vehicle;
       const d = dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
-      // a flipped cruiser is out of the chase — drop the record like a wreck
-      if (v.dead || v.flipped || d > 320 || (stars === 0 && d > 80)) {
+      // NPC-chase cruisers (chaos director) live until the chase resolves or
+      // wanders far from the player; player cruisers cull on stars/distance.
+      // A flipped cruiser is out of the chase — drop the record like a wreck.
+      const cull = cr.npc
+        ? (cr.resolved || d > 220)
+        : (d > 320 || (stars === 0 && d > 80));
+      if (v.dead || v.flipped || cull) {
         game.audio?.stopSiren(v.id);
         if (!v.dead && !v.flipped) game.vehicles.remove(v);
         this.cruisers.splice(this.cruisers.indexOf(cr), 1);
@@ -428,6 +433,25 @@ export class WantedSystem {
       cop.patrol = patrol;
       this.footCops.push(cop);
       return cop;
+    }
+    return null;
+  }
+
+  // chaos director: a cruiser that chases a fleeing NPC's vehicle (never
+  // touches the player's wanted level). Spawns near the fugitive.
+  spawnNpcCruiser(target) {
+    const game = this.game;
+    for (let tries = 0; tries < 6; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 45 + Math.random() * 40;
+      const v = game.vehicles.spawnOnRoadNear(target.pos.x + Math.cos(a) * d, target.pos.z + Math.sin(a) * d, 'police');
+      if (!v) continue;
+      v.sirenOn = true;
+      v.aiControlled = true;
+      game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+      const cr = { vehicle: v, state: 'pursue', target, npc: true, unloaded: false, stuckT: 0, resolved: false };
+      this.cruisers.push(cr);
+      return cr;
     }
     return null;
   }
@@ -487,10 +511,57 @@ export class WantedSystem {
     const game = this.game;
     const v = cr.vehicle;
     if (v.dead) return;
+    v.flashSiren(game.time);
+
+    // chaos-director NPC pursuit: this cruiser is chasing a fleeing NPC's
+    // CAR, not the player. Runs the same intercept/PIT as a player chase,
+    // then arrests the driver when the car is stopped.
+    if (cr.target) {
+      const t = cr.target;
+      if (t.dead || t.driver == null || t.driver === 'player') { cr.resolved = true; return; }
+      const td = dist2d(v.pos.x, v.pos.z, t.pos.x, t.pos.z);
+      const lead = clamp(td / 30, 0, 1.4);
+      const wantH = Math.atan2(
+        (t.pos.x + t.vel.x * lead) - v.pos.x, (t.pos.z + t.vel.y * lead) - v.pos.z);
+      let e2 = wantH - v.heading;
+      while (e2 > Math.PI) e2 -= Math.PI * 2;
+      while (e2 < -Math.PI) e2 += Math.PI * 2;
+      let steer = clamp(e2 * 2, -1, 1);
+      v.chaseBoost = clamp(1 + (td - 20) / 120, 0.9, 1.25);
+      let throttle = 1;
+      const relX = t.pos.x - v.pos.x, relZ = t.pos.z - v.pos.z;
+      const side = Math.cos(v.heading) * relX - Math.sin(v.heading) * relZ;
+      if (td < 6.5 && Math.abs(v.speed) > 8) steer = clamp(side * 0.9, -1, 1);   // PIT
+      // driver's car stopped: pull the driver and make the collar
+      if (Math.abs(t.speed) < 1.5 && td < 14) {
+        throttle = v.speed > 1 ? -1 : 0;
+        const drv = t.driver;
+        if (drv && drv !== 'player') {
+          game.traffic?.releaseVehicle(t);
+          game.peds?.ejectDriver?.(drv, t);
+          t.driver = null;
+          // collared: hands up, stand down
+          drv.criminal = null;
+          drv.threat = null;
+          drv.state = 'cower';
+          drv.panicked = true;
+          drv.stateT = 0;
+          game.peds?.spectacleAt?.(drv.pos.x, drv.pos.z, 20);
+        }
+        cr.resolved = true;
+      }
+      if (Math.abs(v.speed) < 0.5 && throttle > 0.5) {
+        cr.stuckT = (cr.stuckT || 0) + dt;
+        if (cr.stuckT > 1.6) { cr.reverseT = 0.9; cr.stuckT = 0; }
+      } else cr.stuckT = 0;
+      if (cr.reverseT > 0) { cr.reverseT -= dt; throttle = -1; }
+      v.updatePhysics(dt, { throttle, steer: cr.reverseT > 0 ? -steer : steer, handbrake: false });
+      return;
+    }
+
     const player = game.player;
     const px = player.pos.x, pz = player.pos.z;
     const d = dist2d(v.pos.x, v.pos.z, px, pz);
-    v.flashSiren(game.time);
 
     if (cr.state === 'block') {
       // parked across the road; unload cops if the player is close
