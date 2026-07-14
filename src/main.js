@@ -391,12 +391,17 @@ class Game {
   }
 
   // re-bake the procedural sky into scene.environment when the light or
-  // weather moves enough (every 30 game-minutes bucket / cloud step)
+  // weather moves enough. Each bake is a synchronous GPU stall, so it's
+  // gated hard: coarse buckets (2 game-hours / half-cloud steps) plus a
+  // real-time floor of one bake per minute. Direct sun/hemi light still
+  // updates every frame — only the ambient env map steps coarsely.
   refreshEnv() {
     if (!this.sky) return;
-    const key = Math.floor(this.dayNight.minutes / 30) + '|' +
-      Math.round((this.weather?.cloud ?? 0) * 4);
-    this.sky.refreshEnv(this.gfx, key);
+    const now = performance.now() / 1000;
+    if (this._envBakedAt && now - this._envBakedAt < 60) return;
+    const key = Math.floor(this.dayNight.minutes / 120) + '|' +
+      Math.round((this.weather?.cloud ?? 0) * 2);
+    if (this.sky.refreshEnv(this.gfx, key)) this._envBakedAt = now;
   }
 
   updateMenu(dt) {
@@ -537,6 +542,7 @@ class Game {
           game.vehicles?.setNight?.(night);
           game.input.endFrame();
         }
+        game._envBakedAt = 0;   // tests fast-forward hours; skip the real-time floor
         game.refreshEnv();
       },
       setWeather: (s) => {
