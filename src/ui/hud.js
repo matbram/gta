@@ -24,6 +24,7 @@ export class Hud {
       radioToast: document.querySelector('#radiotoast span'),
       timerBox: $('timerbox'), timerText: document.querySelector('#timerbox span'),
       crosshair: $('crosshair'), vignette: $('vignette'), fader: $('fader'),
+      boomflash: $('boomflash'),
       dmgdir: $('dmgdir'),
       speedo: $('speedo'),
       speedoKmh: document.querySelector('#speedo .kmh'),
@@ -32,6 +33,7 @@ export class Hud {
     };
     this.shownMoney = 0;
     this.damageFlashT = 0;
+    this.boomFlashV = 0;
     this.zoneTimer = 0;
     this.vehTimer = 0;
     this.toastTimer = 0;
@@ -43,6 +45,10 @@ export class Hud {
 
   show() { this.el.hud.classList.remove('hidden'); this._tickBase = null; }
   hide() { this.el.hud.classList.add('hidden'); }
+
+  boomFlash(strength) {
+    this.boomFlashV = Math.max(this.boomFlashV, strength);
+  }
 
   update(dt, game) {
     const p = game.player;
@@ -99,6 +105,14 @@ export class Hud {
       vig = Math.max(vig, this.damageFlashT * 2.2);
     }
     this.el.vignette.style.opacity = vig;
+
+    // explosion screen flash: instant on, fast decay
+    if (this.boomFlashV > 0.005) {
+      this.boomFlashV = Math.max(0, this.boomFlashV - dt * 4);
+      this.el.boomflash.style.opacity = this.boomFlashV;
+    } else if (this.el.boomflash.style.opacity !== '0') {
+      this.el.boomflash.style.opacity = 0;
+    }
 
     // speedometer while driving
     const veh = p.vehicle;
