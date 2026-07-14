@@ -101,10 +101,30 @@ export class Cop extends Ped {
         this.shoot(game, d);
       }
     } else {
-      // run toward the player
       this.arrestT = 0;
-      this.moveToward(player.pos.x, player.pos.z, this.runSpeed, dt);
-      this.rig.setAnim('run');
+      // chase what they KNOW: the player when someone can see them, the
+      // last known position otherwise — then search the area on foot
+      const known = game.wanted.playerSeen || (los && d < 45) || !game.wanted.lastKnown;
+      if (known) {
+        this.moveToward(player.pos.x, player.pos.z, this.runSpeed, dt);
+        this.rig.setAnim('run');
+      } else {
+        const lk = game.wanted.lastKnown;
+        const dl = dist2d(this.pos.x, this.pos.z, lk.x, lk.z);
+        if (dl > 6) {
+          this.moveToward(lk.x, lk.z, this.runSpeed * 0.9, dt);
+          this.rig.setAnim('run');
+        } else {
+          this._searchT = (this._searchT ?? 0) - dt;
+          if (this._searchT <= 0) {
+            this._searchT = 2.5;
+            const a = Math.random() * Math.PI * 2;
+            this._searchPt = { x: lk.x + Math.cos(a) * 10, z: lk.z + Math.sin(a) * 10 };
+          }
+          this.moveToward(this._searchPt?.x ?? lk.x, this._searchPt?.z ?? lk.z, this.walkSpeed * 2, dt);
+          this.rig.setAnim(this.speed > 0.2 ? 'walk' : 'idle');
+        }
+      }
     }
 
     this.rig.update(dt, this.speed);

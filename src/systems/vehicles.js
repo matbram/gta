@@ -124,6 +124,7 @@ export class VehicleSystem {
     player.pos.set(v.pos.x, v.pos.y, v.pos.z);
     this.game.traffic?.releaseVehicle(v);
     this.game.wanted?.releaseCruiser(v);
+    this.game.wanted?.onPlayerVehicleChange?.(v);
     this.game.audio?.carDoor();
     this.game.audio?.startEngine();
     if (this.game.audio?.radio?.station >= 0) this.game.audio.radio.resume();
@@ -167,7 +168,14 @@ export class VehicleSystem {
       this.playerControl.steer = -input.axisH();
       this.playerControl.handbrake = input.down('Space');
       if (input.wasPressed('KeyF') || input.wasPressed('Enter')) this.exitVehicle();
-      if (input.down('KeyH')) {
+      if (['police', 'ambulance', 'firetruck'].includes(v.type)) {
+        // H toggles the siren in emergency vehicles — traffic parts for you
+        if (input.wasPressed('KeyH')) {
+          v.sirenOn = !v.sirenOn;
+          if (v.sirenOn) game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+          else game.audio?.stopSiren(v.id);
+        }
+      } else if (input.down('KeyH')) {
         if (!this._hornT || game.time - this._hornT > 0.5) {
           this._hornT = game.time;
           game.audio?.horn(v.pos.x, v.pos.z);
@@ -407,8 +415,8 @@ export class VehicleSystem {
           continue;
         }
       }
-      // siren flash
-      if (v.type === 'police') v.flashSiren(this.game.time);
+      // siren flash for anything with a lightbar
+      if (v.lightbarR) v.flashSiren(this.game.time);
 
       // car alarm: honk loop + flashing lights after a break-in or hard bump
       if (v.alarmT > 0) {

@@ -154,11 +154,12 @@ export class TrafficSystem {
 
   laneTarget(car, tAhead) {
     // point on the edge at parameter t, offset to the right-hand lane
+    // (curbBias pushes further right when yielding to sirens)
     const e = car.edge;
     const t = clamp(tAhead, 0, 1);
     const x = lerp(e.a.x, e.b.x, t);
     const z = lerp(e.a.z, e.b.z, t);
-    const off = e.width * LANE * car.dir;
+    const off = e.width * (LANE + (car.curbBias || 0)) * car.dir;
     return e.horizontal ? { x, z: z + off } : { x: x - off, z };
   }
 
@@ -229,6 +230,19 @@ export class TrafficSystem {
 
     // desired speed with obstacle checks
     let want = car.targetSpeed * (car.panicT > 0 ? 1.5 : 1);
+
+    // an active siren nearby (police, fire, ambulance — or YOU driving one):
+    // pull toward the curb and slow until it passes
+    let sirenNear = false;
+    if (car.panicT <= 0) {
+      for (const o of game.vehicles.vehicles) {
+        if (!o.sirenOn || o.dead || o === v) continue;
+        if (distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z) < 32 * 32) { sirenNear = true; break; }
+      }
+    }
+    const bias = sirenNear ? 0.16 : 0;
+    car.curbBias = (car.curbBias || 0) + (bias - (car.curbBias || 0)) * Math.min(1, dt * 2.5);
+    if (sirenNear) want = Math.min(want, 3);
 
     // slow near intersections; stop for red lights at signalled crossings
     const distToEnd = (car.dir > 0 ? (1 - car.t) : car.t) * e.len;

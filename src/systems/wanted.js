@@ -33,16 +33,73 @@ export class WantedSystem {
     this.spawnT = 0;
     this.roadblockT = 20;
     this.decayT = 0;
+    // police intelligence: where they last saw you, which car they think
+    // you're in, and whether you've slipped their description
+    this.lastKnown = null;
+    this.knownVehicle = null;
+    this.incognito = false;
+    this.playerSeen = false;
+    this._proxT = 0;
   }
 
   // ---------------- heat ----------------
   crime(kind, x, z) {
     const heat = CRIME_HEAT[kind] ?? 4;
+    // quiet crimes need a witness; a lonely street keeps your secrets
+    const quiet = ['carjack', 'assault', 'kill', 'breakin'].includes(kind);
+    if (quiet && !this.hasWitness(x, z)) {
+      if (kind === 'kill') {
+        // no witness, but a body will be found eventually — half heat
+        this.state.heat = clamp(this.state.heat + CRIME_HEAT.kill * 0.5, 0, 900);
+        this.recalcStars(true);
+      }
+      return;
+    }
+    // a witnessed/loud crime marks the spot and blows any disguise
+    this.incognito = false;
+    this.lastKnown = { x, z };
+    const nearCop = this.nearestCop(x, z, 45);
+    if (nearCop) nearCop.provoked = true;
     // witnesses matter less out in the countryside
     const district = this.game.city.districtAt(x, z);
     const mult = ({ farm: 0.5, heights: 0.7 })[district] ?? 1;
     this.state.heat = clamp(this.state.heat + heat * mult, 0, 900);
     this.recalcStars();
+  }
+
+  // is anyone actually watching this spot? civilians use their real sight
+  // cones; cops, cruisers and passing drivers count too
+  hasWitness(x, z) {
+    const g = this.game;
+    const gy = g.city.groundHeight(x, z);
+    for (const ped of g.peds?.peds ?? []) {
+      if (!ped.dead && ped.state !== 'driver' && ped.seePoint?.(x, z, { range: 24 })) return true;
+    }
+    for (const c of this.footCops) {
+      if (!c.dead && distSq2d(c.pos.x, c.pos.z, x, z) < 45 * 45 &&
+          this.lineOfSight(c.pos.x, c.pos.y + 1.5, c.pos.z, x, gy + 1.2, z)) return true;
+    }
+    for (const cr of this.cruisers) {
+      if (!cr.vehicle.dead && distSq2d(cr.vehicle.pos.x, cr.vehicle.pos.z, x, z) < 50 * 50) return true;
+    }
+    for (const car of g.traffic?.cars ?? []) {
+      if (car.driverPed && distSq2d(car.vehicle.pos.x, car.vehicle.pos.z, x, z) < 20 * 20) return true;
+    }
+    return false;
+  }
+
+  // player got into a different car — if nobody watched the switch, the
+  // description the police are working from is now wrong
+  onPlayerVehicleChange(v) {
+    if (this.state.stars === 0) { this.knownVehicle = v.id; return; }
+    if (this.knownVehicle != null && v.id !== this.knownVehicle && !this.incognito &&
+        this.unseenT > 1.2 && !this.hasWitness(v.pos.x, v.pos.z)) {
+      this.incognito = true;
+      this.game.hud?.showToast('Nobody saw the switch — they’re still looking for the old car.', 3.5);
+      setTimeout(() => this.game.audio?.bark?.('scanner2', v.pos.x, v.pos.z), 300);
+    } else if (this.unseenT <= 1.2) {
+      this.knownVehicle = v.id;   // they watched you get in
+    }
   }
 
   setStars(n) {
@@ -149,23 +206,53 @@ export class WantedSystem {
     const resp = RESPONSE[stars];
 
     // ---- evasion / decay ----
-    // ducking into a store breaks line of sight: hiding indoors works
+    // ducking into a store breaks line of sight: hiding indoors works.
+    // Incognito (unseen car switch) shrinks every sight range; an authority
+    // vehicle while incognito makes you effectively one of them.
     const indoors = !!game.interiors?.playerInside;
+    const authority = this.incognito &&
+      ['police', 'ambulance', 'firetruck'].includes(player.vehicle?.type);
+    const copRange = this.incognito ? 22 : 70;
+    const cruiserRange = this.incognito ? 28 : 90;
     let seen = false;
-    if (!indoors) for (const c of this.footCops) {
-      if (!c.dead && distSq2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z) < 70 * 70 &&
+    if (!indoors && !authority) for (const c of this.footCops) {
+      if (!c.dead && distSq2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z) < copRange * copRange &&
           this.lineOfSight(c.pos.x, c.pos.y + 1.5, c.pos.z, player.pos.x, player.pos.y + 1, player.pos.z)) { seen = true; break; }
     }
-    if (!seen && !indoors) for (const cr of this.cruisers) {
+    if (!seen && !indoors && !authority) for (const cr of this.cruisers) {
       const v = cr.vehicle;
       if (v.dead) continue;
       const d2 = distSq2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
       // parked roadblocks only spot you up close; pursuers need line of sight
-      const range = cr.state === 'block' ? 30 : 90;
+      const range = cr.state === 'block' ? (this.incognito ? 14 : 30) : cruiserRange;
       if (d2 < range * range &&
           this.lineOfSight(v.pos.x, v.pos.y + 1.6, v.pos.z, player.pos.x, player.pos.y + 1.2, player.pos.z)) {
         seen = true; break;
       }
+    }
+    // the uniform only holds up from a distance — loiter next to a real
+    // officer for a few seconds and the game is up
+    if (authority) {
+      let near = false;
+      for (const c of this.footCops) {
+        if (!c.dead && distSq2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z) < 100) { near = true; break; }
+      }
+      if (!near) for (const cr of this.cruisers) {
+        if (!cr.vehicle.dead && distSq2d(cr.vehicle.pos.x, cr.vehicle.pos.z, player.pos.x, player.pos.z) < 144) { near = true; break; }
+      }
+      this._proxT = near ? this._proxT + dt : 0;
+      if (this._proxT > 4) {
+        this._proxT = 0;
+        this.incognito = false;
+        game.hud?.showToast("Your cover's blown!", 3);
+      }
+    } else this._proxT = 0;
+
+    this.playerSeen = seen;
+    if (seen) {
+      this.lastKnown = { x: player.pos.x, z: player.pos.z };
+      if (this.incognito) this.incognito = false;
+      if (player.vehicle) this.knownVehicle = player.vehicle.id;
     }
     if (stars > 0) {
       if (seen) {
@@ -173,9 +260,10 @@ export class WantedSystem {
         // sustained pressure: heat stays put while seen
       } else {
         this.unseenT += dt;
-        // out of sight: decay a star roughly every 7 seconds unseen
-        if (this.unseenT > 6) {
-          this.state.heat = Math.max(0, this.state.heat - dt * (14 + stars * 4));
+        // out of sight: decay a star roughly every 7 seconds unseen —
+        // twice as fast when they're chasing the wrong car
+        if (this.unseenT > (this.incognito ? 3 : 6)) {
+          this.state.heat = Math.max(0, this.state.heat - dt * (14 + stars * 4) * (this.incognito ? 2 : 1));
           this.recalcStars(true);
           if (this.state.stars < stars) this.unseenT = 3;   // partial reset per star lost
         }
@@ -183,6 +271,14 @@ export class WantedSystem {
       // slow passive decay even when seen (crimes must continue to sustain 6★)
       this.state.heat = Math.max(0, this.state.heat - dt * 0.8);
       this.recalcStars(true);
+      // you actually lost them
+      if (this.state.stars === 0) {
+        game.hud?.showCenter('EVADED', 'passed', '', 3);
+        game.audio?.pickup?.();
+        this.incognito = false;
+        this.knownVehicle = null;
+        this.lastKnown = null;
+      }
     } else {
       this.state.heat = Math.max(0, this.state.heat - dt * 3);
     }
@@ -353,9 +449,20 @@ export class WantedSystem {
       return;
     }
 
-    // pursue: intercept-lead the player's car, PIT when alongside
+    // pursue: intercept-lead the player's car, PIT when alongside.
+    // If nobody can actually see the player, converge on the last known
+    // position and prowl there instead of psychically tracking them.
     let aimX = px, aimZ = pz;
-    if (player.vehicle) {
+    const blind = !this.playerSeen && this.lastKnown;
+    if (blind) {
+      aimX = this.lastKnown.x; aimZ = this.lastKnown.z;
+      const dl = dist2d(v.pos.x, v.pos.z, aimX, aimZ);
+      if (dl < 14) {
+        // circle the area slowly, scanning
+        v.updatePhysics(dt, { throttle: 0.35, steer: 0.55, handbrake: false });
+        return;
+      }
+    } else if (player.vehicle) {
       // lead the target by its velocity for a proper intercept
       const lead = clamp(d / 30, 0, 1.4);
       aimX = px + player.vehicle.vel.x * lead;
