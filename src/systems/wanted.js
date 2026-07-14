@@ -387,9 +387,10 @@ export class WantedSystem {
       this.driveCruiser(cr, dt);
       const v = cr.vehicle;
       const d = dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
-      if (v.dead || d > 320 || (stars === 0 && d > 80)) {
+      // a flipped cruiser is out of the chase — drop the record like a wreck
+      if (v.dead || v.flipped || d > 320 || (stars === 0 && d > 80)) {
         game.audio?.stopSiren(v.id);
-        if (!v.dead) game.vehicles.remove(v);
+        if (!v.dead && !v.flipped) game.vehicles.remove(v);
         this.cruisers.splice(this.cruisers.indexOf(cr), 1);
       }
     }

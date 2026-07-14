@@ -25,6 +25,7 @@ export class VehicleSystem {
     v.pos.set(x, this.game.city.groundHeight(x, z), z);
     v.heading = heading;
     v.onCrash = (veh, box, impact) => this.handleStaticCrash(veh, box, impact);
+    v.onFlipped = (veh) => this.handleFlipped(veh);
     v.syncMesh(0);
     v.setNightLights(this._lightsOn ?? false);
     this.vehicles.push(v);
@@ -85,6 +86,31 @@ export class VehicleSystem {
     return false;
   }
 
+  // a car came to rest on its roof: kill the engine story, throw the AI
+  // driver clear, draw a gawking crowd, and give the player a beat to
+  // scramble out before it lurches back over (or bleeds out and burns)
+  handleFlipped(v) {
+    const game = this.game;
+    game.audio?.crash?.(10, v.pos.x, v.pos.z);
+    game.particles?.dust(v.pos.x, v.pos.y + 0.4, v.pos.z, 8);
+    const culprit = v._lastHitBy === 'player' ? 'player' : 'ai';
+    game.peds?.senseEvent?.(v.pos.x, v.pos.z, 'crash', culprit);
+    game.peds?.spectacleAt?.(v.pos.x, v.pos.z, 22);
+    game.traffic?.releaseVehicle(v);
+    v.aiControlled = false;
+    if (v.driver === 'player') {
+      v.rightT = 4;                       // auto-right after a beat
+      game.cameraRig?.addShake(0.6);
+      game.hud?.showToast?.('Flipped! Bail out or hold on…', 2.4);
+      game.voice?.say?.('flip', 0.7);
+    } else if (v.driver && v.driver !== 'player') {
+      const ped = v.driver;
+      v.driver = null;
+      game.peds?.ejectDriver?.(ped, v);
+      ped.damage?.(15, game, 'crash', null, culprit);
+    }
+  }
+
   // a hard motorcycle impact throws the rider — no walking away from a
   // wall at 60. The player takes bail damage and tumbles with the bike's
   // momentum; AI riders are ejected and hit the pavement (fatal ejections
@@ -139,7 +165,7 @@ export class VehicleSystem {
     if (player.dead) return;
     if (player.vehicle) { this.exitVehicle(); return; }
 
-    const v = this.nearestVehicle(player.pos.x, player.pos.z, 4.2, (v) => !v.dead);
+    const v = this.nearestVehicle(player.pos.x, player.pos.z, 4.2, (v) => !v.dead && !v.flipped && !v.flipping);
     if (!v) return;
 
     // locked parked cars take a moment to break into
@@ -248,8 +274,9 @@ export class VehicleSystem {
         v.updatePhysics(dt, this.playerControl);
         player.pos.set(v.pos.x, v.pos.y, v.pos.z);
         // visible seated driver at the per-type seat (driver's side, straddle
-        // on bikes), lerping in from the door during the mount beat
-        player.rig.group.visible = true;
+        // on bikes), lerping in from the door during the mount beat — but a
+        // rolled body has no upright seat, so hide the rig while it tumbles
+        player.rig.group.visible = Math.abs(v.flipRoll) < 0.6;
         const seat = v.seatRigWorld();
         if (this._mountT > 0) {
           this._mountT -= dt;
@@ -415,7 +442,7 @@ export class VehicleSystem {
     if (bloodScan) this._bloodScanT = 0.12;
     const blood = game.gore?.blood;
     for (const v of vs) {
-      if (Math.abs(v.speed) < 2) continue;
+      if (Math.abs(v.speed) < 2 || v.flipping || v.flipped) continue;
       const offs = v.wheelOffsets;
       if (!offs?.length || !blood) continue;
       const sinH = Math.sin(v.heading), cosH = Math.cos(v.heading);
@@ -472,6 +499,11 @@ export class VehicleSystem {
       if (v.exploded) {
         v.exploded = false;
         this.explodeFx(v);
+      }
+      // an abandoned car left on its roof slowly wrecks itself → the
+      // existing burn/explode lifecycle takes it from there
+      if (v.flipped && v.driver == null && !v.dead) {
+        v.applyDamage(2 * dt, 'crash', v._lastHitBy ?? 'ai');
       }
       if (v.health < 55 && !v.dead) {
         v.smokeTimer -= dt;

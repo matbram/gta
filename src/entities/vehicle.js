@@ -77,6 +77,14 @@ export class Vehicle {
     this.pitchOff = 0; this.pitchVel = 0;
     this.rollOff = 0; this.rollVel = 0;
     this.angKick = 0;                  // brief yaw impulse from glancing hits
+    // flip dynamics: a violent side hit (or a blast under the car) rolls the
+    // BODY past the spring clamp while the physics footprint stays 2D
+    this.flipping = false;             // actively rolling
+    this.flipRoll = 0;                 // extra Z-roll (unwrapped while airborne)
+    this.flipVel = 0;
+    this.flipped = false;              // at rest on the roof
+    this.rightT = 0;                   // player auto-right countdown
+    this.onFlipped = null;             // set by VehicleSystem
 
     this.buildMesh(colorOverride);
   }
@@ -130,7 +138,9 @@ export class Vehicle {
 
   // control: {throttle: -1..1, steer: -1..1, handbrake: bool}
   updatePhysics(dt, control) {
-    if (this.dead && !this.sinkingActive) control = { throttle: 0, steer: 0, handbrake: false };
+    if ((this.dead && !this.sinkingActive) || this.flipping || this.flipped) {
+      control = { throttle: 0, steer: 0, handbrake: false };   // engine is done
+    }
     const S = this.spec;
 
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
@@ -225,6 +235,20 @@ export class Vehicle {
       this.vy = 0;
       this.airborne = false;
       this.sinking = 0;
+      // catching air off a crest: climbing fast onto terrain that falls
+      // away means the wheels can't follow the ground
+      if (Math.abs(vf) > 20 && !this.flipping && !this.flipped) {
+        const bH = this.city.groundHeight(this.pos.x - nfx * 1.6, this.pos.z - nfz * 1.6);
+        const s = (ground - bH) / 1.6;          // rise per metre along heading
+        const vRate = s * vf;                    // our current vertical rate
+        if (vRate > 1.5) {
+          const aH = this.city.groundHeight(this.pos.x + nfx * 3, this.pos.z + nfz * 3);
+          if (aH < ground + s * 3 - 0.3) {       // convex crest: ground drops off
+            this.vy = vRate;
+            this.airborne = true;
+          }
+        }
+      }
     }
 
     // pitch/roll rock: damped spring, clamped well short of a rollover
@@ -232,6 +256,32 @@ export class Vehicle {
     this.rollVel -= (this.rollOff * 28 + this.rollVel * 6) * dt;
     this.pitchOff = clamp(this.pitchOff + this.pitchVel * dt, -0.55, 0.55);
     this.rollOff = clamp(this.rollOff + this.rollVel * dt, -0.55, 0.55);
+
+    // active flip: free barrel roll in the air; on the ground, gravity
+    // torque settles the shell onto its wheels or its roof
+    if (this.flipping) {
+      this.flipRoll += this.flipVel * dt;
+      if (this.airborne) {
+        this.flipVel *= Math.max(0, 1 - 0.15 * dt);
+      } else {
+        this.flipRoll = wrapAngle(this.flipRoll);
+        const target = Math.abs(this.flipRoll) > Math.PI / 2 ? Math.sign(this.flipRoll) * Math.PI : 0;
+        this.flipVel += (target - this.flipRoll) * 10 * dt;
+        this.flipVel *= Math.max(0, 1 - 4 * dt);
+        this.vel.multiplyScalar(Math.max(0, 1 - 1.8 * dt));   // shell scrapes, speed dies
+        if (Math.abs(target - this.flipRoll) < 0.12 && Math.abs(this.flipVel) < 0.4) {
+          this.flipRoll = target;
+          this.flipVel = 0;
+          this.flipping = false;
+          if (target !== 0) this.enterFlipped();
+          else this.rollVel += 0.6;                            // upright: spring settle
+        }
+      }
+    }
+    if (this.flipped && this.rightT > 0) {
+      this.rightT -= dt;
+      if (this.rightT <= 0) this.selfRight();
+    }
 
     // world bounds
     const lim = this.city.HALF - 4;
@@ -278,6 +328,39 @@ export class Vehicle {
     this.pitchVel += -fwd * impact * 0.05;
     this.rollVel += side * impact * 0.06;
     if (lift > 0) this.vy = Math.max(this.vy, lift);
+    // violent T-bones and blasts under the car roll it for real (walls
+    // only rock the pitch — head-on hits shouldn't barrel-roll anyone)
+    if (!this.flipping && !this.flipped && !this.dead && this.sinking <= 0 &&
+        this.type !== 'moto') {
+      if (impact > 14 && Math.abs(side) > 0.7) this.startFlip(Math.sign(side), impact);
+      else if (lift > 5) this.startFlip(Math.random() < 0.5 ? 1 : -1, impact);
+    }
+  }
+
+  startFlip(dir, impact) {
+    this.flipping = true;
+    this.flipVel = dir * (2.5 + Math.min(impact, 30) * 0.12);
+    this.vy = Math.max(this.vy, Math.min(6, impact * 0.25));
+    this.airborne = true;
+    this.rollOff = 0;
+    this.rollVel = 0;   // the spring hands the roll over to the flip
+  }
+
+  enterFlipped() {
+    this.flipped = true;
+    this.sirenOn = false;
+    this.vel.multiplyScalar(0.3);
+    this.onFlipped?.(this);
+  }
+
+  // the lurch back onto the wheels (player cars only, after a beat)
+  selfRight() {
+    this.flipped = false;
+    this.flipping = true;
+    this.flipVel = -Math.sign(this.flipRoll || 1) * 3.5;
+    this.vy = 3;
+    this.airborne = true;
+    this.applyDamage(15, 'crash');
   }
 
   // culprit tracks WHO wrecked this car ('player'|'ai') so an eventual
@@ -321,10 +404,17 @@ export class Vehicle {
       this.pos.z - Math.cos(this.heading) * 1.6);
     const pitch = Math.atan2(behind - ahead, 3.2);
     const lean = this.type === 'moto' ? -this.steerVis * clamp(Math.abs(this.speed) / 12, 0, 1) * 0.45 : 0;
-    this.group.rotation.set(pitch + this.pitchOff, this.heading, lean + this.rollOff, 'YXZ');
+    this.group.rotation.set(pitch + this.pitchOff, this.heading, lean + this.rollOff + this.flipRoll, 'YXZ');
+    // a rolling body rides up on its side / rests on its roof — visual
+    // lift only; the physics origin stays at wheel-contact height
+    if (this.flipRoll !== 0) {
+      const wr = wrapAngle(this.flipRoll);
+      this.group.position.y += Math.abs(Math.sin(wr)) * this.hw * 0.55 +
+        Math.max(0, -Math.cos(wr)) * (this.spec.h - this.wheelR);
+    }
 
     // wheels spin + front steering pivots
-    const spin = this.speed * dt / this.wheelR;
+    const spin = (this.flipping || this.flipped) ? 0 : this.speed * dt / this.wheelR;
     for (const w of this.wheels) w.rotation.x += spin;
     const steer = this.steerVis * (this.type === 'moto' ? 0.5 : 0.45);
     for (const p of this.frontPivots) p.rotation.y = steer;
