@@ -389,6 +389,9 @@ export class PedSystem {
     });
     ped.place(rec.x, rec.z);
     if (rec.edge) ped.setSidewalk(rec.edge, rec.dir, rec.side);
+    // brief scale-in softens the sprite→rig swap if it happens on-screen
+    ped._grow = { t: 0, dur: 0.25, target: ped.rig.group.scale.x };
+    ped.rig.group.scale.setScalar(ped._grow.target * 0.6);
     this.peds.push(ped);
     return true;
   }

@@ -120,10 +120,16 @@ export const OVERLAY_POSES = {
     upLegR: [-0.25, 0, 0], legR: [0.55, 0, 0],
     armL: [0, 0, 0.6], armR: [0, 0, -0.6],
   },
+  // protective kneel: left foot planted in front, right knee to the ground
+  // (hipDrop actually lowers the body), torso curled, forearms shielding
+  // the head — replaces a lopsided hanging-arms squat that read as broken
   kneel: {
-    upLegL: [-1.5, 0, 0], legL: [1.6, 0, 0],
-    upLegR: [-0.5, 0, 0], legR: [1.9, 0, 0],
-    spine1: [0.25, 0, 0],
+    hipDrop: 0.45,   // fraction of the hips' rest height (skeleton units vary)
+    upLegL: [-1.25, 0, 0.08], legL: [1.25, 0, 0],
+    upLegR: [0.25, 0, -0.08], legR: [1.9, 0, 0],
+    spine1: [0.3, 0, 0], head: [0.22, 0, 0],
+    armR: [0.9, 0, 0.25], foreArmR: [-2.3, 0, 0],
+    armL: [-0.9, 0, -0.25], foreArmL: [2.3, 0, 0],
   },
   hose: {
     armR: [0.95, 0, 0.15], foreArmR: [-0.4, 0, 0],
@@ -214,13 +220,20 @@ export class Animator {
     const pose = OVERLAY_POSES[this.overlay];
     if (pose && this.overlayW > 0.01) {
       for (const [key, rot] of Object.entries(pose)) {
-        if (key === 'hipsRotX') continue;
+        if (key === 'hipsRotX' || key === 'hipDrop') continue;
         const bone = this.bones[key];
         if (!bone) continue;
         const w = this.overlayW;
         _e.set(rot[0] * w, rot[1] * w, rot[2] * w);
         _q.setFromEuler(_e);
         bone.quaternion.multiply(_q);
+      }
+      // poses like kneeling actually lower the body, not just fold the legs.
+      // hipDrop is a fraction of the hips' rest height because the skeleton's
+      // native units are normalized away by the rig's height scaling.
+      if (pose.hipDrop && this.bones.hips) {
+        if (this._hipsRestY === undefined) this._hipsRestY = this.bones.hips.position.y || 1;
+        this.bones.hips.position.y -= pose.hipDrop * this._hipsRestY * this.overlayW;
       }
     }
 

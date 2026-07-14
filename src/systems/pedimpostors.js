@@ -10,9 +10,14 @@ import * as THREE from 'three';
 import { budgetLook } from '../entities/humanoid.js';
 import { dist2d, distSq2d } from '../core/mathutil.js';
 
+const _camDir = new THREE.Vector3();
+
 const CELLS = 16;
 const CAP_PER_CELL = 64;          // 16 × 64 = 1024 walkers max
-const NEAR = 115, FAR = 470, DROP = 505, PROMOTE = 95;
+// PROMOTE sits just beyond fog-near (180) so the sprite→rig swap hides in
+// haze; inside the clear zone a record only promotes once it's BEHIND the
+// camera (or at the hard floor). NEAR keeps fresh sprites out of clear view.
+const NEAR = 200, FAR = 470, DROP = 505, PROMOTE = 185, PROMOTE_FLOOR = 60;
 const TOTAL_TARGET = 1000;        // whole-city crowd = rigs + impostors
 
 // a simple painted person silhouette — at 100m+ through fog this reads as
@@ -141,6 +146,12 @@ export class PedImpostors {
       for (let i = 0; i < 6 && this.recs.length < want; i++) this.trySpawn(p);
     }
 
+    // camera basis for the promote-behind-the-camera test
+    const cam = game.camera.position;
+    game.camera.getWorldDirection(_camDir);
+    this._camFX = _camDir.x;
+    this._camFZ = _camDir.z;
+
     // impostors obey the same walk phases as real peds (cheap version:
     // one boolean per road orientation per frame, waiters idle at the curb)
     const phH = game.traffic?.pedPhase?.(true);
@@ -200,7 +211,12 @@ export class PedImpostors {
       if (d2 > DROP * DROP) { this.recs.splice(i, 1); continue; }
       if (d2 < PROMOTE * PROMOTE) {
         // entering the live bubble: hand over to a real rig (stays an
-        // impostor when the rig budget is full)
+        // impostor when the rig budget is full). Inside the fog-clear zone
+        // the swap is visible, so wait until the record is behind the
+        // camera — except at the hard floor, where flat sprites up close
+        // look worse than one pop.
+        const behind = (this._camFX * (r.x - cam.x) + this._camFZ * (r.z - cam.z)) < 0;
+        if (!behind && d2 > PROMOTE_FLOOR * PROMOTE_FLOOR) continue;
         if (game.peds?.spawnFromImpostor?.({ x: r.x, z: r.z, edge: r.edge, dir: r.dir, side: r.side, lookIdx: r.cell * 6 + 1 })) {
           this.recs.splice(i, 1);
         }
@@ -209,7 +225,6 @@ export class PedImpostors {
     }
 
     // render: rebuild instance matrices, cylindrical-billboarded at camera
-    const cam = game.camera.position;
     const counts = new Array(CELLS).fill(0);
     const dummy = this._dummy;
     for (const r of this.recs) {

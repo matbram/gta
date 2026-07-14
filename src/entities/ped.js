@@ -396,6 +396,14 @@ export class Ped {
     this.stateT += dt;
     const player = game.player;
 
+    // promoted impostors scale in over a beat
+    if (this._grow) {
+      this._grow.t += dt;
+      const k = Math.min(1, this._grow.t / this._grow.dur);
+      this.rig.group.scale.setScalar(this._grow.target * (0.6 + 0.4 * k));
+      if (k >= 1) this._grow = null;
+    }
+
     // threat memory + criminal-flag decay
     if (this.threatT > 0) {
       this.threatT -= dt;
