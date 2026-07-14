@@ -43,6 +43,9 @@ export class Cop extends Ped {
       return;
     }
 
+    // commandeering a vehicle to join the chase takes precedence
+    if (this.commandeer && this.runCommandeer(dt, game)) return;
+
     // no heat: police NPC criminals, walk the beat, investigate reports
     if (game.wanted.state.stars === 0 && !this.provoked) {
       this.arrestT = 0;
@@ -131,6 +134,76 @@ export class Cop extends Ped {
 
     this.rig.update(dt, this.speed);
     this.syncRig();
+  }
+
+  // run to a nearby car, pull the driver if needed, and drive off as a
+  // headless pursuit cruiser. Returns true while the beat is playing so
+  // update() skips the normal chase logic. `boarded` marks this officer
+  // for removal by the wanted loop (his body is now "in the car").
+  runCommandeer(dt, game) {
+    const cm = this.commandeer;
+    const v = cm.vehicle;
+    const abort = () => {
+      if (v) v._commandeerBy = null;
+      const car0 = game.traffic?.cars?.find((c) => c.vehicle === v);
+      if (car0) car0.pulledOver = false;
+      this.commandeer = null;
+      if (game.wanted) game.wanted._commandeers = Math.max(0, (game.wanted._commandeers ?? 1) - 1);
+    };
+    cm.t += dt;
+    if (!v || v.dead || v.driver === 'player' || game.player.vehicle === v ||
+        game.wanted.state.stars === 0 || cm.t > 25) { abort(); return false; }
+    const door = v.seatWorldPos();
+    const d = dist2d(this.pos.x, this.pos.z, door.x, door.z);
+    if (d > 55) { abort(); return false; }
+    const car = game.traffic?.cars?.find((c) => c.vehicle === v);
+
+    if (cm.phase === 'approach') {
+      // wave a moving target over to the curb once we're close
+      if (car && d < 25 && !car.pulledOver) car.pulledOver = true;
+      if (d > 1.6) {
+        this.moveToward(door.x, door.z, this.runSpeed, dt);
+        this.rig.setAnim('run');
+      } else if (car?.driverPed) {
+        cm.phase = 'yank';
+        cm.yankT = 0;
+      } else if (Math.abs(v.speed) < 1.5) {
+        cm.phase = 'enter';
+      }
+    }
+    if (cm.phase === 'yank') {
+      // gun on the window: "out of the car"
+      this.speed = 0;
+      this.heading = angleDamp(this.heading,
+        Math.atan2(v.pos.x - this.pos.x, v.pos.z - this.pos.z), 12, dt);
+      this.rig.setAnim('aim');
+      if (!cm.barked) { cm.barked = true; game.audio?.bark?.('bark_moveit', this.pos.x, this.pos.z); }
+      cm.yankT += dt;
+      if (cm.yankT > 0.9) {
+        const ped = car?.driverPed;
+        if (ped) {
+          game.peds.ejectDriver(ped, v);
+          game.audio?.bark?.('bark_mycar', ped.pos.x, ped.pos.z);
+        }
+        if (car) car.driverPed = null;
+        v.driver = null;
+        game.traffic?.releaseVehicle(v);
+        cm.phase = 'enter';
+      }
+    }
+    if (cm.phase === 'enter') {
+      v._commandeerBy = null;
+      if (game.wanted) {
+        game.wanted._commandeers = Math.max(0, (game.wanted._commandeers ?? 1) - 1);
+        game.wanted.convertToCruiser(v, 1);
+      }
+      this.commandeer = null;
+      this.boarded = true;   // wanted loop disposes + removes us this frame
+      return true;
+    }
+    this.rig.update(dt, this.speed);
+    this.syncRig();
+    return true;
   }
 
   // chase / arrest / shoot an NPC criminal (0★ police work). Returns true
@@ -250,5 +323,27 @@ export class Cop extends Ped {
     if (culprit === 'player') game.state.stats.kills++;
     game.peds?.panicAt(this.pos.x, this.pos.z, 26, null, culprit);
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 20 + Math.floor(Math.random() * 30));
+    // his sidearm skitters loose — anyone can grab it (tough units carry rifles)
+    game.worldlife?.dropWeapon?.(this.pos.x + 0.7, this.pos.z + 0.4,
+      this.tough ? 'rifle' : 'pistol', this.tough ? 24 : 12);
+    this._clearCommandeer();
+  }
+
+  // any removal path (death, cull, stand-down) must release a car we were
+  // in the middle of grabbing, or it stays flagged/stopped forever
+  _clearCommandeer() {
+    if (!this.commandeer) return;
+    const v = this.commandeer.vehicle;
+    if (v) v._commandeerBy = null;
+    const car = this.game?.traffic?.cars?.find((c) => c.vehicle === v);
+    if (car) car.pulledOver = false;
+    this.commandeer = null;
+    const w = this.game?.wanted;
+    if (w) w._commandeers = Math.max(0, (w._commandeers ?? 1) - 1);
+  }
+
+  dispose() {
+    this._clearCommandeer();
+    super.dispose();
   }
 }

@@ -40,6 +40,8 @@ export class WantedSystem {
     this.incognito = false;
     this.playerSeen = false;
     this._proxT = 0;
+    this._commandeers = 0;    // active grab-a-car attempts (hard cap 2)
+    this.commandeerT = 0;
     // chopper searchlight lives in the scene permanently (intensity 0 when
     // grounded) — adding a light mid-game forces every material in the scene
     // to recompile its shader, which reads as a multi-second freeze at 5★
@@ -148,6 +150,7 @@ export class WantedSystem {
     this.incognito = false;
     this.playerSeen = false;
     this.unseenT = 0;
+    this._commandeers = 0;
     this.despawnAll(true);
   }
 
@@ -329,6 +332,9 @@ export class WantedSystem {
       if (aliveCars < resp.cars) this.spawnCruiser();
     }
 
+    // outgunned on wheels: a stranded foot cop grabs whatever car is near
+    if (stars >= 1) this.considerCommandeer(dt);
+
     // ---- beat patrol: the city always has a couple of cops walking around ----
     if (stars === 0 && this.spawnT <= 0) {
       this.spawnT = 4;
@@ -361,6 +367,13 @@ export class WantedSystem {
     // ---- run cops ----
     for (const cop of [...this.footCops]) {
       cop.update(dt, game);
+      // commandeered a car: the officer is in the driver's seat now
+      if (cop.boarded) {
+        cop.dispose();
+        const bi = this.footCops.indexOf(cop);
+        if (bi >= 0) this.footCops.splice(bi, 1);
+        continue;
+      }
       const d = dist2d(cop.pos.x, cop.pos.z, player.pos.x, player.pos.z);
       const cullDist = cop.patrol ? 230 : (stars === 0 ? 60 : 260);
       if ((cop.dead && cop.removeTimer > 20) || d > cullDist) {
@@ -555,13 +568,85 @@ export class WantedSystem {
     cr.unloaded = true;
     const v = cr.vehicle;
     const tough = this.state.stars >= 5;
-    for (const side of [-1, 1]) {
+    // a commandeered car carries the one officer who took it, not a pair
+    const n = cr.crew ?? 2;
+    const sides = [-1, 1];
+    for (let i = 0; i < n; i++) {
+      const side = sides[i % 2];
       const lx = -Math.cos(v.heading) * side, lz = Math.sin(v.heading) * side;
       const cop = new Cop(this.game.city, this.game.scene, tough);
       cop.place(v.pos.x + lx * 1.6, v.pos.z + lz * 1.6);
       cop.provoked = this.state.stars >= 2;
       this.footCops.push(cop);
     }
+  }
+
+  // ---------------- commandeering ----------------
+  // a civilian car becomes a pursuit cruiser: same headless record the
+  // real cruisers use — driveCruiser handles any vehicle (flashSiren
+  // no-ops without a lightbar)
+  convertToCruiser(v, crew = 1) {
+    const game = this.game;
+    game.traffic?.releaseVehicle(v);
+    v.parked = false;
+    v.locked = false;
+    v.sirenOn = true;
+    v.aiControlled = true;
+    game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+    const cr = { vehicle: v, state: 'pursue', unloaded: false, stuckT: 0, commandeered: true, crew };
+    this.cruisers.push(cr);
+    return cr;
+  }
+
+  // once a second while wanted: if the player is escaping by car and the
+  // cruiser response is thin, the best-placed foot cop grabs a nearby
+  // vehicle instead of chasing hopelessly on foot
+  considerCommandeer(dt) {
+    const game = this.game;
+    const player = game.player;
+    this.commandeerT -= dt;
+    if (this.commandeerT > 0) return;
+    this.commandeerT = 1;
+    if (!player.vehicle || Math.abs(player.vehicle.speed) < 8) return;
+    if (this._commandeers >= 2) return;
+    const resp = RESPONSE[this.state.stars];
+    const aliveCars = this.cruisers.filter((c) => !c.vehicle.dead).length;
+    let nearCruiser = Infinity;
+    for (const cr of this.cruisers) {
+      if (cr.vehicle.dead) continue;
+      nearCruiser = Math.min(nearCruiser,
+        dist2d(cr.vehicle.pos.x, cr.vehicle.pos.z, player.pos.x, player.pos.z));
+    }
+    // response is fine: enough cars and at least one actually in the fight
+    if (aliveCars >= resp.cars && nearCruiser < 150) return;
+
+    // best-placed stranded officer
+    let cop = null, bd = Infinity;
+    for (const c of this.footCops) {
+      if (c.dead || c.commandeer || c.boarded || c.arrestT > 0) continue;
+      const d = dist2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z);
+      if (d < 25 || d > 130) continue;
+      if (d < bd) { bd = d; cop = c; }
+    }
+    if (!cop) return;
+
+    // nearest usable car: parked beats yanking a driver, buses are useless
+    let best = null, bestScore = -Infinity;
+    for (const v of game.vehicles.vehicles) {
+      if (v.dead || v.health <= 40 || v.type === 'bus') continue;
+      if (v === player.vehicle || v.driver === 'player') continue;
+      if (v._commandeerBy || v.emergency) continue;
+      if (this.cruisers.some((cr) => cr.vehicle === v)) continue;
+      const d = dist2d(v.pos.x, v.pos.z, cop.pos.x, cop.pos.z);
+      if (d > 45) continue;
+      const pref = v.parked ? 2 : (v.aiControlled ? 1 : 1.5);
+      const score = pref - d / 45;
+      if (score > bestScore) { bestScore = score; best = v; }
+    }
+    if (!best) return;
+    best._commandeerBy = cop;
+    cop.commandeer = { vehicle: best, phase: 'approach', t: 0 };
+    this._commandeers++;
   }
 
   // ---------------- helicopter (5★+) ----------------
@@ -615,6 +700,7 @@ export class WantedSystem {
     this.despawnChopper();
     for (const c of this.footCops) c.dispose();
     this.footCops.length = 0;
+    this._commandeers = 0;
     for (const cr of [...this.cruisers]) {
       // never delete the car out from under the player (e.g. respray in a stolen cruiser)
       if (this.game.player.vehicle === cr.vehicle) {

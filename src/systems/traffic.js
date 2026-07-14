@@ -266,10 +266,13 @@ export class TrafficSystem {
         }
       }
     }
-    const sirenNear = car._sirenNear;
+    // pulledOver: an officer is waving THIS car over (commandeering it) —
+    // curb like a siren yield, but come to a complete stop
+    const sirenNear = car._sirenNear || car.pulledOver;
     const bias = sirenNear ? 0.16 : 0;
     car.curbBias = (car.curbBias || 0) + (bias - (car.curbBias || 0)) * Math.min(1, dt * 2.5);
-    if (sirenNear) want = Math.min(want, 3);
+    if (car.pulledOver) want = 0;
+    else if (sirenNear) want = Math.min(want, 3);
 
     // slow near intersections; stop for red lights at signalled crossings
     const distToEnd = (car.dir > 0 ? (1 - car.t) : car.t) * e.len;

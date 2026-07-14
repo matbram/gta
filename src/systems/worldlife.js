@@ -108,6 +108,26 @@ export class WorldLife {
     this.pickups.push({ mesh, kind: 'cash', amount, x, z, t: 0, ttl: 30 });
   }
 
+  // a dropped firearm (dead cops leave their sidearm behind)
+  dropWeapon(x, z, weaponId, ammo) {
+    const game = this.game;
+    if (!this._gunGeoA) {
+      this._gunGeoA = new THREE.BoxGeometry(0.09, 0.09, 0.42);   // slide/barrel
+      this._gunGeoB = new THREE.BoxGeometry(0.09, 0.2, 0.11);    // grip
+      this._gunMat = new THREE.MeshLambertMaterial({ color: 0x2a2c30, emissive: 0x8899aa, emissiveIntensity: 0.18 });
+    }
+    const mesh = new THREE.Group();
+    const a = new THREE.Mesh(this._gunGeoA, this._gunMat);
+    const b = new THREE.Mesh(this._gunGeoB, this._gunMat);
+    b.position.set(0, -0.12, -0.13);
+    mesh.add(a, b);
+    const y = game.city.groundHeight(x, z);
+    mesh.position.set(x, y + 0.16, z);
+    mesh.rotation.z = 0.3;
+    game.scene.add(mesh);
+    this.pickups.push({ mesh, kind: 'weapon', weapon: weaponId, amount: ammo, x, z, t: 0, ttl: 45 });
+  }
+
   spawnCoins() {
     // 30 lucky coins hidden across the map, deterministic locations
     const game = this.game;
@@ -499,6 +519,9 @@ export class WorldLife {
         if (pk.kind === 'cash') {
           game.addMoney(pk.amount);
           game.audio?.cash();
+        } else if (pk.kind === 'weapon') {
+          game.combat?.give(pk.weapon, pk.amount);
+          game.audio?.pickup?.();
         } else if (pk.kind === 'coin') {
           this.coinsTaken.add(pk.id);
           game.state.stats.coins = this.coinsTaken.size;
