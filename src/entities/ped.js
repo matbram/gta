@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Humanoid, randomLook } from './humanoid.js';
 import { clamp, angleDamp, circleVsAabb, circleVsObb, dist2d, distSq2d } from '../core/mathutil.js';
-import { ARCHETYPES, makePersonality, reactToThreat } from '../systems/npcmind.js';
+import { ARCHETYPES, makePersonality, reactToThreat, reactToMugging } from '../systems/npcmind.js';
 
 const RADIUS = 0.35;
 let nextPedId = 1;
@@ -46,6 +46,7 @@ export class Ped {
     const arch = ARCHETYPES[this.archetype];
     if (arch && opts.archetype) {
       this.walkSpeed = arch.walkSpeed[0] + Math.random() * (arch.walkSpeed[1] - arch.walkSpeed[0]);
+      if (arch.runSpeed) this.runSpeed = arch.runSpeed[0] + Math.random() * (arch.runSpeed[1] - arch.runSpeed[0]);
       this.brave = Math.random() < (arch.braveChance ?? 0.08);
       const sc = arch.scale[0] + Math.random() * (arch.scale[1] - arch.scale[0]);
       this.rig.group.scale.setScalar(sc);
@@ -334,14 +335,17 @@ export class Ped {
     }
     // the death scream carries — those who see it panic, others turn to look
     game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream', this.killedBy ?? 'player');
-    // an NPC murderer with witnesses gets the police called on THEM
+    // an NPC murderer with witnesses gets the police called on THEM —
+    // unless the deceased was a flagged criminal (a mugging victim who
+    // drops their mugger acted in self-defense)
     const atk = this.lastAttacker;
-    if (atk && atk !== game.player && !atk.isCop && !atk.dead &&
+    if (atk && atk !== game.player && !atk.isCop && !atk.dead && !this.criminal &&
         game.wanted?.hasWitness?.(this.pos.x, this.pos.z)) {
       game.peds?.reportNpcCrime?.(atk, 'kill', this.pos.x, this.pos.z);
     }
-    // drop some cash; an ambulance may come for the body
-    game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 10 + Math.floor(Math.random() * 30));
+    // drop some cash (plus anything mugged off others); medics may respond
+    game.worldlife?.dropCash?.(this.pos.x, this.pos.z,
+      10 + Math.floor(Math.random() * 30) + (this.lootCash ?? 0));
     game.dispatch?.reportDeath(this);
   }
 
@@ -639,6 +643,131 @@ export class Ped {
               game.audio?.punch();
             }
           }
+        }
+        break;
+      }
+      case 'mug': {
+        // thug street crime: stalk a lone mark → intimidate → take → flee.
+        // Witnesses go through the normal 'ai'-culprit pipeline: films,
+        // panics, police calls and a cop response — zero player heat.
+        const m = this.mug;
+        const v = m?.victim;
+        const abortMug = () => {
+          this.mug = null;
+          this.state = 'wander';
+          this.stateT = 0;
+          this.pickWanderTarget();
+        };
+        if (!m || !v || v.dead) { abortMug(); break; }
+        const dv = dist2d(this.pos.x, this.pos.z, v.pos.x, v.pos.z);
+        if (m.phase === 'stalk') {
+          m.t += dt;
+          if (m.t > 6 || dv > 20 || v.panicked ||
+              game.wanted?.nearestCop?.(this.pos.x, this.pos.z, 25)) { abortMug(); break; }
+          if (dv > 1.3) {
+            this.moveToward(v.pos.x, v.pos.z, this.walkSpeed * 1.6, dt);
+            this.rig.setAnim('walk');
+          } else {
+            m.phase = 'intimidate';
+            m.t = 0;
+            m.armed = Math.random() < 0.4;
+            this.criminal = this.criminal ?? { level: 1, t: 60 };
+            this.bark('bark_backoff');
+            if (!m.armed) this.rig.startPunch?.();   // brandished fist
+            // the yelp carries: witnesses film/flee/call on the THUG
+            game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream', 'ai');
+            game.peds?.spectacleAt?.(this.pos.x, this.pos.z);
+            const r = reactToMugging(v);
+            if (r === 'fight') {
+              v.threat = this; v.threatT = 12;
+              v.state = 'fight'; v.panicked = true; v.stateT = 0;
+              v.bark?.('bark_fight');
+            } else if (r === 'flee') {
+              v.panic(this.pos.x, this.pos.z, false, null, 'ai');
+              m.fled = true;
+            } else {
+              v.state = 'handsup'; v.mugBy = this;
+              v.panicked = true; v.stateT = 0; v.speed = 0;
+            }
+          }
+        } else if (m.phase === 'intimidate') {
+          m.t += dt;
+          this.speed = 0;
+          this.rig.setAnim(m.armed ? 'aim' : 'idle');
+          this.heading = angleDamp(this.heading,
+            Math.atan2(v.pos.x - this.pos.x, v.pos.z - this.pos.z), 10, dt);
+          if (v.state === 'fight') {
+            // the mark swings back — brawl instead of payday
+            this.threat = v; this.threatT = 12;
+            this.state = 'fight'; this.stateT = 0; this.mug = null;
+            break;
+          }
+          // mark bolted (their choice, or something else spooked them)
+          if ((m.fled || v.state === 'flee') && dv > 10) { abortMug(); break; }
+          if (m.t > 2.5) { m.phase = 'take'; m.t = 0; }
+        } else if (m.phase === 'take') {
+          m.t += dt;
+          this.speed = 0;
+          this.rig.setAnim('idle');
+          if (m.t > 1.5) {
+            this.lootCash = (this.lootCash ?? 0) + 30 + Math.floor(Math.random() * 40);
+            // someone saw it (or the victim reports it): cops come for HIM
+            game.peds?.reportNpcCrime?.(this, 'mug', this.pos.x, this.pos.z);
+            if (v.state === 'handsup') {
+              v.mugBy = null;
+              v.state = 'flee'; v.panicked = true; v.stateT = 0;
+              v.fleeFrom.x = this.pos.x; v.fleeFrom.z = this.pos.z;
+            }
+            this.mug = null;
+            this.stateT = 0;
+            if (Math.random() < 0.75) {
+              this.state = 'flee';
+              this.panicked = true;
+              this.fleeFrom.x = v.pos.x; this.fleeFrom.z = v.pos.z;
+            } else {
+              this.state = 'wander';   // cold-blooded: strolls off
+              this.pickWanderTarget();
+            }
+          }
+        }
+        break;
+      }
+      case 'handsup': {
+        // mugging victim complying: hands up, facing the mugger
+        this.speed = 0;
+        this.rig.setAnim('handsup');
+        if (this.mugBy && !this.mugBy.dead) {
+          this.heading = angleDamp(this.heading,
+            Math.atan2(this.mugBy.pos.x - this.pos.x, this.mugBy.pos.z - this.pos.z), 8, dt);
+        }
+        if (this.stateT > 8 || !this.mugBy || this.mugBy.dead || this.mugBy.state !== 'mug') {
+          const from = this.mugBy?.pos ?? this.pos;
+          this.fleeFrom.x = from.x; this.fleeFrom.z = from.z;
+          this.mugBy = null;
+          this.state = 'flee'; this.panicked = true; this.stateT = 0;
+        }
+        break;
+      }
+      case 'gawk': {
+        // rubbernecking: stand at a distance and watch the drama
+        this.speed = 0;
+        this.rig.setAnim('idle');
+        if (this.gawkPt) {
+          this.heading = angleDamp(this.heading,
+            Math.atan2(this.gawkPt.x - this.pos.x, this.gawkPt.z - this.pos.z), 5, dt);
+          if (dist2d(this.pos.x, this.pos.z, this.gawkPt.x, this.gawkPt.z) < 8) {
+            // too close for comfort now
+            this.fleeFrom.x = this.gawkPt.x; this.fleeFrom.z = this.gawkPt.z;
+            this.gawkPt = null;
+            this.state = 'flee'; this.panicked = true; this.stateT = 0;
+            break;
+          }
+        }
+        if (this.stateT > (this.gawkDur ?? 10)) {
+          this.gawkPt = null;
+          this.state = 'wander';
+          this.stateT = 0;
+          this.pickWanderTarget();
         }
         break;
       }

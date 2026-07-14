@@ -96,6 +96,13 @@ export class PedSystem {
       this.senseScan();
     }
 
+    // street-crime director: every few seconds, maybe a thug marks a mark
+    this._mugT = (this._mugT ?? 8) - dt;
+    if (this._mugT <= 0) {
+      this._mugT = 5;
+      this.tryMugging();
+    }
+
     // refresh the ring of edges we can actually spawn on (near-100% hit
     // rate vs sampling the whole 1.8km map)
     this.edgeCacheT = (this.edgeCacheT ?? 0) - dt;
@@ -384,6 +391,71 @@ export class PedSystem {
     if (rec.edge) ped.setSidewalk(rec.edge, rec.dir, rec.side);
     this.peds.push(ped);
     return true;
+  }
+
+  // ---- autonomous street crime --------------------------------------
+  // pick a wandering thug near the player and a lone civilian mark; the
+  // thug runs the 'mug' state machine (stalk → intimidate → take → flee).
+  // Rarity: one attempt per cooldown window, ~a mugging every 2-4 minutes.
+  tryMugging() {
+    const game = this.game;
+    if (this._mugCooldown && game.time < this._mugCooldown) return;
+    if ((game.wanted?.state.stars ?? 0) >= 3) return;   // city's busy enough
+    if (game.interiors?.playerInside) return;           // drama the player can see
+    const p = game.player.pos;
+    let thug = null;
+    for (const ped of this.peds) {
+      if (ped.dead || ped.archetype !== 'thug' || ped.panicked || ped.mug || ped.criminal) continue;
+      if (ped.state !== 'wander' && ped.state !== 'idle') continue;
+      const d = dist2d(ped.pos.x, ped.pos.z, p.x, p.z);
+      if (d < 25 || d > 90) continue;                   // visible, not in your face
+      thug = ped;
+      break;
+    }
+    if (!thug) return;
+    let victim = null;
+    for (const cand of this.nearPeds(thug.pos.x, thug.pos.z, 12)) {
+      if (cand === thug || cand.dead || cand.panicked || cand.loiter) continue;
+      if (cand.faction !== 'civ' || cand.archetype === 'thug' || cand.archetype === 'gangster') continue;
+      if (cand.state !== 'wander' && cand.state !== 'idle') continue;
+      let lone = true;
+      for (const other of this.nearPeds(cand.pos.x, cand.pos.z, 6)) {
+        if (other !== cand && other !== thug && !other.dead) { lone = false; break; }
+      }
+      if (!lone) continue;
+      if (game.wanted?.nearestCop?.(cand.pos.x, cand.pos.z, 35)) continue;
+      victim = cand;
+      break;
+    }
+    if (!victim) return;
+    this._mugCooldown = game.time + 90 + Math.random() * 120;
+    if (Math.random() < 0.5) return;                    // kept prowling this time
+    thug.mug = { victim, phase: 'stalk', t: 0 };
+    thug.state = 'mug';
+    thug.stateT = 0;
+  }
+
+  // a public drama (mugging, arrest, brawl): calm bystanders at a safe
+  // distance turn to watch — the curious film, the rest gawk. Closer peds
+  // get real panic from the accompanying senseEvent instead.
+  spectacleAt(x, z, r = 20) {
+    for (const ped of this.nearPeds(x, z, r)) {
+      if (ped.dead || ped.panicked || ped.loiter) continue;
+      if (ped.state !== 'wander' && ped.state !== 'idle') continue;
+      if (dist2d(ped.pos.x, ped.pos.z, x, z) < 10) continue;
+      const p = ped.personality;
+      if (!p) continue;
+      if (p.curiosity > 0.75 && p.bravery > 0.5) {
+        ped.state = 'film';
+        ped.fleeFrom.x = x; ped.fleeFrom.z = z;
+        ped.stateT = 0;
+      } else if (p.curiosity > 0.45) {
+        ped.state = 'gawk';
+        ped.gawkPt = { x, z };
+        ped.gawkDur = 6 + Math.random() * 8;
+        ped.stateT = 0;
+      }
+    }
   }
 
   // an NPC committed a witnessed crime: flag them and send a cop after

@@ -214,6 +214,11 @@ export class Cop extends Ped {
     const d = dist2d(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
     if (d > 120) { this.npcTarget = null; return false; }
     this.shootCooldown -= dt;   // the 0★ branch returns before the shared tick
+    // a crowd gathers to watch the arrest / shootout (throttled)
+    if (d < 30 && (this._spectT ?? 0) < game.time) {
+      this._spectT = game.time + 2;
+      game.peds?.spectacleAt?.(t.pos.x, t.pos.z);
+    }
     const los = game.wanted.lineOfSight(this.pos.x, this.pos.y + 1.5, this.pos.z,
       t.pos.x, t.pos.y + 1.2, t.pos.z);
     if (t.criminal.level >= 2) {
