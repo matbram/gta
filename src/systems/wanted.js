@@ -87,14 +87,35 @@ export class WantedSystem {
     const city = this.game.city;
     const dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
     const dist = Math.hypot(dx, dz);
-    const steps = Math.max(2, Math.floor(dist / 5));
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const x = x1 + dx * t, y = y1 + dy * t, z = z1 + dz * t;
-      const cols = city.queryColliders(x, z, 0.3);
-      const ground = city.groundHeight(x, z);
-      for (const b of cols) {
-        if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < ground + b.h) return false;
+    if (dist < 0.5) return true;
+    // exact segment-vs-AABB tests on colliders gathered along the corridor —
+    // point sampling missed the 0.25m interior walls of hollowed shopfronts
+    const seen = new Set();
+    const strides = Math.max(1, Math.ceil(dist / 8));
+    for (let i = 0; i <= strides; i++) {
+      const ts = i / strides;
+      for (const b of city.queryColliders(x1 + dx * ts, z1 + dz * ts, 5.2)) {
+        if (seen.has(b) || b.gone) continue;
+        seen.add(b);
+        let t0 = 0, t1 = 1;
+        if (Math.abs(dx) < 1e-9) {
+          if (x1 < b.minX || x1 > b.maxX) continue;
+        } else {
+          let ta = (b.minX - x1) / dx, tb = (b.maxX - x1) / dx;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        }
+        if (Math.abs(dz) < 1e-9) {
+          if (z1 < b.minZ || z1 > b.maxZ) continue;
+        } else {
+          let ta = (b.minZ - z1) / dz, tb = (b.maxZ - z1) / dz;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        }
+        if (t1 <= t0 || t1 <= 0.02 || t0 >= 0.98) continue;
+        const tm = (Math.max(t0, 0) + Math.min(t1, 1)) / 2;
+        const ground = city.groundHeight(x1 + dx * tm, z1 + dz * tm);
+        if (y1 + dy * tm < ground + b.h) return false;
       }
     }
     return true;

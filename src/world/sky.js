@@ -174,7 +174,9 @@ export class SkyDome {
     this.sunStreak.position.copy(sp);
     this.sunGlow.material.opacity = flareA;
     this.sunStreak.material.opacity = flareA * 0.5;
-    this.sunDisc.material.opacity = (1 - cloud * 0.85);
+    // the disc itself dims out as dusk deepens (flare fades separately)
+    this.sunDisc.material.opacity =
+      (1 - cloud * 0.85) * clamp(1 - (night - 0.18) * 3.2, 0, 1);
 
     // moon opposite the sun, phase advances daily
     const md = this.moonDisc.position;

@@ -62,6 +62,7 @@ export class Knockables {
     const d = {
       group: g, kind: p.kind, groundY,
       mode: kn.fall ? 'fall' : 'tumble',
+      yawQ: g.quaternion.clone(),   // preserve the prop's standing yaw
       // fall: hinge at the base, tipping in the direction of travel
       axis: new THREE.Vector3(vz / sp, 0, -vx / sp),
       angle: 0, angVel: 0.4 + sp * 0.06,
@@ -107,9 +108,10 @@ export class Knockables {
         if (d.angle < Math.PI / 2 - 0.03) {
           d.angVel += dt * 3.2;
           d.angle = Math.min(Math.PI / 2 - 0.02, d.angle + d.angVel * dt);
-          d.group.quaternion.setFromAxisAngle(d.axis, d.angle);
+          d.group.quaternion.setFromAxisAngle(d.axis, d.angle).multiply(d.yawQ);
           if (d.angle >= Math.PI / 2 - 0.03) {
-            parts?.sparks(d.group.position.x + d.axis.z * 5, d.groundY + 0.3, d.group.position.z - d.axis.x * 5, 8);
+            // the pole tip lands at base + 5*(-axis.z, axis.x)
+            parts?.sparks(d.group.position.x - d.axis.z * 5, d.groundY + 0.3, d.group.position.z + d.axis.x * 5, 8);
             this.game.cameraRig?.addShake(0.15);
           }
         } else if (d.t > 6) d.sink = 0.001;

@@ -121,8 +121,9 @@ export class DayNight {
     if (this.gfx) {
       const dayT2 = clamp((h - 6) / 14, 0, 1);
       const arc = Math.sin(dayT2 * Math.PI);          // 0 at sunrise/sunset, 1 at noon
+      // both branches meet at 0.95 as night crosses 0.5 — no exposure pop
       const exposure = night > 0.5
-        ? lerp(1.0, 0.85, night)
+        ? lerp(0.95, 0.85, (night - 0.5) * 2)
         : lerp(0.95, 1.12, arc);
       this.gfx.setExposure(exposure);
       this.gfx.setBloomStrength(1 + night * 1.1);

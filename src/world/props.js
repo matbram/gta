@@ -43,6 +43,7 @@ function hydrant() {
     new THREE.Vector2(0.17, 0.26), new THREE.Vector2(0.17, 0.18), new THREE.Vector2(0.2, 0.12),
     new THREE.Vector2(0.2, 0.0),
   ];
+  pts.reverse();   // lathe profiles must run bottom-up for outward normals
   const body = new THREE.LatheGeometry(pts, 9);
   const cap = new THREE.CylinderGeometry(0.045, 0.06, 0.07, 6);
   cap.translate(0, 0.88, 0);
@@ -140,8 +141,9 @@ function trafficlight() {
   }
   structure.push({
     geo: mergeBG(lenses, false),
-    mat: new THREE.MeshLambertMaterial({ color: 0x552211, emissive: 0xcc5522, emissiveIntensity: 0.65 }),
+    mat: new THREE.MeshLambertMaterial({ color: 0x552211, emissive: 0xcc5522, emissiveIntensity: 0.35 }),
     castShadow: false,
+    nightKey: 'signalLens',   // citymesh boosts this after dark
   });
   return structure;
 }

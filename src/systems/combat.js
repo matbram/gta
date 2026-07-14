@@ -452,7 +452,12 @@ export class CombatSystem {
     for (const p of game.peds?.peds || []) if (!p.dead) out.push(p);
     for (const c of game.wanted?.footCops || []) if (!c.dead) out.push(c);
     for (const g of game.missions?.activeGoons?.() || []) if (!g.dead) out.push(g);
-    for (const k of game.interiors?.keepers?.() || []) out.push(k);
+    // shopkeepers only when they're actually in play: provoked, or in the
+    // room the player is standing in — never through a closed shopfront
+    const inside = game.interiors?.playerInside;
+    for (const k of game.interiors?.keepers?.() || []) {
+      if (k.provoked || (inside && (inside.keeper === k || inside.dancers?.includes(k)))) out.push(k);
+    }
     return out;
   }
 

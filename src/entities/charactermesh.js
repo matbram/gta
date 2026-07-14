@@ -87,12 +87,20 @@ class GeoAccum {
       }
     }
     for (let i = 0; i < rings.length - 1; i++) {
+      // outward winding depends on which way the loft travels along its
+      // axis and on the angular chirality of that axis' parametrization
+      // ('z' rings run one way, 'x' rings the other) — flip per segment
+      const step = axis === 'z'
+        ? rings[i + 1].z - rings[i].z
+        : -(rings[i + 1].x - rings[i].x);
+      const flip = step < 0;
       for (let s = 0; s < segs; s++) {
         const a = first + i * cols + s;
         const b = a + 1;
         const c = a + cols;
         const d = c + 1;
-        this.idx.push(a, c, b, b, c, d);
+        if (flip) this.idx.push(a, b, c, b, d, c);
+        else this.idx.push(a, c, b, b, c, d);
       }
     }
     if (capEnds) {
@@ -111,8 +119,9 @@ class GeoAccum {
     this.vc++;
     for (let s = 0; s < segs; s++) {
       const a = ringStart + s, b = ringStart + s + 1;
-      if (top) this.idx.push(a, b, centerIdx);
-      else this.idx.push(b, a, centerIdx);
+      // top caps face along +axis, bottom caps along -axis (outward)
+      if (top) this.idx.push(b, a, centerIdx);
+      else this.idx.push(a, b, centerIdx);
     }
   }
 
@@ -133,7 +142,8 @@ class GeoAccum {
       this.pushBones(bones);
       this.vc++;
     }
-    const f = (a, b, c, d) => this.idx.push(first + a, first + b, first + c, first + a, first + c, first + d);
+    // wound counter-clockwise seen from outside (signed volume positive)
+    const f = (a, b, c, d) => this.idx.push(first + a, first + c, first + b, first + a, first + d, first + c);
     f(0, 1, 2, 3); f(5, 4, 7, 6); f(4, 0, 3, 7); f(1, 5, 6, 2); f(3, 2, 6, 7); f(4, 5, 1, 0);
   }
 

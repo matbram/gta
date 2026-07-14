@@ -293,9 +293,11 @@ export class Interiors {
     if (rec.template === 'club') {
       rec.dancers = [];
       for (let k = 0; k < 4; k++) {
+        if (rec.dancerDead?.[k]) continue;
         const d = new Goon(this.game.city, this.game.scene, {
           health: 40, shirt: [0xe84a8a, 0x4ae8d8, 0xe8d84a, 0x8a4ae8][k],
         });
+        d._slot = k;
         d.isKeeper = true;
         d.state = 'guard';
         d.interiorY = rec.built.gy;
@@ -314,7 +316,11 @@ export class Interiors {
       rec.keeper.dispose();
       rec.keeper = null;
     }
-    for (const d of rec.dancers) d.dispose();
+    // dead dancers stay dead across re-furnishes, like keepers
+    for (const d of rec.dancers) {
+      if (d.dead) (rec.dancerDead = rec.dancerDead || [])[d._slot] = true;
+      d.dispose();
+    }
     rec.dancers = [];
   }
 
@@ -348,7 +354,17 @@ export class Interiors {
       else if (rec.built && d > TEARDOWN_R) this.teardown(rec);
       if (rec.built) {
         if (!rec.furnished && d < FURNISH_R) this.furnish(rec);
-        else if (rec.furnished && d > UNFURNISH_R) this.unfurnish(rec);
+        else if (rec.furnished && d > UNFURNISH_R) {
+          // a provoked clerk mid-fight doesn't vanish in plain sight —
+          // he stays until the fight ends or the player is truly gone
+          const hot = rec.keeper && !rec.keeper.dead && rec.keeper.provoked;
+          if (!hot || d > 120) {
+            if (hot && this.game.combat?.lockTarget === rec.keeper) {
+              this.game.combat.lockTarget = null;
+            }
+            this.unfurnish(rec);
+          }
+        }
       }
     }
   }
@@ -379,9 +395,8 @@ export class Interiors {
     const game = this.game;
     this.playerInside = rec;
     this.current = rec.template;
-    this.robT = 0;
-    this.robDrops = 0;
-    this.counterArmed = true;
+    this.robT = 0;               // robDrops lives on the rec — stepping out
+    this.counterArmed = true;    // and back in can't reset a half-done heist
     game.player.interiorY = rec.built.gy;
     rec.built.light.intensity = 2.2;
     game.hud.showZone(LABELS[rec.template] ?? 'STORE');
@@ -443,7 +458,14 @@ export class Interiors {
           if (rec.keeper.dead && !rec.keeperLooted) {
             rec.keeperLooted = true;
             rec.keeperDead = true;
-            this.pendingHeat = Math.max(this.pendingHeat, 200);   // killing a clerk is serious
+            // killing a clerk is serious. If the player is inside, the heat
+            // waits for the street; killed from outside, it lands right now.
+            if (this.playerInside === rec) {
+              this.pendingHeat = Math.max(this.pendingHeat, 200);
+            } else {
+              game.wanted.state.heat = clamp(game.wanted.state.heat + 200, 0, 900);
+              game.wanted.recalcStars();
+            }
             if (rec.register) game.worldlife?.dropCash(rec.register.x, rec.register.z - 0.8, 60 + Math.random() * 80);
           }
         }
@@ -486,8 +508,8 @@ export class Interiors {
       if (!this.bedCooldown || t - this.bedCooldown > 6) {
         this.bedCooldown = t;
         player.heal(100);
-        const ok = game.save?.save();
         game.dayNight.minutes = (game.dayNight.minutes + 360) % 1440;   // nap 6 hours
+        const ok = game.save?.save();     // save AFTER the nap so it's kept
         game.hud.showToast(ok ? 'Slept and saved. Six hours pass.' : 'Rested — saving failed.', 4);
         game.audio?.pickup();
       }
@@ -503,13 +525,14 @@ export class Interiors {
         keeper.rig.setAnim('handsup');
         keeper.holdup = true;
         this.robT += dt;
-        if (this.robT > 1.2 && this.robDrops < 5 && this.robT > 1.2 + this.robDrops * 0.9) {
-          this.robDrops++;
-          const amt = 25 + Math.floor(rand2i(rec.id, this.robDrops, game.city.seed) * 55);
+        rec.robDrops = rec.robDrops ?? 0;
+        if (this.robT > 1.2 && rec.robDrops < 5 && this.robT > 1.2 + rec.robDrops * 0.9) {
+          rec.robDrops++;
+          const amt = 25 + Math.floor(rand2i(rec.id, rec.robDrops, game.city.seed) * 55);
           game.worldlife?.dropCash(rec.register.x, rec.register.z - 0.9, amt);
           game.audio?.cash();
           this.pendingHeat = Math.max(this.pendingHeat, 95);   // ~2 stars waiting outside
-          if (this.robDrops === 5) {
+          if (rec.robDrops === 5) {
             this.robbedDoors.add(rec.id);
             game.hud.showToast('Register cleaned out. Now get gone.', 3.5);
           }

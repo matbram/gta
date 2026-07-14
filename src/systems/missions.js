@@ -75,7 +75,12 @@ export class MissionSystem {
   refreshContactMarkers() {
     for (const c of CONTACTS) {
       const m = this.markerMeshes.get(c.id);
-      if (m) m.visible = this.contactAvailable(c);
+      if (!m) continue;
+      m.visible = this.contactAvailable(c);
+      // POIs can move after construction (interiors claim doors) — keep the
+      // visible marker glued to the live trigger position
+      const p = this.contactPos(c);
+      m.position.set(p.x, this.game.city.groundHeight(p.x, p.z) + 1.3, p.z);
     }
   }
 

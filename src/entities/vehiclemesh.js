@@ -143,15 +143,43 @@ function bodyGeometry(type, W, L, H, wheelR) {
   s.lineTo(z(P.hood[0]), y(P.hood[1]));                 // hood
   s.quadraticCurveTo(L / 2 - 0.02, y(P.hood[1] - 0.02), L / 2, y(P.nose));  // nose curve
   s.lineTo(L / 2, yBot + 0.04);                         // front bumper face
-  // bottom edge, front → rear, cutting an upward arch over each wheel:
-  // arc runs CCW from its right (+z) bottom intersection over the top to the
-  // left (−z) one
+  // bottom edge, front → rear, cutting an upward arch over each wheel.
+  // The arc must stay BELOW the top outline at the axle or the shape
+  // self-intersects and earcut shreds the hood/trunk caps — clamp the
+  // sweep and cut a flat across the top when the outline sits low.
+  const topLine = [
+    [-L / 2, y(P.tailTop)], [z(P.trunk[0]), y(P.trunk[1])],
+    [z(P.rearGlass[0]), y(P.rearGlass[1])], [z(P.roof[0][0]), y(P.roof[0][1])],
+    [z(P.roof[1][0]), y(P.roof[1][1])], [z(P.windshield[0]), y(P.windshield[1])],
+    [z(P.hood[0]), y(P.hood[1])], [L / 2, y(P.nose)],
+  ];
+  const yTopAt = (x) => {
+    for (let i = 0; i < topLine.length - 1; i++) {
+      const [x0, y0] = topLine[i], [x1, y1] = topLine[i + 1];
+      if (x >= Math.min(x0, x1) && x <= Math.max(x0, x1)) {
+        return Math.abs(x1 - x0) < 1e-6 ? Math.min(y0, y1)
+          : y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+      }
+    }
+    return y(P.tailTop);
+  };
   const aR = -Math.asin(Math.min(0.9, (cy - yBot) / r));
   const xOff = r * Math.cos(aR);
-  s.lineTo(axF + xOff, yBot);
-  s.absarc(axF, cy, r, aR, Math.PI - aR, false);
-  s.lineTo(axR + xOff, yBot);
-  s.absarc(axR, cy, r, aR, Math.PI - aR, false);
+  const arch = (ax) => {
+    s.lineTo(ax + xOff, yBot);
+    const yTop = Math.min(yTopAt(ax - r), yTopAt(ax), yTopAt(ax + r)) - 0.05;
+    const lim = (yTop - cy) / r;
+    if (lim >= 0.999) {
+      s.absarc(ax, cy, r, aR, Math.PI - aR, false);
+    } else {
+      const aC = Math.asin(Math.max(0.15, Math.min(0.95, lim)));
+      s.absarc(ax, cy, r, aR, aC, false);
+      s.lineTo(ax - r * Math.cos(aC), cy + r * Math.sin(aC));
+      s.absarc(ax, cy, r, Math.PI - aC, Math.PI - aR, false);
+    }
+  };
+  arch(axF);
+  arch(axR);
   s.closePath();
 
   const bev = Math.min(0.09, W * 0.055);

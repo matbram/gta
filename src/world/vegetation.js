@@ -102,6 +102,7 @@ function palmFrondGeometry() {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const t = (x + 1.65) / 3.3;            // 0 at base → 1 at tip
+      pos.setZ(i, pos.getY(i));              // keep the card's width, turned flat
       pos.setY(i, Math.sin(t * 1.8) * 0.55 - t * t * 1.3);   // arch up then droop
       pos.setX(i, x + 1.65);
     }

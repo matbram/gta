@@ -71,6 +71,10 @@ export class SaveSystem {
     }
     game.worldlife?.restoreCoins(data.coins || []);
 
+    // build any walk-in interior around the saved point FIRST, so a bed
+    // save wakes the player at the bed instead of being spiralled outside
+    // the still-solid building collider
+    game.interiors?.stream?.(data.pos?.x ?? 0, data.pos?.z ?? 0);
     game.player.teleport(data.pos?.x ?? 0, data.pos?.z ?? 0, data.heading ?? 0);
     game.cameraRig.snapBehind(game.player.heading);
     return true;

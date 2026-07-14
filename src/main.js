@@ -165,6 +165,10 @@ class Game {
       this.dispatch = new dispatch.Dispatch(this);
       const interiors = await import('./systems/interiors.js');
       this.interiors = new interiors.Interiors(this);
+      // interiors moved some POIs onto their claimed doors — re-sync the
+      // markers that copied positions at construction time
+      this.worldlife?.refreshPoiMarkers?.();
+      this.missions?.refreshContactMarkers?.();
       const knock = await import('./systems/knockables.js');
       this.knockables = new knock.Knockables(this);
       const weather = await import('./systems/weather.js');

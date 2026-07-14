@@ -352,6 +352,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     if (!parts || !list?.length) return;
     for (const part of parts) {
       instanced(part.geo, part.mat, list, yOf, extraScaleY, part.castShadow !== false);
+      if (part.nightKey) propDefs[part.nightKey] = { mat: part.mat };
     }
   };
 
@@ -487,7 +488,8 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       if (dist !== 'oldtown' && dist !== 'midtown') continue;
       const hash = Math.abs(Math.round(b.x * 13 + b.z * 7));
       if (hash % 6 !== 0) continue;
-      const side = hash % 2 ? 1 : -1;
+      // hash is always divisible by 6 here, so use an independent bit
+      const side = Math.round(hash / 6) % 2 ? 1 : -1;
       perStyle[mi % muralStyles.length].push({ b, side });
       mi++;
     }
@@ -535,7 +537,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     if (acList.length) {
       const box = new THREE.BoxGeometry(1.3, 0.62, 0.95);
       const fan = new THREE.CylinderGeometry(0.34, 0.34, 0.1, 8);
-      fan.translate(0, 0.36, 0);
+      fan.translate(0, 0.67, 0);   // fan sits on TOP of the housing
       const geo = mergeGeometries([box, fan].map((gg, i) => {
         if (i === 0) gg.translate(0, 0.31, 0);
         return gg;
@@ -543,7 +545,8 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       const im = new THREE.InstancedMesh(geo, grey, acList.length);
       for (let k = 0; k < acList.length; k++) {
         const p = acList[k];
-        dummy.position.set(p.x, p._y - 0.35, p.z);
+        // roof slabs top out ~0.45 above b.h — sit the unit on the slab
+        dummy.position.set(p.x, p._y + 0.11, p.z);
         dummy.rotation.set(0, p.rot, 0);
         dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
@@ -562,6 +565,7 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       setNight(intensity);
       if (propDefs.lampHeads) propDefs.lampHeads.mat.emissiveIntensity = intensity * 1.6;
       if (propDefs.lampPools) propDefs.lampPools.mat.opacity = intensity * 0.16;
+      if (propDefs.signalLens) propDefs.signalLens.mat.emissiveIntensity = 0.35 + intensity * 1.45;
     },
   };
 }

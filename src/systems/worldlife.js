@@ -49,6 +49,18 @@ export class WorldLife {
     }
   }
 
+  // Interiors claims doors after construction and moves some POIs onto
+  // them — re-sync the frozen marker copies so blips match the real doors
+  refreshPoiMarkers() {
+    for (const m of this.markers) {
+      const poi = this.game.city.pois[m.poi];
+      if (!poi) continue;
+      m.x = poi.x;
+      m.z = poi.z;
+      m.mesh.position.set(poi.x, this.game.city.groundHeight(poi.x, poi.z) + 1.1, poi.z);
+    }
+  }
+
   provideBlips(blips) {
     // POmarkers as coloured squares
     const colors = { safehouse: '#5fae52', gunshop: '#b03a2e', respray: '#4a7fb5', food: '#d87a3a' };

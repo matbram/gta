@@ -413,7 +413,28 @@ const ACCENT_DEFAULT = {
 
 // ---------------------------------------------------------------- cache
 
-const texCache = new Map();   // hash → { tex, mat, uses }
+const texCache = new Map();   // hash → { tex, mat, uses, last }
+let cacheTick = 0;
+const CACHE_MAX = 90;         // looks in active use stay; idle looks evict LRU
+
+function evictIdle() {
+  if (texCache.size <= CACHE_MAX) return;
+  const idle = [...texCache.entries()]
+    .filter(([, e]) => e.uses <= 0)
+    .sort((a, b) => a[1].last - b[1].last);
+  for (const [hash, e] of idle) {
+    if (texCache.size <= CACHE_MAX) break;
+    e.tex.dispose();
+    e.mat.dispose();
+    texCache.delete(hash);
+  }
+}
+
+// characters call this on dispose so unused looks can be evicted
+export function releaseMaterial(mat) {
+  const entry = texCache.get(mat?.userData?.lookHash);
+  if (entry) entry.uses = Math.max(0, entry.uses - 1);
+}
 
 export function lookHash(look) {
   return [
@@ -444,10 +465,13 @@ export function materialForLook(look) {
     const mat = new THREE.MeshStandardMaterial({
       map: tex, roughness: 0.86, metalness: 0.0, envMapIntensity: 0.35,
     });
-    entry = { tex, mat, uses: 0 };
+    mat.userData.lookHash = hash;
+    entry = { tex, mat, uses: 0, last: 0 };
     texCache.set(hash, entry);
   }
   entry.uses++;
+  entry.last = ++cacheTick;
+  evictIdle();
   return entry.mat;
 }
 

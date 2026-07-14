@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { clamp, lerp, damp } from '../core/mathutil.js';
 import { Animator, GESTURES } from '../core/animator.js';
 import { characterFactory } from './charactermesh.js';
+import { releaseMaterial } from './charactertex.js';
 
 const GEO = {};
 function geo(key, make) {
@@ -523,9 +524,14 @@ export class SkinnedHumanoid {
 
   dispose() {
     if (!this.factoryBuilt) {
-      // factory materials + geometry are cached and shared — never disposed here
       this.modelRoot.traverse((o) => {
         if ((o.isMesh || o.isSkinnedMesh) && o.material) o.material.dispose();
+      });
+    } else {
+      // factory materials are cached + shared — release our claim so the
+      // texture cache can evict looks nobody is wearing anymore
+      this.modelRoot.traverse((o) => {
+        if (o.isSkinnedMesh && o.material) releaseMaterial(o.material);
       });
     }
     this.group.removeFromParent();

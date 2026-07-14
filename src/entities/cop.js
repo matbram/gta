@@ -83,8 +83,8 @@ export class Cop extends Ped {
     const playerInCar = !!player.vehicle;
     const canShoot = game.wanted.state.stars >= 2 || this.provoked;
 
-    if (d < 1.9 && !playerInCar && player.speed2d < 1.2) {
-      // arrest attempt
+    if (d < 1.9 && !playerInCar && player.speed2d < 1.2 && los) {
+      // arrest attempt — needs actual line of sight (no busts through walls)
       this.speed = 0;
       this.heading = angleDamp(this.heading, Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z), 12, dt);
       this.rig.setAnim('aim');

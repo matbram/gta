@@ -429,6 +429,7 @@ export class VehicleSystem {
     if (!v) return;
     const door = v.seatWorldPos();
     player.vehicle = null;
+    v.driver = null;      // keep the sim/cull loops running for this car
     player.teleport(door.x, door.z, v.heading);
     player.setVisible(true);
     this.game.audio?.stopEngine();
