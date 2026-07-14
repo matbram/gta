@@ -174,7 +174,7 @@ export class Ped {
     // NOTE: use this.game (set every update) — a bare `game` here would resolve
     // to the <canvas id="game"> element via named-global access, not the game.
     switch (reaction) {
-      case 'fight': this.state = 'fight'; this.bark('bark_backoff'); break;
+      case 'fight': this.state = 'fight'; this.bark(Math.random() < 0.5 ? 'bark_backoff' : 'bark_fight'); break;
       case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); this.bark('bark_help'); break;
       case 'film': this.state = 'film'; this.bark('bark_photo'); break;
       case 'call': this.state = 'call'; this.callT = 0; this.bark('bark_help'); break;
@@ -245,7 +245,7 @@ export class Ped {
       ally.state = ally.isGoon ? 'attack' : 'fight';
       ally.panicked = true;
       ally.stateT = 0;
-      ally.bark?.('bark_backoff');
+      ally.bark?.('bark_fight');
     }
   }
 

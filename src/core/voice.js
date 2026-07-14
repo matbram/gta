@@ -4,7 +4,9 @@
 // (marco_<trigger>, marco_<trigger>_2, …) exist in the audio manifest they
 // play too. All lines are profanity-free.
 
-const LINES = {
+// exported so tools/gen-audio.mjs generates one voice take per line —
+// the spoken audio always matches the subtitle
+export const LINES = {
   cops: [
     'Great. Company.',
     'Here they come…',
@@ -90,7 +92,10 @@ export class Voice {
     if (i === this.lastIdx[trigger] && lines.length > 1) i = (i + 1) % lines.length;
     this.lastIdx[trigger] = i;
     g.hud?.say('Marco', lines[i], 3.4);
-    g.audio?.playVar?.(`marco_${trigger}`, { gain: 0.9 });
+    // takes are named per line (marco_x, marco_x_2, …) so the audio says
+    // exactly what the subtitle shows
+    const take = i === 0 ? `marco_${trigger}` : `marco_${trigger}_${i + 1}`;
+    g.audio?.playVar?.(take, { gain: 0.9 });
   }
 
   update(dt) {

@@ -138,6 +138,7 @@ const SFX = [
 // Using two default ElevenLabs voices for variety.
 const VOICE_A = '21m00Tcm4TlvDq8ikWAM';   // female
 const VOICE_B = 'pNInz6obpgDQGcFmaJgB';   // male
+const VOICE_M = 'TxGEqnHWrfWFTfGW9XjX';   // Marco: deep male
 const BARKS = [
   // civilians — all clean
   ['bark_hey', 'Hey! Watch where you\'re going!', VOICE_B],
@@ -160,7 +161,44 @@ const BARKS = [
   // scanner
   ['scanner1', 'Dispatch, we have a ten thirty one in progress downtown.', VOICE_B],
   ['scanner2', 'All units, suspect is armed and dangerous, use caution.', VOICE_A],
+  // second takes so the same reaction doesn't always sound identical
+  // (audio.playVar rotates name / name_2 / name_3 automatically)
+  ['bark_hey_2', 'Watch it, pal!', VOICE_A],
+  ['bark_help_2', 'Call nine one one! Hurry!', VOICE_B],
+  ['bark_run_2', 'Gun! GUN! Get down!', VOICE_B],
+  ['bark_crazy_2', 'What is wrong with you?!', VOICE_A],
+  ['bark_mycar_2', 'Hey! Somebody stop him!', VOICE_A],
+  ['bark_photo_2', 'This is going online, buddy!', VOICE_B],
+  ['bark_moveit_2', 'Any day now, come on!', VOICE_A],
+  ['bark_nice_day_2', 'Some weather today, huh?', VOICE_B],
+  ['bark_lost_2', 'Is the marina this way? I always get turned around.', VOICE_B],
+  ['bark_backoff_2', 'I mean it, stay back!', VOICE_A],
+  ['cop_freeze_2', 'Police! Don\'t move!', VOICE_B],
+  ['shop_welcome_2', 'Looking for anything special today?', VOICE_A],
+  // new situations
+  ['bark_fight', 'You want to go? Let\'s go!', VOICE_B],
+  ['bark_fight_2', 'Get him!', VOICE_A],
+  ['bark_cops_coming', 'Cops! The cops are coming!', VOICE_A],
+  ['cop_backup', 'Shots fired, requesting backup now!', VOICE_B],
+  ['scream_f', 'Aaaah! No no no!', VOICE_A],
+  ['scream_m', 'Hey— aagh! Look out!', VOICE_B],
 ];
+
+// ------------------------------------------------------------------ Marco
+// One take per subtitle line, named marco_<trigger>, marco_<trigger>_2, …
+// (index-aligned with LINES so the audio says what the subtitle shows).
+async function genMarco() {
+  const { LINES } = await import('../src/core/voice.js');
+  console.log('\n[MARCO]');
+  for (const [trigger, lines] of Object.entries(LINES)) {
+    for (let i = 0; i < lines.length; i++) {
+      const name = i === 0 ? `marco_${trigger}` : `marco_${trigger}_${i + 1}`;
+      // strip typographic quotes/dashes the TTS reads awkwardly
+      const text = lines[i].replace(/…/g, '...').replace(/[’‘]/g, "'").replace(/—/g, ', ');
+      await genVoice(name, text, VOICE_M);
+    }
+  }
+}
 
 // ------------------------------------------------------------------ music
 const MUSIC = [
@@ -173,7 +211,11 @@ const MUSIC = [
 // ------------------------------------------------------------------ run
 async function run() {
   if (want('--sfx')) { console.log('\n[SFX]'); for (const [n, t, d, o] of SFX) await genSound(n, t, d, o || {}); }
-  if (want('--voice')) { console.log('\n[VOICE]'); for (const [n, t, v] of BARKS) await genVoice(n, t, v); }
+  if (want('--voice')) {
+    console.log('\n[VOICE]');
+    for (const [n, t, v] of BARKS) await genVoice(n, t, v);
+    await genMarco();
+  }
   if (want('--music')) { console.log('\n[MUSIC]'); for (const [n, p, l] of MUSIC) await genMusic(n, p, l); }
 
   // merge into existing manifest if present
