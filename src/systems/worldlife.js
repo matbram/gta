@@ -433,6 +433,17 @@ export class WorldLife {
       this.dressInstitutions();
     }
 
+    // seagulls over the waterfront
+    this._gullT = (this._gullT ?? 8) - dt;
+    if (this._gullT <= 0) {
+      this._gullT = 10 + Math.random() * 16;
+      const d = game.city.districtAt(p.x, p.z);
+      if (d === 'beach' || d === 'docks') {
+        const a = Math.random() * Math.PI * 2;
+        game.audio?.seagull?.(p.x + Math.cos(a) * 30, p.z + Math.sin(a) * 30);
+      }
+    }
+
     // ambient theater: every so often a siren wails past on a call of its
     // own — the city has emergencies that aren't about you
     this._passByT = (this._passByT ?? 40) - dt;

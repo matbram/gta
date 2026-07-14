@@ -212,6 +212,7 @@ export class Ped {
     game.audio?.scream(this.pos.x, this.pos.z);
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.state.stats.kills++;
+    if (!this.isGoon && !this.isCop) game.voice?.say?.('kill', 0.2);
     // the death scream carries — those who see it panic, others turn to look
     game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream');
     // drop some cash; an ambulance may come for the body

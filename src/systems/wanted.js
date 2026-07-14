@@ -95,6 +95,7 @@ export class WantedSystem {
     if (this.knownVehicle != null && v.id !== this.knownVehicle && !this.incognito &&
         this.unseenT > 1.2 && !this.hasWitness(v.pos.x, v.pos.z)) {
       this.incognito = true;
+      this.game.voice?.say?.('incognito', 0.8);
       this.game.hud?.showToast('Nobody saw the switch — they’re still looking for the old car.', 3.5);
       setTimeout(() => this.game.audio?.bark?.('scanner2', v.pos.x, v.pos.z), 300);
     } else if (this.unseenT <= 1.2) {
@@ -129,6 +130,7 @@ export class WantedSystem {
     for (let i = 6; i >= 1; i--) if (h >= STAR_TH[i]) { stars = i; break; }
     if (stars > this.state.stars && !silent) {
       this.game.audio?.wantedUp();
+      this.game.voice?.say?.('cops', 0.7);
       // police scanner call-out on first wanted + escalations
       if (this.state.stars === 0) {
         const p = this.game.player.pos;
@@ -275,6 +277,7 @@ export class WantedSystem {
       if (this.state.stars === 0) {
         game.hud?.showCenter('EVADED', 'passed', '', 3);
         game.audio?.pickup?.();
+        game.voice?.say?.('evaded', 0.9);
         this.incognito = false;
         this.knownVehicle = null;
         this.lastKnown = null;

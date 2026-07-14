@@ -173,6 +173,8 @@ class Game {
       this.knockables = new knock.Knockables(this);
       const weather = await import('./systems/weather.js');
       this.weather = new weather.Weather(this);
+      const voice = await import('./core/voice.js');
+      this.voice = new voice.Voice(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -220,9 +222,16 @@ class Game {
     this.state.money = 250;
     this.dayNight.minutes = 9 * 60 + 30;
     this.missions?.reset?.();
+    // starter loadout: the weapon system should be visible from minute one
+    this.combat?.give?.('bat');
+    this.combat?.give?.('pistol', 48);
+    this.combat?.select?.('fists');
     this.startPlay();
     this.hud.showToast('Welcome to Bayvale. Find the yellow marker to start working.', 6);
     this.hud.say('Marco', 'Six years away… and the old city still smells like trouble.', 6);
+    // staged control tips while the player finds their feet
+    setTimeout(() => this.state.mode === 'play' && this.hud.showToast('Scroll or hold Q for your weapons — RMB aims, LMB swings or fires.', 5), 9000);
+    setTimeout(() => this.state.mode === 'play' && this.hud.showToast('F enters cars. V changes camera. M opens the map.', 5), 22000);
   }
 
   continueGame() {
@@ -415,6 +424,7 @@ class Game {
     this.particles?.update(dt);
     this.gore?.update(dt);
     this.knockables?.update(dt);
+    this.voice?.update(dt);
     this.audio?.update(dt);
 
     // camera follows player or vehicle (re-read: enter/exit can happen mid-frame)

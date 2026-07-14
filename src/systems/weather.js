@@ -38,6 +38,7 @@ export class Weather {
   }
 
   set(state) {
+    if (state === 'rain' && this.state !== 'rain') this.game?.voice?.say?.('rain', 0.9);
     if (!STATES[state]) return;
     this.state = state;
     this.nextChange = 150 + Math.random() * 150;
@@ -45,6 +46,7 @@ export class Weather {
 
   update(dt) {
     const game = this.game;
+    game.audio?.setRain?.(this.rain);
     this.nextChange -= dt;
     if (this.nextChange <= 0) {
       // clear-biased weather chain

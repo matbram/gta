@@ -69,7 +69,10 @@ export class VehicleSystem {
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
       if (impact > 7) this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash');
       if (impact > 12) this.game.particles?.glassBurst(veh.pos.x, veh.pos.y + 1.0, veh.pos.z);
-      if (veh.driver === 'player') this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
+      if (veh.driver === 'player') {
+        this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
+        if (impact > 12) this.game.voice?.say?.('crash', 0.6);
+      }
     }
     return false;
   }
@@ -109,6 +112,7 @@ export class VehicleSystem {
       this.game.peds?.ejectDriver(ped, v);
       this.game.wanted?.crime('carjack', v.pos.x, v.pos.z);
       this.game.state.stats.vehiclesJacked++;
+      this.game.voice?.say?.('carjack', 0.6);
     }
 
     v.driver = 'player';
@@ -255,6 +259,7 @@ export class VehicleSystem {
           game.audio?.crash?.(6, b.v.pos.x, b.v.pos.z);
           game.particles?.glassBurst(b.v.pos.x, b.v.pos.y + 0.9, b.v.pos.z);
           game.wanted?.crime('breakin', b.v.pos.x, b.v.pos.z);
+          game.voice?.say?.('breakin', 0.5);
           if (b.v.alarmed) { b.v.alarmT = 12; b.v.alarmed = false; }
           this.tryEnterExit();
         }

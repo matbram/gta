@@ -149,7 +149,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     // prefer the generated clip
     if (this.buffers?.has('gun_' + kind)) {
-      this.playBuffer('gun_' + kind, x !== undefined ? { x, z, gain: 0.9, range: 170 } : { gain: 0.9 });
+      this.playVar('gun_' + kind, x !== undefined ? { x, z, gain: 0.9, range: 170 } : { gain: 0.9 });
       return;
     }
     const g = x !== undefined ? this.spatialGain(x, z, 1, 160) : 1;
@@ -181,9 +181,86 @@ export class AudioEngine {
     this.tone({ freq: 2400 + Math.random() * 1400, freqTo: 500, dur: 0.09, gain: 0.12 * g, type: 'triangle' });
   }
 
-  footstep(run = false) {
+  // pick `name`, `name_2`, `name_3`… avoiding the last-played take, with a
+  // pitch jitter so nothing repeats identically twice in a row
+  playVar(name, opts = {}) {
+    if (!this.ctx) return null;
+    const takes = [name];
+    for (let i = 2; i <= 5; i++) if (this.buffers?.has(`${name}_${i}`)) takes.push(`${name}_${i}`);
+    let pick = takes[Math.floor(Math.random() * takes.length)];
+    if (takes.length > 1 && pick === this._lastTake?.[name]) {
+      pick = takes[(takes.indexOf(pick) + 1) % takes.length];
+    }
+    (this._lastTake = this._lastTake || {})[name] = pick;
+    return this.playBuffer(pick, { rate: 0.94 + Math.random() * 0.12, ...opts });
+  }
+
+  // indoor rooms muffle the street: master bus through a swept lowpass
+  setIndoors(on) {
+    if (!this.ctx || !this.master) return;
+    if (!this._lp) {
+      this._lp = this.ctx.createBiquadFilter();
+      this._lp.type = 'lowpass';
+      this._lp.frequency.value = 20000;
+      this.master.disconnect();
+      this.master.connect(this._lp);
+      this._lp.connect(this.ctx.destination);
+    }
+    this._lp.frequency.setTargetAtTime(on ? 850 : 20000, this.now(), 0.15);
+  }
+
+  // looping rain noise bed; also flags the ground wet for footsteps
+  setRain(level) {
     if (!this.ctx) return;
-    this.burst({ dur: run ? 0.08 : 0.06, gain: run ? 0.09 : 0.05, filterFrom: 900, filterTo: 200, q: 1.5 });
+    this._wetGround = level > 0.45;
+    if (level > 0.05 && !this._rainLoop) {
+      const len = this.ctx.sampleRate * 2;
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'lowpass'; f.frequency.value = 850;
+      const g = this.ctx.createGain(); g.gain.value = 0;
+      src.connect(f); f.connect(g); g.connect(this.master);
+      src.start();
+      this._rainLoop = { src, g };
+    }
+    if (this._rainLoop) this._rainLoop.g.gain.setTargetAtTime(level * 0.13, this.now(), 0.8);
+  }
+
+  // shop door chime
+  chime() {
+    if (!this.ctx) return;
+    this.tone({ freq: 880, dur: 0.12, gain: 0.18, type: 'sine' });
+    this.tone({ freq: 660, dur: 0.16, gain: 0.15, type: 'sine', delay: 0.11 });
+  }
+
+  // lazy gull cries for the waterfront
+  seagull(x, z) {
+    if (!this.ctx) return;
+    const g = x !== undefined ? this.spatialGain(x, z, 0.5, 120) : 0.4;
+    if (g < 0.04) return;
+    const d0 = Math.random() * 0.15;
+    this.tone({ freq: 1250, freqTo: 880, dur: 0.2, gain: 0.09 * g, type: 'triangle', delay: d0 });
+    this.tone({ freq: 1420, freqTo: 940, dur: 0.24, gain: 0.08 * g, type: 'triangle', delay: d0 + 0.28 });
+  }
+
+  footstep(run = false, surface = 'concrete') {
+    if (!this.ctx) return;
+    // wet streets splash; grass and sand thud softer than concrete
+    if (this._wetGround) {
+      this.burst({ dur: 0.09, gain: run ? 0.11 : 0.06, filterFrom: 2500, filterTo: 700, type: 'bandpass', q: 0.8 });
+      return;
+    }
+    if (surface === 'grass') {
+      this.burst({ dur: run ? 0.09 : 0.07, gain: run ? 0.07 : 0.04, filterFrom: 600, filterTo: 150, q: 0.7 });
+    } else if (surface === 'sand') {
+      this.burst({ dur: 0.1, gain: run ? 0.08 : 0.05, filterFrom: 400, filterTo: 120, q: 0.5 });
+    } else {
+      this.burst({ dur: run ? 0.08 : 0.06, gain: run ? 0.09 : 0.05, filterFrom: 900, filterTo: 200, q: 1.5 });
+    }
   }
 
   whoosh() {
@@ -194,7 +271,7 @@ export class AudioEngine {
 
   punch() {
     if (!this.ctx) return;
-    if (this.buffers?.has('punch')) return void this.playBuffer('punch', { gain: 0.7 });
+    if (this.buffers?.has('punch')) return void this.playVar('punch', { gain: 0.7 });
     this.burst({ dur: 0.08, gain: 0.5, filterFrom: 700, filterTo: 150 });
     this.tone({ freq: 120, freqTo: 60, dur: 0.08, gain: 0.35, type: 'sine' });
   }
@@ -235,7 +312,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const v = clamp(intensity / 14, 0.25, 1);
     if (this.buffers?.has('car_crash')) {
-      return void this.playBuffer('car_crash', {
+      return void this.playVar('car_crash', {
         x, z, gain: 0.85 * v, range: 140, rate: 0.9 + Math.random() * 0.25 + (1 - v) * 0.2,
       });
     }
@@ -275,7 +352,7 @@ export class AudioEngine {
     const g = this.spatialGain(x, z, 0.9, 55);
     if (g < 0.08) return;
     this._lastBark = this.now();
-    this.playBuffer(name, { x, z, gain: 0.9, range: 55 });
+    this.playVar(name, { x, z, gain: 0.9, range: 55 });
   }
 
   // looped ambient bed, crossfaded by district/time (one active at a time)

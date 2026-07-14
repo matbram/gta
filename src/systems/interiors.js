@@ -389,6 +389,7 @@ export class Interiors {
     const rec = this.playerInside;
     if (rec.built) rec.built.light.intensity = 0;
     game.player.interiorY = null;
+    game.audio?.setIndoors?.(false);
     this.playerInside = null;
     this.current = null;
     this.pendingHeat = 0;
@@ -403,6 +404,8 @@ export class Interiors {
     this.counterArmed = true;    // and back in can't reset a half-done heist
     game.player.interiorY = rec.built.gy;
     rec.built.light.intensity = 2.2;
+    game.audio?.chime?.();
+    game.audio?.setIndoors?.(true);
     game.hud.showZone(LABELS[rec.template] ?? 'STORE');
     document.getElementById('minimap-wrap').style.visibility = 'hidden';
   }
@@ -414,6 +417,7 @@ export class Interiors {
     this.playerInside = null;
     this.current = null;
     game.player.interiorY = null;
+    game.audio?.setIndoors?.(false);
     document.getElementById('minimap-wrap').style.visibility = '';
     if (this.pendingHeat > 0) {
       game.wanted.state.heat = clamp(game.wanted.state.heat + this.pendingHeat, 0, 900);
@@ -539,6 +543,7 @@ export class Interiors {
           if (rec.robDrops === 5) {
             this.robbedDoors.add(rec.id);
             game.hud.showToast('Register cleaned out. Now get gone.', 3.5);
+            game.voice?.say?.('robbery');
           }
         }
         // brave keepers eventually go for the shotgun under the counter

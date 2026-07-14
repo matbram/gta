@@ -207,7 +207,10 @@ export class Player {
       this.stepPhase = (this.stepPhase || 0) + this.speed2d * dt * 0.9;
       if (this.stepPhase >= 1) {
         this.stepPhase -= 1;
-        this._audio?.footstep(this.speed2d > 4);
+        const dist = this.city.districtAt?.(this.pos.x, this.pos.z);
+        const surface = dist === 'beach' ? 'sand'
+          : (dist === 'park' || dist === 'farm' || dist === 'heights') ? 'grass' : 'concrete';
+        this._audio?.footstep(this.speed2d > 4, surface);
       }
     }
   }
