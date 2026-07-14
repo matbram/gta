@@ -67,7 +67,10 @@ export class VehicleSystem {
     if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
       veh._lastCrashSfxT = this.game.time;
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
-      if (impact > 7) this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash');
+      if (impact > 7) {
+        this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash',
+          veh.driver === 'player' ? 'player' : 'ai');
+      }
       if (impact > 12) this.game.particles?.glassBurst(veh.pos.x, veh.pos.y + 1.0, veh.pos.z);
       if (veh.driver === 'player') {
         this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
@@ -312,8 +315,9 @@ export class VehicleSystem {
               b.vel.y += nz * impulse * (ma / tot);
               const impact = -rel;
               if (impact > 5) {
-                a.applyDamage(impact * 1.2, 'crash');
-                b.applyDamage(impact * 1.2, 'crash');
+                const culprit = (a.driver === 'player' || b.driver === 'player') ? 'player' : 'ai';
+                a.applyDamage(impact * 1.2, 'crash', culprit);
+                b.applyDamage(impact * 1.2, 'crash', culprit);
                 // bumping an alarmed parked car sets the alarm off
                 for (const c of [a, b]) {
                   if (c.alarmed && c.parked) { c.alarmT = 12; c.alarmed = false; }
@@ -476,19 +480,20 @@ export class VehicleSystem {
     this.game.particles?.explosion(x, y + 0.5, z);
     this.game.audio?.explosion(x, z);
     this.game.cameraRig.addShake(clamp(1.2 - dist2d(x, z, this.game.player.pos.x, this.game.player.pos.z) / 40, 0, 1));
-    // splash damage
+    // splash damage — chain explosions inherit the culprit of the first blast
+    const culprit = v._lastHitBy === 'player' ? 'player' : 'ai';
     const player = this.game.player;
     const pd = dist2d(x, z, player.pos.x, player.pos.z);
     if (pd < 9 && !player.vehicle) player.damage((9 - pd) * 12, 'explosion');
     if (player.vehicle && dist2d(x, z, player.vehicle.pos.x, player.vehicle.pos.z) < 8 && player.vehicle !== v) {
-      player.vehicle.applyDamage(40, 'explosion');
+      player.vehicle.applyDamage(40, 'explosion', culprit);
     }
     for (const o of this.vehicles) {
       if (o === v || o.dead) continue;
       const d = dist2d(x, z, o.pos.x, o.pos.z);
-      if (d < 8) o.applyDamage((8 - d) * 9, 'explosion');
+      if (d < 8) o.applyDamage((8 - d) * 9, 'explosion', culprit);
     }
-    this.game.peds?.explosionAt(x, z, 8);
+    this.game.peds?.explosionAt(x, z, 8, culprit);
     this.game.dispatch?.reportFire(x, z, v);
     if (v.driver === 'player') {
       player.vehicle = null;
@@ -502,7 +507,10 @@ export class VehicleSystem {
       this.game.peds?.killInVehicle(v.driver, v);
       v.driver = null;
     }
-    this.game.wanted?.crime('explosion', x, z);
+    // only player-caused explosions are the player's crime — an AI pileup
+    // burning out on its own sends a cop to look, not stars (this was the
+    // "wanted level rises while standing still" bug)
+    this.game.wanted?.crime('explosion', x, z, culprit);
   }
 
   setNight(night) {

@@ -156,8 +156,11 @@ export class Cop extends Ped {
     }
   }
 
-  damage(amount, game, source) {
-    this.provoked = true;
+  damage(amount, game, source, impact = null, culprit = 'player') {
+    // a stray AI car clipping a beat cop must not put him in execution
+    // mode — only a direct player attack provokes lethal response at 0★
+    if (culprit === 'player') this.provoked = true;
+    this.killedBy = culprit;
     if (this.dead) return;
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
@@ -176,8 +179,9 @@ export class Cop extends Ped {
     this.ragdoll = game.gore?.makeRagdoll(this.rig, { dx: dx / l, dz: dz / l, force: 2.5, up: 1, spin: (Math.random() - 0.5) * 3 });
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.audio?.scream(this.pos.x, this.pos.z);
-    game.state.stats.kills++;
-    game.peds?.panicAt(this.pos.x, this.pos.z, 26);
+    const culprit = this.killedBy ?? 'player';
+    if (culprit === 'player') game.state.stats.kills++;
+    game.peds?.panicAt(this.pos.x, this.pos.z, 26, null, culprit);
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 20 + Math.floor(Math.random() * 30));
   }
 }

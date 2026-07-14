@@ -228,6 +228,9 @@ class Game {
     this.player.health = 100;
     this.state.money = 250;
     this.dayNight.minutes = 9 * 60 + 30;
+    // a fresh start owes the law nothing — without this, heat, stars and
+    // live cops from the previous session walk right into the new game
+    this.wanted?.clear?.();
     this.missions?.reset?.();
     // starter loadout: the weapon system should be visible from minute one
     this.combat?.give?.('bat');

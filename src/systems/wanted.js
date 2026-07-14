@@ -52,7 +52,16 @@ export class WantedSystem {
   }
 
   // ---------------- heat ----------------
-  crime(kind, x, z) {
+  // culprit: 'player' (default) or 'ai'. Wanted heat is the PLAYER's rap
+  // sheet — AI-caused mayhem must never raise it. AI crimes still get a
+  // police response (a unit investigates) but add zero heat.
+  crime(kind, x, z, culprit = 'player') {
+    if (culprit !== 'player') {
+      let cop = this.nearestCop(x, z, 240);
+      if (!cop) cop = this.spawnFootCop(false, true);
+      if (cop && !cop.investigate) cop.investigate = { x, z, t: 0 };
+      return;
+    }
     const heat = CRIME_HEAT[kind] ?? 4;
     // quiet crimes need a witness; a lonely street keeps your secrets
     const quiet = ['carjack', 'assault', 'kill', 'breakin'].includes(kind);
@@ -117,10 +126,14 @@ export class WantedSystem {
     this.recalcStars(true);
   }
 
-  // a civilian phoned it in: heat bump + a unit sent to look at the spot
-  reportCrime(x, z) {
-    this.state.heat = clamp(this.state.heat + 16, 0, 900);
-    this.recalcStars();
+  // a civilian phoned it in: a unit is sent to look at the spot. Only
+  // reports about the PLAYER bump the player's heat — someone calling in
+  // an AI driver's hit-and-run sends a cop, not stars.
+  reportCrime(x, z, culprit = 'player') {
+    if (culprit === 'player') {
+      this.state.heat = clamp(this.state.heat + 16, 0, 900);
+      this.recalcStars();
+    }
     // point an existing patrol/foot cop at the scene, or spawn one nearby
     let cop = this.nearestCop(x, z, 240);
     if (!cop) cop = this.spawnFootCop(false, true);
@@ -130,6 +143,11 @@ export class WantedSystem {
   clear() {
     this.state.heat = 0;
     this.state.stars = 0;
+    this.lastKnown = null;
+    this.knownVehicle = null;
+    this.incognito = false;
+    this.playerSeen = false;
+    this.unseenT = 0;
     this.despawnAll(true);
   }
 

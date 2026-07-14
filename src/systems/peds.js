@@ -244,14 +244,14 @@ export class PedSystem {
   // ---- senses ------------------------------------------------------
   // a loud event: peds who SEE it panic at once; the rest hear it, turn
   // toward the sound, and react after a beat
-  senseEvent(x, z, kind) {
+  senseEvent(x, z, kind, culprit = 'player') {
     const R = { gunshot: 34, explosion: 32, crash: 18, scream: 14, alarm: 20 }[kind] ?? 20;
     for (const ped of this.peds) {
       if (ped.dead || ped.inVehicle || ped.state === 'driver') continue;
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
       if (d > R) continue;
-      if (d < 6 || ped.seePoint?.(x, z, { range: R })) ped.panic(x, z);
-      else ped.hearThreat(x, z, kind);
+      if (d < 6 || ped.seePoint?.(x, z, { range: R })) ped.panic(x, z, false, kind, culprit);
+      else ped.hearThreat(x, z, kind, culprit);
     }
   }
 
@@ -275,6 +275,7 @@ export class PedSystem {
         if ((P.civic ?? 0) > 0.65 && Math.random() < 0.4) {
           ped.fleeFrom.x = player.pos.x; ped.fleeFrom.z = player.pos.z;
           ped.panicked = true; ped.state = 'call'; ped.callT = 0; ped.stateT = 0;
+          ped._panicCulprit = 'player';   // they saw YOUR gun
           ped.bark('bark_help');
         } else if ((P.bravery ?? 0) < 0.45 || d < 6) {
           ped.fleeFrom.x = player.pos.x; ped.fleeFrom.z = player.pos.z;
@@ -295,11 +296,15 @@ export class PedSystem {
           if (d > 10 || !ped.seePoint(c.pos.x, c.pos.z, { range: 10 })) continue;
           ped._sawCorpse = true;
           ped.bark('bark_help');
+          // the caller reports the body they found — who killed it decides
+          // whether the police come for the PLAYER or just investigate
+          const culprit = c.killedBy ?? 'player';
           if ((ped.personality?.civic ?? 0) > 0.55) {
             ped.fleeFrom.x = c.pos.x; ped.fleeFrom.z = c.pos.z;
             ped.panicked = true; ped.state = 'call'; ped.callT = 0; ped.stateT = 0;
+            ped._panicCulprit = culprit;
           } else {
-            ped.panic(c.pos.x, c.pos.z);
+            ped.panic(c.pos.x, c.pos.z, false, null, culprit);
           }
           break;
         }
@@ -324,18 +329,22 @@ export class PedSystem {
   }
 
   // --- interactions -------------------------------------------------
-  panicAt(x, z, radius) {
+  panicAt(x, z, radius, kind = null, culprit = 'player') {
     for (const ped of this.peds) {
-      if (distSq2d(ped.pos.x, ped.pos.z, x, z) < radius * radius) ped.panic(x, z);
+      if (distSq2d(ped.pos.x, ped.pos.z, x, z) < radius * radius) {
+        ped.panic(x, z, false, kind, culprit);
+      }
     }
   }
 
-  explosionAt(x, z, radius) {
+  explosionAt(x, z, radius, culprit = 'player') {
     for (const ped of this.hitTargets()) {
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
-      if (d < radius && !ped.dead) ped.damage((radius - d) * 18, this.game, 'explosion');
+      if (d < radius && !ped.dead) {
+        ped.damage((radius - d) * 18, this.game, 'explosion', null, culprit);
+      }
     }
-    this.senseEvent(x, z, 'explosion');
+    this.senseEvent(x, z, 'explosion', culprit);
   }
 
   // vehicles query the grid instead of scanning every human in the city
@@ -352,7 +361,8 @@ export class PedSystem {
       if (d < vehicle.radius + 0.4) {
         if (this.game.time - (ped._lastRunOverT ?? -9) < 0.6) continue;
         ped._lastRunOverT = this.game.time;
-        ped.damage(speed * 4.5, this.game, 'runover');
+        ped.damage(speed * 4.5, this.game, 'runover', null,
+          vehicle.driver === 'player' ? 'player' : 'ai');
         if (!ped.dead) {
           // knocked aside
           const nx = (ped.pos.x - vehicle.pos.x) / (d || 1);
@@ -366,7 +376,8 @@ export class PedSystem {
             ped.pos.x, ped.pos.z);
         }
       } else if (d < vehicle.radius + 3.2 && speed > 8) {
-        ped.panic(vehicle.pos.x, vehicle.pos.z);
+        ped.panic(vehicle.pos.x, vehicle.pos.z, false, 'runover',
+          vehicle.driver === 'player' ? 'player' : 'ai');
       }
     }
   }
@@ -397,9 +408,11 @@ export class PedSystem {
   ejectDriver(pedLike, vehicle) {
     if (!pedLike || pedLike === 'player') return;
     const door = vehicle.seatWorldPos();
-    // the victim yells — anyone in earshot turns to look
+    // the victim yells — anyone in earshot turns to look. A player carjack
+    // is on the player; an AI road-rage bail-out isn't.
+    const byPlayer = dist2d(this.game.player.pos.x, this.game.player.pos.z, door.x, door.z) < 4;
     this.game.audio?.scream?.(door.x, door.z);
-    this.senseEvent(door.x, door.z, 'scream');
+    this.senseEvent(door.x, door.z, 'scream', byPlayer ? 'player' : 'ai');
     pedLike.inVehicle = null;
     pedLike.state = 'flee';
     pedLike.panicked = true;

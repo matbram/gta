@@ -132,14 +132,19 @@ export class Ped {
 
   // hearing: something loud happened out of view — turn toward it, take a
   // beat to understand, THEN react. No more psychic instant panics.
-  hearThreat(x, z, kind) {
+  hearThreat(x, z, kind, culprit = 'player') {
     if (this.dead || this.state === 'driver' || this.panicked || this.alarm) return;
     const b = this.personality?.bravery ?? 0.4;
-    this.alarm = { x, z, kind, t: 0.25 + (1 - b) * 0.45 + Math.random() * 0.25 };
+    this.alarm = { x, z, kind, culprit, t: 0.25 + (1 - b) * 0.45 + Math.random() * 0.25 };
   }
 
-  panic(fromX, fromZ, directlyTargeted = false) {
+  // kind: what actually scared them ('gunshot'|'brandish'|'runover'|'crash'|
+  // 'scream'|'explosion'|null). Barks are kind-aware — "He's got a gun!"
+  // only ever follows an actual gun event, not any random fright.
+  // culprit: who's to blame ('player'|'ai') — carried into a police call.
+  panic(fromX, fromZ, directlyTargeted = false, kind = null, culprit = 'player') {
     if (this.dead || this.state === 'driver') return;
+    this._panicCulprit = culprit;
     // already reacting? repeated scares escalate to flat-out fleeing
     if (this.panicked && this.state !== 'fight') {
       this.state = 'flee';
@@ -157,6 +162,11 @@ export class Ped {
     this.stateT = 0;
     this.idleMode = null;
     this.crossWait = null;
+    const gun = kind === 'gunshot' || kind === 'brandish';
+    const fleeBark = gun ? (Math.random() < 0.5 ? 'bark_run' : 'bark_help')
+      : (kind === 'runover' || kind === 'crash')
+        ? (Math.random() < 0.5 ? 'bark_crazy' : 'bark_help')
+        : 'bark_help';
     // NOTE: use this.game (set every update) — a bare `game` here would resolve
     // to the <canvas id="game"> element via named-global access, not the game.
     switch (reaction) {
@@ -164,7 +174,7 @@ export class Ped {
       case 'cower': this.state = 'cower'; this.rig.setAnim?.('kneel'); this.bark('bark_help'); break;
       case 'film': this.state = 'film'; this.bark('bark_photo'); break;
       case 'call': this.state = 'call'; this.callT = 0; this.bark('bark_help'); break;
-      default: this.state = 'flee'; this.bark(Math.random() < 0.5 ? 'bark_run' : 'bark_help');
+      default: this.state = 'flee'; this.bark(fleeBark);
     }
   }
 
@@ -172,8 +182,9 @@ export class Ped {
     if (this.game && Math.random() < 0.6) this.game.audio?.bark(name, this.pos.x, this.pos.z);
   }
 
-  damage(amount, game, source = 'player', impact = null) {
+  damage(amount, game, source = 'player', impact = null, culprit = 'player') {
     if (this.dead) return;
+    this.killedBy = culprit;   // remembered by the corpse for witness calls
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
     if (this.health <= 0) {
@@ -201,7 +212,9 @@ export class Ped {
     }
     // flinch on non-fatal hits (skinned rig)
     this.rig.flinch?.();
-    this.panic(game.player.pos.x, game.player.pos.z, source === 'melee' || source === 'gun');
+    const kind = source === 'gun' ? 'gunshot' : source === 'runover' ? 'runover' : null;
+    this.panic(game.player.pos.x, game.player.pos.z,
+      source === 'melee' || source === 'gun', kind, culprit);
   }
 
   // knocked down but alive: brief ragdoll-style topple, then get up
@@ -224,10 +237,14 @@ export class Ped {
     this.ragdoll = game.gore?.makeRagdoll(this.rig, impact);
     game.audio?.scream(this.pos.x, this.pos.z);
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
-    game.state.stats.kills++;
-    if (!this.isGoon && !this.isCop) game.voice?.say?.('kill', 0.2);
+    // the kill counter and Marco's guilt line are the PLAYER's — deaths the
+    // AI causes (traffic accidents, crossfire) don't belong on either
+    if ((this.killedBy ?? 'player') === 'player') {
+      game.state.stats.kills++;
+      if (!this.isGoon && !this.isCop) game.voice?.say?.('kill', 0.2);
+    }
     // the death scream carries — those who see it panic, others turn to look
-    game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream');
+    game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream', this.killedBy ?? 'player');
     // drop some cash; an ambulance may come for the body
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 10 + Math.floor(Math.random() * 30));
     game.dispatch?.reportDeath(this);
@@ -270,7 +287,7 @@ export class Ped {
       a.t -= dt;
       if (a.t <= 0) {
         this.alarm = null;
-        this.panic(a.x, a.z);
+        this.panic(a.x, a.z, false, a.kind, a.culprit);
       }
       this.rig.update(dt, 0);
       this.syncRig();
@@ -410,8 +427,11 @@ export class Ped {
         this.rig.setAnim('phone');
         this.callT = (this.callT ?? 0) + dt;
         if (this.callT > 4) {
-          game.wanted?.reportCrime?.(this.fleeFrom.x, this.fleeFrom.z);
-          game.hud?.showToast('Someone called the police!', 3);
+          // the caller reports what they actually witnessed — AI-caused
+          // mayhem sends a cop to the scene but adds no player heat
+          const culprit = this._panicCulprit ?? 'player';
+          game.wanted?.reportCrime?.(this.fleeFrom.x, this.fleeFrom.z, culprit);
+          if (culprit === 'player') game.hud?.showToast('Someone called the police!', 3);
           this.state = 'flee';
           this.stateT = 0;
         }

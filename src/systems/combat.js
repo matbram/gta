@@ -304,7 +304,7 @@ export class CombatSystem {
       } else {
         const v = game.vehicles?.nearestVehicle(reachX, reachZ, spec.range + 0.6, (v) => !v.dead && v.driver !== 'player');
         if (v) {
-          v.applyDamage(spec.dmg * 0.7, 'melee');
+          v.applyDamage(spec.dmg * 0.7, 'melee', 'player');
           game.particles?.sparks(reachX, player.pos.y + 1, reachZ, 4);
           game.wanted?.crime('crash', player.pos.x, player.pos.z);
           this.hitmark();
@@ -426,7 +426,7 @@ export class CombatSystem {
         }
         anyHit = true;
       } else if (hit.type === 'vehicle') {
-        hit.target.applyDamage(spec.dmg * 0.55, 'gun');
+        hit.target.applyDamage(spec.dmg * 0.55, 'gun', 'player');
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 4);
         if (hit.target.aiControlled) game.traffic?.panic(hit.target);
         anyHit = true;

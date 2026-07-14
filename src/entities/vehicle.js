@@ -219,15 +219,18 @@ export class Vehicle {
         this.vel.x -= hit.nx * vn * 1.4;   // bounce
         this.vel.y -= hit.nz * vn * 1.4;
         if (impact > 4) {
-          this.applyDamage(impact * 1.7, 'crash');
+          this.applyDamage(impact * 1.7, 'crash', this.driver === 'player' ? 'player' : 'ai');
           this.lastHitSpeed = impact;
         }
       }
     }
   }
 
-  applyDamage(amount, cause = 'unknown') {
+  // culprit tracks WHO wrecked this car ('player'|'ai') so an eventual
+  // explosion can be attributed — AI pileups must not raise player heat
+  applyDamage(amount, cause = 'unknown', culprit = null) {
     if (this.dead) return;
+    if (culprit) this._lastHitBy = culprit;
     this.health -= amount;
     if (this.health <= 0) {
       this.health = 0;
