@@ -101,6 +101,8 @@ export class Ped {
       const node = sw.dir > 0 ? e.b : e.a;
       const options = node.edges.filter((n2) => n2 !== e);
       const next = options.length ? options[Math.floor(Math.random() * options.length)] : e;
+      // turning onto a cross street at a signalled corner: wait for green
+      if (node.hasSignal && next.horizontal !== e.horizontal) this.crossWait = next.horizontal;
       sw.edge = next;
       sw.dir = next.a === node ? 1 : -1;
       if (Math.random() < 0.18) sw.side = -sw.side;
@@ -153,6 +155,8 @@ export class Ped {
       : reactToThreat(this, d, directlyTargeted);
     this.panicked = true;
     this.stateT = 0;
+    this.idleMode = null;
+    this.crossWait = null;
     // NOTE: use this.game (set every update) — a bare `game` here would resolve
     // to the <canvas id="game"> element via named-global access, not the game.
     switch (reaction) {
@@ -303,20 +307,55 @@ export class Ped {
 
     switch (this.state) {
       case 'wander': {
+        // wait for the light before crossing at a signalled corner
+        if (this.crossWait != null) {
+          const green = this.game?.traffic?.signalGreenFor?.(this.crossWait);
+          if (!green) { this.speed = 0; this.rig.setAnim('idle'); break; }
+          this.crossWait = null;
+        }
         const d = dist2d(this.pos.x, this.pos.z, this.target.x, this.target.z);
         if (d < 1.6 || this.stateT > 40) {
           this.state = Math.random() < 0.25 ? 'idle' : 'wander';
           this.stateT = 0;
           this.pickWanderTarget();
         }
-        this.moveToward(this.target.x, this.target.z, this.walkSpeed, dt);
-        this.rig.setAnim(this.speed > 0.2 ? 'walk' : 'idle');
+        // rain sends everyone scurrying
+        const rainy = this.game?.weather?.state === 'rain' && !this.loiter;
+        this.moveToward(this.target.x, this.target.z, this.walkSpeed * (rainy ? 1.9 : 1), dt);
+        this.rig.setAnim(this.speed > 2.6 ? 'run' : this.speed > 0.2 ? 'walk' : 'idle');
         break;
       }
       case 'idle': {
         this.speed = 0;
-        this.rig.setAnim('idle');
-        if (this.stateT > 2 + Math.random() * 4) {
+        // archetype flavor: commuters check phones, tourists take photos,
+        // the elderly sit on benches
+        if (!this.idleMode) {
+          const idles = ARCHETYPES[this.archetype]?.idles ?? [];
+          this.idleMode = 'stand';
+          this.idleDur = 2 + Math.random() * 4;
+          if (idles.includes('phone') && Math.random() < 0.4) {
+            this.idleMode = 'phone'; this.idleDur = 5 + Math.random() * 6;
+          }
+          if (idles.includes('photo') && Math.random() < 0.35) {
+            this.idleMode = 'photo'; this.idleDur = 4 + Math.random() * 4;
+          }
+          if (idles.includes('bench')) {
+            for (const b of this.city.queryColliders(this.pos.x, this.pos.z, 4)) {
+              if (b.kind === 'prop' && b.owner?.kind === 'bench' && !b.gone) {
+                this.pos.x = b.owner.x;
+                this.pos.z = b.owner.z;
+                this.heading = b.owner.rot ?? 0;
+                this.idleMode = 'sit';
+                this.idleDur = 12 + Math.random() * 14;
+                break;
+              }
+            }
+          }
+        }
+        this.rig.setAnim(this.idleMode === 'sit' ? 'sit'
+          : (this.idleMode === 'phone' || this.idleMode === 'photo') ? 'phone' : 'idle');
+        if (this.stateT > (this.idleDur ?? 3)) {
+          this.idleMode = null;
           this.state = 'wander';
           this.stateT = 0;
           this.pickWanderTarget();

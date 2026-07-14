@@ -6,7 +6,7 @@ import { enrichLook } from '../entities/humanoid.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
 import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 
-const TARGET_PEDS = 40;
+const TARGET_PEDS = 60;
 const SPAWN_MIN = 55, SPAWN_MAX = 150, DESPAWN = 230;
 
 export class PedSystem {
@@ -35,12 +35,27 @@ export class PedSystem {
       this.senseScan();
     }
 
-    // spawn up to target count
+    // refresh the ring of edges we can actually spawn on (near-100% hit
+    // rate vs sampling the whole 1.8km map)
+    this.edgeCacheT = (this.edgeCacheT ?? 0) - dt;
+    if (this.edgeCacheT <= 0) {
+      this.edgeCacheT = 1.5;
+      this.nearEdges = game.city.edges.filter((e) => {
+        const mx = (e.a.x + e.b.x) / 2, mz = (e.a.z + e.b.z) / 2;
+        return dist2d(mx, mz, p.x, p.z) < SPAWN_MAX + e.len / 2;
+      });
+    }
+
+    // spawn up to target count — the streets thin out deep at night and in rain
     this.spawnTimer -= dt;
     const density = this.densityAt(p.x, p.z);
-    const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1));
+    const hour = (game.dayNight?.minutes ?? 720) / 60;
+    const nightThin = (hour >= 23 || hour < 5) ? 0.45 : 1;
+    const rainThin = game.weather?.state === 'rain' ? 0.65 : 1;
+    const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1) * nightThin * rainThin);
     if (this.peds.length < want && this.spawnTimer <= 0) {
-      this.spawnTimer = 0.25;
+      // burst-fill when the street is under half strength
+      this.spawnTimer = this.peds.length < want * 0.5 ? 0.08 : 0.22;
       this.trySpawn(p);
     }
 
@@ -101,9 +116,9 @@ export class PedSystem {
 
   trySpawn(p) {
     const city = this.game.city;
-    // sample several random edges — most are outside the spawn ring
+    const pool = this.nearEdges?.length ? this.nearEdges : city.edges;
     for (let attempt = 0; attempt < 10; attempt++) {
-      const edge = city.edges[Math.floor(Math.random() * city.edges.length)];
+      const edge = pool[Math.floor(Math.random() * pool.length)];
       const t = Math.random();
       const ex = edge.a.x + (edge.b.x - edge.a.x) * t;
       const ez = edge.a.z + (edge.b.z - edge.a.z) * t;
@@ -116,9 +131,9 @@ export class PedSystem {
       if (!city.landAt(x, z)) continue;
       if (Math.random() > this.densityAt(x, z)) continue;
 
-      // role + personality by district
+      // role + personality by district and hour
       const district = city.districtAt(x, z);
-      const archetype = pickArchetype(district);
+      const archetype = pickArchetype(district, Math.random, (this.game.dayNight?.minutes ?? 720) / 60);
       const arch = ARCHETYPES[archetype];
       const look = enrichLook({ ...(arch?.look ?? {}) });
       if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];

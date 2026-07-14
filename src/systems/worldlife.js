@@ -49,6 +49,21 @@ export class WorldLife {
     }
   }
 
+  // civic dressing: cruisers parked outside BPD HQ, an ambulance at
+  // St. Aurora — the institutions look inhabited
+  dressInstitutions() {
+    const game = this.game;
+    const put = (poi, type, n) => {
+      if (!poi) return;
+      for (let k = 0; k < n; k++) {
+        const v = game.vehicles?.spawnOnRoadNear(poi.x + k * 7 - 4, poi.z + 6, type);
+        if (v) { v.parked = true; v.sirenOn = false; }
+      }
+    };
+    put(game.city.pois.policeHQ, 'police', 2);
+    put(game.city.pois.hospital, 'ambulance', 1);
+  }
+
   // Interiors claims doors after construction and moves some POIs onto
   // them — re-sync the frozen marker copies so blips match the real doors
   refreshPoiMarkers() {
@@ -411,6 +426,22 @@ export class WorldLife {
     const game = this.game;
     const p = game.player.pos;
     const t = game.time;
+
+    // one-time civic dressing once vehicles exist
+    if (!this._dressed && game.vehicles) {
+      this._dressed = true;
+      this.dressInstitutions();
+    }
+
+    // ambient theater: every so often a siren wails past on a call of its
+    // own — the city has emergencies that aren't about you
+    this._passByT = (this._passByT ?? 40) - dt;
+    if (this._passByT <= 0) {
+      this._passByT = 75 + Math.random() * 70;
+      if ((game.state.wanted?.stars ?? 0) === 0) {
+        game.traffic?.trySpawn(p, Math.random() < 0.65 ? 'police' : 'ambulance');
+      }
+    }
 
     // markers: pulse + trigger
     for (const m of this.markers) {

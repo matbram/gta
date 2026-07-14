@@ -4,7 +4,7 @@
 import { Ped, randomLook } from '../entities/ped.js';
 import { clamp, dist2d, distSq2d, wrapAngle, lerp } from '../core/mathutil.js';
 
-const TARGET_CARS = 20;
+const TARGET_CARS = 30;
 const SPAWN_MIN = 90, SPAWN_MAX = 200, DESPAWN = 280;
 const LANE = 0.24;            // lane offset as fraction of road width
 
@@ -53,7 +53,7 @@ export class TrafficSystem {
 
     this.spawnTimer -= dt;
     if (this.cars.length < TARGET_CARS && this.spawnTimer <= 0) {
-      this.spawnTimer = 0.4;
+      this.spawnTimer = this.cars.length < TARGET_CARS * 0.5 ? 0.15 : 0.35;
       this.trySpawn(p);
     }
 
@@ -61,6 +61,7 @@ export class TrafficSystem {
       this.drive(car, dt);
       const v = car.vehicle;
       if (dist2d(v.pos.x, v.pos.z, p.x, p.z) > DESPAWN || v.dead) {
+        if (v.sirenOn) { v.sirenOn = false; this.game.audio?.stopSiren(v.id); }
         if (v.dead) {
           // wreck stays (vehicle system culls it later); free the driver rig
           // unless the explosion path already handed the ped to the ped system
@@ -101,10 +102,11 @@ export class TrafficSystem {
     }
   }
 
-  trySpawn(p) {
+  // forceType lets ambient theater inject a siren pass-by into the flow
+  trySpawn(p, forceType = null) {
     const city = this.game.city;
     let edge = null, ex = 0, ez = 0, t = 0;
-    for (let attempt = 0; attempt < 10 && !edge; attempt++) {
+    for (let attempt = 0; attempt < 14 && !edge; attempt++) {
       const cand = city.edges[Math.floor(Math.random() * city.edges.length)];
       t = 0.2 + Math.random() * 0.6;
       ex = lerp(cand.a.x, cand.b.x, t);
@@ -119,15 +121,20 @@ export class TrafficSystem {
       if (distSq2d(c.pos.x, c.pos.z, ex, ez) < 100) return;
     }
 
-    const type = pickType(Math.random(), city.districtAt(ex, ez), edge.artery);
+    const type = forceType ?? pickType(Math.random(), city.districtAt(ex, ez), edge.artery);
     const dir = Math.random() < 0.5 ? 1 : -1;
     const v = this.game.vehicles.spawn(type, ex, ez, 0);
     const car = {
       vehicle: v, edge, dir, t,
-      targetSpeed: edge.artery ? 12 : 8.5,
+      targetSpeed: (edge.artery ? 12 : 8.5) * (forceType ? 1.4 : 1),
       waitT: 0, honkT: 0, panicT: 0, stuckT: 0,
     };
     v.aiControlled = true;
+    if (forceType && ['police', 'ambulance', 'firetruck'].includes(forceType)) {
+      v.sirenOn = true;
+      this.game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+      car.panicT = 999;   // clears intersections like a real response unit
+    }
 
     // put a visible AI driver figure at the wheel (pulled out on carjack)
     const ped = new Ped(city, this.game.scene, randomLook(Math.random));

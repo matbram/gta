@@ -271,6 +271,10 @@ export class Interiors {
 
   furnish(rec) {
     if (rec.furnished || !rec.built) return;
+    // the club only comes alive after dark — daytime it's an empty room
+    // (left unfurnished so night can still populate it)
+    const hour = (this.game.dayNight?.minutes ?? 720) / 60;
+    if (rec.template === 'club' && !(hour >= 20 || hour < 5)) return;
     rec.furnished = true;
     const b = rec.b, mzf = rec.built.face;
     const mz = (z) => (mzf > 0 ? z : -z);

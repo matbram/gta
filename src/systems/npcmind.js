@@ -56,11 +56,23 @@ export const ARCHETYPES = {
   },
 };
 
-export function pickArchetype(district, rand = Math.random) {
+export function pickArchetype(district, rand = Math.random, hour = 12) {
   let total = 0;
   const entries = [];
+  // the city's cast changes with the clock: joggers at dawn, a commuter
+  // crush at rush hour, gang corners owning the small hours
+  const dawn = hour >= 5 && hour < 9;
+  const rush = (hour >= 7 && hour < 9.5) || (hour >= 16 && hour < 18.5);
+  const night = hour >= 22 || hour < 5;
+  const hourMult = (key) => {
+    if (key === 'jogger') return dawn ? 3 : night ? 0.1 : 1;
+    if (key === 'commuter') return rush ? 2.2 : night ? 0.5 : 1;
+    if (key === 'gangster') return night ? 3 : 1;
+    if (key === 'tourist' || key === 'elderly') return night ? 0.15 : 1;
+    return 1;
+  };
   for (const [key, a] of Object.entries(ARCHETYPES)) {
-    const w = a.weight[district] ?? 0.4;
+    const w = (a.weight[district] ?? 0.4) * hourMult(key);
     total += w;
     entries.push([key, w]);
   }
