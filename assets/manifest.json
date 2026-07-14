@@ -1,0 +1,17 @@
+{
+  "generated": "rebuild",
+  "note": "Soldier is used ONLY as the animation/skeleton source \u2014 its mesh is never rendered. All visible 3D content is generated at runtime.",
+  "models": {
+    "Soldier": "assets/anim/soldier-rig.glb"
+  },
+  "textures": [
+    "brick",
+    "grass",
+    "metal",
+    "concrete",
+    "sidewalk",
+    "sand",
+    "plaster",
+    "asphalt"
+  ]
+}
