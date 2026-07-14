@@ -6,6 +6,7 @@
 // Clearcoat paint on medium/high quality, Lambert on low.
 
 import * as THREE from 'three';
+import { mergeGeometries as mergeBG } from '../../vendor/jsm/utils/BufferGeometryUtils.js';
 
 // ---- shared resources (never disposed per-vehicle) ------------------------
 export const SHARED_MATS = new Set();
@@ -197,23 +198,28 @@ SHARED_MATS.add(windowMat);
 
 function addWindows(out, g, type, W, L, H) {
   const P = PROFILES[type] ?? PROFILES.sedan;
-  const wsMat = windowMat;
-  const own = (m) => { (out._ownGeos = out._ownGeos || new Set()).add(m.geometry); return m; };
   // windshield: quad along the rake from windshield base to roof front
   const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
   const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
   const rakeLen = Math.hypot(zA - zB, yA - yB);
-  const ws = own(new THREE.Mesh(new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92), wsMat));
-  ws.position.set(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
-  ws.rotation.x = -Math.atan2(zA - zB, yB - yA);
-  g.add(ws);
+  const panes = [];
+  const ws = new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92);
+  ws.rotateX(-Math.atan2(zA - zB, yB - yA));
+  ws.translate(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
+  panes.push(ws);
   // front side windows
   for (const sx of [-1, 1]) {
-    const win = own(new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7), wsMat));
-    win.position.set(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
-    win.rotation.y = sx * Math.PI / 2;
-    g.add(win);
+    const win = new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7);
+    win.rotateY(sx * Math.PI / 2);
+    win.translate(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
+    panes.push(win);
   }
+  // one merged mesh per car keeps the draw-call budget flat
+  const merged = mergeBG(panes, false);
+  for (const p of panes) p.dispose();
+  const m = new THREE.Mesh(merged, windowMat);
+  (out._ownGeos = out._ownGeos || new Set()).add(merged);
+  g.add(m);
 }
 
 // ---------------------------------------------------------------- factory
@@ -302,18 +308,20 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   out.reverseMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d0, emissive: 0xffffff, emissiveIntensity: 0 });
   const noseY = H * (PROFILES[type]?.nose ?? 0.45) * 0.82;
   const tailY = H * (PROFILES[type]?.tailTop ?? 0.46) - 0.1;
-  for (const sx of [-1, 1]) {
-    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.13, 0.07), out.headMat);
-    hl.position.set(sx * (W / 2 - 0.32), noseY + 0.12, L / 2 + 0.01);
-    g.add(hl);
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.07), out.tailMat);
-    tl.position.set(sx * (W / 2 - 0.3), tailY, -L / 2 - 0.01);
-    g.add(tl);
-    const rv = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.06), out.reverseMat);
-    rv.position.set(sx * (W / 2 - 0.56), tailY, -L / 2 - 0.01);
-    g.add(rv);
-    (out._ownGeos = out._ownGeos || new Set()).add(hl.geometry).add(tl.geometry).add(rv.geometry);
-  }
+  // each left/right lamp pair merges into one mesh — one draw per pair
+  const lampPair = (w, h, d, x, y, z, mat) => {
+    const a = new THREE.BoxGeometry(w, h, d); a.translate(-x, y, z);
+    const b = new THREE.BoxGeometry(w, h, d); b.translate(x, y, z);
+    const geo = mergeBG([a, b], false);
+    a.dispose(); b.dispose();
+    const m = new THREE.Mesh(geo, mat);
+    (out._ownGeos = out._ownGeos || new Set()).add(geo);
+    g.add(m);
+    return m;
+  };
+  lampPair(0.34, 0.13, 0.07, W / 2 - 0.32, noseY + 0.12, L / 2 + 0.01, out.headMat);
+  lampPair(0.3, 0.12, 0.07, W / 2 - 0.3, tailY, -L / 2 - 0.01, out.tailMat);
+  lampPair(0.14, 0.1, 0.06, W / 2 - 0.56, tailY, -L / 2 - 0.01, out.reverseMat);
 
   addExtras(out, g, type, spec, W, L, H, wheelR);
   finish(out, g);

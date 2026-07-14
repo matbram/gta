@@ -24,9 +24,13 @@ await page.evaluate(() => { window.__game.setWeather('clear'); window.__game.set
     let frontGlass = 0, rearLamps = 0;
     v.group.traverse((o) => {
       if (!o.isMesh) return;
-      if (o.material === v.reverseMat && o.position.z < -v.spec.l * 0.4) rearLamps++;
-      if (o.material?.transparent && o.geometry?.type === 'PlaneGeometry' &&
-          o.position.z > v.spec.l * 0.15) frontGlass++;
+      o.geometry.computeBoundingBox?.();
+      const bb = o.geometry.boundingBox;
+      // merged reverse-lamp pair sits at the rear
+      if (o.material === v.reverseMat && bb && bb.max.z < -v.spec.l * 0.4) rearLamps += 2;
+      // merged window panes: bright transparent glass reaching the windshield
+      if (o.material?.transparent && o.material.opacity === 0.55 &&
+          bb && bb.max.z > v.spec.l * 0.15) frontGlass++;
     });
     return { hasReverseMat: !!v.reverseMat, rearLamps, frontGlass };
   });

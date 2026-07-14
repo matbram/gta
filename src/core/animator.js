@@ -29,22 +29,25 @@ const BONE_ALIASES = {
 };
 
 // overlay pose targets, applied as extra local rotations (radians)
-// each entry: bone → [x, y, z]
-const OVERLAY_POSES = {
+// each entry: bone → [x, y, z]. Exported so tests can inspect/tune poses.
+export const OVERLAY_POSES = {
   none: {},
+  // NOTE on arm axes (probed empirically on this skeleton, arms hanging):
+  // arm +X = raise forward, arm -X = swing back; armR -Z / armL +Z = out to
+  // the side, armR +Z / armL -Z = tuck across the body; foreArm -X = elbow flex.
   drive: {
     upLegL: [-1.35, 0, 0.12], upLegR: [-1.35, 0, -0.12],
     legL: [1.2, 0, 0], legR: [1.2, 0, 0],
-    armL: [-0.75, 0, 0.2], armR: [-0.75, 0, -0.2],
-    foreArmL: [-0.55, 0, 0], foreArmR: [-0.55, 0, 0],
+    armL: [-0.68, 0, -0.12], armR: [0.68, 0, 0.12],
+    foreArmL: [0.45, 0, 0], foreArmR: [-0.45, 0, 0],
     spine1: [0.08, 0, 0],
   },
   // motorcycle straddle: knees out and gripping the tank, leaning into the bars
   ride: {
     upLegL: [-0.95, 0, 0.55], upLegR: [-0.95, 0, -0.55],
     legL: [1.15, 0, 0], legR: [1.15, 0, 0],
-    armL: [-0.95, 0, 0.1], armR: [-0.95, 0, -0.1],
-    foreArmL: [-0.25, 0, 0], foreArmR: [-0.25, 0, 0],
+    armL: [-0.85, 0, -0.08], armR: [0.85, 0, 0.08],
+    foreArmL: [0.3, 0, 0], foreArmR: [-0.3, 0, 0],
     spine1: [0.32, 0, 0], head: [-0.2, 0, 0],
   },
   sit: {
@@ -52,59 +55,59 @@ const OVERLAY_POSES = {
     legL: [1.35, 0, 0], legR: [1.35, 0, 0],
     spine1: [0.05, 0, 0],
   },
-  aimPistol: {
-    armR: [-1.3, 0, -0.18], foreArmR: [-0.1, 0, 0],
-    armL: [-1.05, 0, 0.28], foreArmL: [-0.35, 0.75, 0],
+  aimPistol: {                         // two-hand isosceles, arms punched out
+    armR: [1.25, 0, 0.15], foreArmR: [-0.15, 0, 0],
+    armL: [-1.15, 0, 0.35], foreArmL: [0.45, -0.5, 0],
     spine2: [0, -0.12, 0],
   },
-  aimRifle: {
-    armR: [-1.2, 0, -0.3], foreArmR: [-0.25, 0, 0],
-    armL: [-1.1, 0, 0.45], foreArmL: [-0.5, 0.9, 0],
+  aimRifle: {                          // shouldered, off hand out to the foregrip
+    armR: [1.15, 0, 0.15], foreArmR: [-0.4, 0, 0],
+    armL: [-1.05, 0, 0.2], foreArmL: [0.4, -0.4, 0],
     spine2: [0, -0.22, 0],
   },
   // ---- per-weapon stances (I3) ----
   // boxing guard: both fists up in front of the chin, bladed stance
   guardFists: {
-    armR: [-0.85, 0, -0.35], foreArmR: [-1.85, 0, 0],
-    armL: [-0.95, 0, 0.4], foreArmL: [-1.75, 0, 0],
-    spine2: [0, 0.22, 0], head: [0.08, -0.1, 0],
+    armR: [0.55, 0, 0.3], foreArmR: [-1.9, 0, 0],
+    armL: [-0.7, 0, 0.25], foreArmL: [2.3, 0, 0],
+    spine2: [0, 0.22, 0], head: [0.06, -0.1, 0],
   },
   // bat cocked over the right shoulder, off hand across the chest
   stanceBat: {
-    armR: [-1.6, 0, -0.55], foreArmR: [-1.25, 0, 0],
-    armL: [-1.15, -0.45, 0.35], foreArmL: [-1.0, 0.35, 0],
-    spine2: [0, 0.4, 0], head: [0, -0.25, 0],
+    armR: [-0.45, 0, -0.5], foreArmR: [-1.7, 0, 0],
+    armL: [-0.75, 0, 0.45], foreArmL: [1.3, 0, 0],
+    spine2: [0, 0.35, 0], head: [0, -0.2, 0],
   },
   // SMG: compact grip, elbows tucked into the body
   aimSmg: {
-    armR: [-1.05, 0, -0.42], foreArmR: [-0.7, 0, 0],
-    armL: [-0.95, 0, 0.5], foreArmL: [-0.9, 0.62, 0],
+    armR: [0.95, 0, 0.25], foreArmR: [-0.8, 0, 0],
+    armL: [-1.0, 0, 0.3], foreArmL: [0.85, -0.35, 0],
     spine2: [0, -0.1, 0],
   },
   // shotgun: shouldered like the rifle but a wider, braced base
   aimShotgun: {
-    armR: [-1.15, 0, -0.35], foreArmR: [-0.35, 0, 0],
-    armL: [-1.0, 0, 0.55], foreArmL: [-0.6, 0.85, 0],
-    spine1: [0.06, 0, 0], spine2: [0, -0.28, 0],
+    armR: [1.12, 0, 0.12], foreArmR: [-0.42, 0, 0],
+    armL: [-1.05, 0, 0.2], foreArmL: [0.35, -0.4, 0],
+    spine1: [0.06, 0, 0], spine2: [0, -0.26, 0],
   },
   // ---- carry poses: weapon out but not aimed ----
   carryPistol: {                       // pistol held low at the thigh
-    armR: [-0.38, 0, -0.12], foreArmR: [-0.55, 0, 0],
+    armR: [0.25, 0, 0.1], foreArmR: [-0.35, 0, 0],
   },
   carryLong: {                         // long gun low-ready across the chest
-    armR: [-0.55, 0, -0.22], foreArmR: [-0.95, 0, 0],
-    armL: [-0.6, 0, 0.38], foreArmL: [-1.1, 0.5, 0],
-    spine2: [0, 0.12, 0],
+    armR: [0.35, 0, 0.15], foreArmR: [-1.0, 0, 0],
+    armL: [-0.55, 0, 0.2], foreArmL: [1.15, -0.25, 0],
+    spine2: [0, 0.1, 0],
   },
   carryBat: {                          // bat resting on the shoulder
-    armR: [-1.3, 0, -0.38], foreArmR: [-1.55, 0, 0],
+    armR: [-0.2, 0, -0.35], foreArmR: [-1.75, 0, 0],
   },
   handsUp: {
     armL: [0, 0, 2.4], armR: [0, 0, -2.4],
     foreArmL: [0, 0, 0.5], foreArmR: [0, 0, -0.5],
   },
   phone: {
-    armR: [-0.35, 0, -0.35], foreArmR: [-2.35, 0.35, 0],
+    armR: [0.2, 0, 0.2], foreArmR: [-2.35, 0.35, 0],
     head: [0.12, -0.18, 0],
   },
   swim: {
@@ -123,8 +126,8 @@ const OVERLAY_POSES = {
     spine1: [0.25, 0, 0],
   },
   hose: {
-    armR: [-1.0, 0, -0.2], foreArmR: [-0.4, 0, 0],
-    armL: [-0.9, 0, 0.35], foreArmL: [-0.6, 0.7, 0],
+    armR: [0.95, 0, 0.15], foreArmR: [-0.4, 0, 0],
+    armL: [-0.85, 0, 0.25], foreArmL: [0.6, -0.4, 0],
     spine1: [0.06, 0, 0],
   },
 };
@@ -254,11 +257,11 @@ const _e = new THREE.Euler();
 
 // ---------------- shared gesture builders ----------------
 export const GESTURES = {
-  // right-hand jab: wind up, extend, recover
+  // right-hand jab: wind up, extend, recover (arm +X = forward)
   punch(bones, q, e, t) {
     const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
     if (bones.armR) {
-      e.set(-1.55 * ext, 0, -0.15 * ext); q.setFromEuler(e);
+      e.set(1.5 * ext, 0, 0.15 * ext); q.setFromEuler(e);
       bones.armR.quaternion.multiply(q);
     }
     if (bones.foreArmR) {
@@ -274,8 +277,12 @@ export const GESTURES = {
   hook(bones, q, e, t) {
     const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
     if (bones.armL) {
-      e.set(-1.45 * ext, 0.35 * ext, 0.15 * ext); q.setFromEuler(e);
+      e.set(-1.35 * ext, 0.3 * ext, -0.2 * ext); q.setFromEuler(e);
       bones.armL.quaternion.multiply(q);
+    }
+    if (bones.foreArmL) {
+      e.set(0.5 * (1 - ext), 0, 0); q.setFromEuler(e);
+      bones.foreArmL.quaternion.multiply(q);
     }
     if (bones.spine2) {
       e.set(0, 0.45 * ext, 0); q.setFromEuler(e);
@@ -291,21 +298,22 @@ export const GESTURES = {
     if (bones.spine2) { e.set(0, yaw * 0.55, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
     if (bones.spine1) { e.set(0.08 * ease, yaw * 0.25, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
     if (bones.armR) {
-      e.set(-0.5 * wind - 0.55 * ease, yaw * 0.4, -0.5 * wind + 0.35 * ease);
+      // coil back (-X) then rip through to the front (+X), sweeping across
+      e.set(-0.6 * wind + 1.5 * ease, yaw * 0.3, -0.45 * wind + 0.55 * ease);
       q.setFromEuler(e); bones.armR.quaternion.multiply(q);
     }
-    if (bones.foreArmR) { e.set(-0.7 * (1 - ease) * wind, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
-    if (bones.armL) { e.set(-0.3 * ease, yaw * 0.3, 0.2 * wind); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+    if (bones.foreArmR) { e.set(-0.8 * (1 - ease) * wind, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.armL) { e.set(-0.4 * ease, yaw * 0.25, -0.2 * wind); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
   },
   // overhead bat smash — the combo finisher
   batOverhead(bones, q, e, t) {
     const up = Math.min(t / 0.4, 1);
     const down = clamp((t - 0.4) / 0.3, 0, 1);
     const ease = down * down;
-    const lift = -2.3 * up + 2.9 * ease;
+    const lift = 2.5 * up - 2.7 * ease;    // way up overhead, then crash down
     for (const key of ['armR', 'armL']) {
       if (!bones[key]) continue;
-      e.set(lift, 0, key === 'armL' ? 0.25 * up : -0.25 * up);
+      e.set(key === 'armL' ? -lift : lift, 0, key === 'armL' ? -0.2 * up : 0.2 * up);
       q.setFromEuler(e); bones[key].quaternion.multiply(q);
     }
     if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
@@ -317,18 +325,18 @@ export const GESTURES = {
     const k = Math.sin(Math.min(t * 3, 1) * Math.PI / 2) * (1 - t) * s;
     for (const key of ['armR', 'armL']) {
       if (!bones[key]) continue;
-      e.set(-0.26 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
+      e.set(key === 'armL' ? -0.24 * k : 0.24 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
     }
     for (const key of ['foreArmR', 'foreArmL']) {
       if (!bones[key]) continue;
-      e.set(-0.18 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
+      e.set(key === 'foreArmL' ? 0.16 * k : -0.16 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
     }
-    if (bones.spine1) { e.set(0.07 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.spine1) { e.set(-0.06 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
   },
-  // shotgun pump: off hand racks the fore-end back and forward
+  // shotgun pump: off hand racks the fore-end back toward the body and forward
   pumpShotgun(bones, q, e, t) {
     const k = Math.sin(clamp(t, 0, 1) * Math.PI);
-    if (bones.armL) { e.set(0.35 * k, 0, 0.1 * k); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+    if (bones.armL) { e.set(0.3 * k, 0, 0); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
     if (bones.foreArmL) { e.set(0.55 * k, 0, 0); q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q); }
     if (bones.spine2) { e.set(0, 0.06 * k, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
   },
@@ -338,14 +346,14 @@ export const GESTURES = {
     const insert = Math.sin(clamp((t - 0.35) / 0.35, 0, 1) * Math.PI); // mag up + in
     const rack = Math.sin(clamp((t - 0.72) / 0.28, 0, 1) * Math.PI);   // slide pull
     if (bones.armL) {
-      e.set(0.9 * drop - 0.5 * insert + 0.15 * rack, 0, 0.25 * drop);
+      e.set(0.9 * drop - 0.5 * insert - 0.2 * rack, 0, -0.2 * drop);
       q.setFromEuler(e); bones.armL.quaternion.multiply(q);
     }
     if (bones.foreArmL) {
-      e.set(-0.5 * drop - 0.9 * insert - 0.7 * rack, 0, 0);
+      e.set(0.4 * drop + 0.9 * insert + 0.7 * rack, 0, 0);
       q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q);
     }
-    if (bones.armR) { e.set(0.28 * (drop + insert) * 0.5, 0, -0.12 * insert); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.armR) { e.set(-0.14 * (drop + insert), 0, 0.12 * insert); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
     if (bones.head) { e.set(0.18 * (insert + rack) * 0.6, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
   },
   // long-gun mag swap: tilt the gun, strip the mag, seat the new one
@@ -353,13 +361,13 @@ export const GESTURES = {
     const strip = Math.sin(clamp(t / 0.4, 0, 1) * Math.PI);
     const seat = Math.sin(clamp((t - 0.42) / 0.4, 0, 1) * Math.PI);
     const slap = Math.sin(clamp((t - 0.78) / 0.22, 0, 1) * Math.PI);
-    if (bones.armR) { e.set(0.15 * strip, 0, -0.3 * (strip + seat) * 0.6); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.armR) { e.set(-0.12 * strip, 0, 0.2 * (strip + seat) * 0.6); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
     if (bones.armL) {
-      e.set(0.8 * strip - 0.4 * seat, 0, 0.2 * strip);
+      e.set(0.7 * strip - 0.35 * seat, 0, -0.15 * strip);
       q.setFromEuler(e); bones.armL.quaternion.multiply(q);
     }
     if (bones.foreArmL) {
-      e.set(-0.6 * strip - 1.0 * seat - 0.5 * slap, 0, 0);
+      e.set(0.5 * strip + 1.0 * seat + 0.5 * slap, 0, 0);
       q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q);
     }
     if (bones.head) { e.set(0.22 * (strip + seat) * 0.5, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
@@ -367,26 +375,26 @@ export const GESTURES = {
   // shotgun shell: left hand feeds one shell under the receiver
   loadShell(bones, q, e, t) {
     const k = Math.sin(clamp(t, 0, 1) * Math.PI);
-    if (bones.armL) { e.set(0.7 * k, 0, 0.3 * k); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
-    if (bones.foreArmL) { e.set(-1.1 * k, 0.3 * k, 0); q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q); }
+    if (bones.armL) { e.set(0.55 * k, 0, -0.2 * k); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+    if (bones.foreArmL) { e.set(0.95 * k, 0.25 * k, 0); q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q); }
     if (bones.head) { e.set(0.2 * k, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
   },
   // draw: right hand sweeps up from the hip as the weapon appears
   drawWeapon(bones, q, e, t) {
     const k = Math.sin(clamp(t, 0, 1) * Math.PI);
-    if (bones.armR) { e.set(-0.9 * k, 0, -0.25 * k); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
-    if (bones.foreArmR) { e.set(-0.6 * k, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.armR) { e.set(0.85 * k, 0, 0.2 * k); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.foreArmR) { e.set(-0.55 * k, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
     if (bones.spine2) { e.set(0, -0.1 * k, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
   },
   // reach out with the right hand — door handles, pickups
   reach(bones, q, e, t) {
     const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
     if (bones.armR) {
-      e.set(-1.05 * ext, 0, -0.2 * ext); q.setFromEuler(e);
+      e.set(0.95 * ext, 0, 0.15 * ext); q.setFromEuler(e);
       bones.armR.quaternion.multiply(q);
     }
     if (bones.foreArmR) {
-      e.set(-0.3 * ext, 0, 0); q.setFromEuler(e);
+      e.set(-0.25 * ext, 0, 0); q.setFromEuler(e);
       bones.foreArmR.quaternion.multiply(q);
     }
     if (bones.spine1) {
