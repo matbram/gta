@@ -3,7 +3,7 @@ set -u
 
 event="${1:-}"
 case "$event" in
-  session-start|user-prompt-submit|stop|stop-failure|pre-compact|post-compact|session-end) ;;
+  session-start|user-prompt-submit|stop|subagent-stop|stop-failure|pre-compact|post-compact|session-end) ;;
   *) printf '%s\n' '{}'; exit 0 ;;
 esac
 
