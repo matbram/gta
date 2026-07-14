@@ -371,11 +371,14 @@ export class CombatSystem {
     }
 
     // --- guns (on foot) ---
-    if (!aiming) return;              // must aim to shoot
+    // third person still requires aiming (the soft-lock/shoulder cam depends
+    // on it); first person can hip-fire like an FPS, paying in spread
+    const fpHip = !aiming && game.cameraRig.firstPerson;
+    if (!aiming && !fpHip) return;
     if (inv.inMag <= 0) { this.startReload(); return; }
     this.cooldown = spec.rate;
     inv.inMag--;
-    this.fireHitscan(spec, false);
+    this.fireHitscan(spec, false, fpHip ? 2.2 : 1);
     // arms take the kick (camera recoil is added in fireHitscan)
     if (spec.animSet?.kick) player.rig.gunKick?.(spec.animSet.kick);
     if (spec.animSet?.pump) this.pumpAt = game.time + 0.28;
@@ -429,7 +432,7 @@ export class CombatSystem {
     this.updateHud();
   }
 
-  fireHitscan(spec, driveBy) {
+  fireHitscan(spec, driveBy, spreadMult = 1) {
     const game = this.game;
     const player = game.player;
     const cam = game.camera;
@@ -461,7 +464,7 @@ export class CombatSystem {
     let anyKill = false;
     for (let p = 0; p < pellets; p++) {
       const d = dir.clone();
-      const spr = spec.spread * (1 + (this.bloom || 0) * 0.6);
+      const spr = spec.spread * spreadMult * (1 + (this.bloom || 0) * 0.6);
       d.x += (Math.random() - 0.5) * spr * 2;
       d.y += (Math.random() - 0.5) * spr * 2;
       d.z += (Math.random() - 0.5) * spr * 2;

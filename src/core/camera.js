@@ -31,6 +31,10 @@ export class CameraRig {
     else if (this.distIndex === DISTANCES.length - 1) { this.firstPerson = true; }
     else this.distIndex++;
     this.dist = DISTANCES[this.distIndex];
+    // each mode has its own pitch range — re-clamp on switch
+    this.pitch = this.firstPerson
+      ? clamp(this.pitch, -1.2, 1.2)
+      : clamp(this.pitch, -0.55, 1.15);
   }
 
   snapBehind(heading, pitch = 0.22) {
@@ -44,7 +48,11 @@ export class CameraRig {
 
   applyMouse(dx, dy, sensitivity = 0.0026) {
     this.yaw -= dx * sensitivity;
-    this.pitch = clamp(this.pitch + dy * sensitivity, -0.55, 1.15);
+    // first person can look nearly straight up/down; the orbit camera keeps
+    // its ground/overhead limits
+    const lo = this.firstPerson ? -1.2 : -0.55;
+    const hi = this.firstPerson ? 1.2 : 1.15;
+    this.pitch = clamp(this.pitch + dy * sensitivity, lo, hi);
   }
 
   // target: Vector3 (feet), targetHeight: metres above feet to look at
@@ -68,7 +76,9 @@ export class CameraRig {
         this.shakeAmp = Math.max(0, this.shakeAmp - dt * 2.4);
       }
       this.camera.position.set(px, py, pz);
-      this.camera.lookAt(px + dx, py + sp + this.recoilPitch, pz + dz);
+      // NEGATED pitch: the orbit camera treats pitch-up as camera-up/look-down,
+      // so first person must look DOWN as pitch grows or the controls invert
+      this.camera.lookAt(px + dx, py - sp + this.recoilPitch, pz + dz);
       // ADS zoom is driven smoothly by the combat system (scoped rifles
       // zoom hard); bare aiming without a gun keeps a slight tighten
       const fov = this.baseFov - (this.adsZoom || (aimMode ? 6 : 0));
