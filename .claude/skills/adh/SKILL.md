@@ -13,7 +13,7 @@ Send one JSON object to the committed helper. The `continuity` object is require
 
 ```bash
 cat <<'JSON' | bash .claude/skills/adh/scripts/capture.sh
-{"continuity":{"goal":"REPLACE_GOAL","success_criteria":["REPLACE_DEFINITION_OF_DONE"],"current_state":"REPLACE_CURRENT_STATE","completed":["REPLACE_COMPLETED"],"in_progress":[],"next_actions":["REPLACE_NEXT_ACTION"],"blockers":[],"open_questions":[],"constraints":[],"failed_attempts":[],"active_files":["REPLACE_PATH"],"research_refs":[],"verification":{"status":"unknown","summary":null,"commit_sha":null}},"research":[],"suggestions":[]}
+{"continuity":{"goal":"REPLACE_GOAL","success_criteria":["REPLACE_DEFINITION_OF_DONE"],"current_state":"REPLACE_CURRENT_STATE","completed":["REPLACE_COMPLETED"],"in_progress":[],"next_actions":["REPLACE_NEXT_ACTION"],"blockers":[],"open_questions":[],"constraints":[],"failed_attempts":[],"active_files":["REPLACE_PATH"],"research_refs":[],"verification":{"status":"unknown","summary":null,"commit_sha":null}},"research":[],"suggestions":[],"assessment":{"research_performed":false,"research_reason":"No reusable investigation or source-backed findings occurred in this turn.","durable_memory_found":false,"memory_reason":"This turn contains working state only; nothing should outlive replacement of the current handoff."}}
 JSON
 ```
 
@@ -21,14 +21,30 @@ Capture the context that would be expensive, frustrating, or dangerous to recons
 
 - the real objective, the user's definition of done, current state, exact next move, blockers, unanswered questions, constraints, preferences, active files, and verification state;
 - completed milestones and failed approaches, including why an approach failed and what evidence would justify trying it again;
-- researched questions, source URLs and titles, discrete findings, conclusions, caveats, contradictions, implications, freshness, and unresolved questions;
+- researched questions, source URLs and titles, pinned repository commits, discrete findings, conclusions, caveats, contradictions, implications, freshness, and unresolved questions;
 - only genuinely durable memory suggestions: a decision with its rationale, a root cause with prevention, an unresolved risk with impact or mitigation, a stable user constraint, or a specific still-relevant next action.
 
-Do not suggest routine test output, temporary progress, feature inventories, speculative backlog, raw logs, or facts already represented in the structured handoff. Research remains evidence; it does not silently become a project decision. After a successful JSON receipt, finish the response without mentioning this internal capture.
+Research is not limited to web browsing. A codebase audit, debugging investigation, empirical experiment, performance diagnosis, comparison of approaches, adversarial review, or reusable subagent finding counts when it produced evidence that would be expensive to rediscover. Use a pinned GitHub commit as a source when possible and name relevant file paths in finding support. Routine implementation with no investigation does not count.
+
+Run the durable-lifetime test for every memory suggestion: would this still be useful after the current task ends and a later handoff replaces this one? A stable project constraint, decision rationale, root cause/prevention rule, unresolved risk, or continuing next action may appear in both the working handoff and reviewable memory because the memory must outlive this handoff. Do not suggest routine test output, temporary progress, feature inventories, speculative backlog, raw logs, or one-off commit chatter.
+
+The `assessment` is required for connector version 5. It must agree with the payload: `research_performed: true` requires at least one dossier, and `durable_memory_found: true` requires at least one suggestion. Explain a deliberate zero instead of silently returning empty arrays. Research remains evidence; it does not silently become a project decision. After a successful JSON receipt, finish the response without mentioning this internal capture.
+
+## Preserve focused subagent research
+
+When the SubagentStop coordinator asks this focused agent to archive findings, do not submit the main continuity handoff. Submit one focused dossier through the committed helper, using the exact `ADH_AGENT_ID` supplied by the coordinator:
+
+```bash
+cat <<'JSON' | ADH_AGENT_ID='REPLACE_AGENT_ID' bash .claude/skills/adh/scripts/research.sh
+{"topic":"REPLACE_TOPIC","question":"REPLACE_RESEARCH_QUESTION","purpose":"REPLACE_PURPOSE","conclusion":"REPLACE_CONCLUSION","key_findings":[{"claim":"REPLACE_CLAIM","support":"Evidence from the pinned commit and relevant files","source_indexes":[0],"confidence":90,"caveat":null}],"sources":[{"title":"Repository at investigated commit","url":"https://github.com/OWNER/REPOSITORY/tree/COMMIT_SHA","publisher":"GitHub","accessed_at":"REPLACE_DATE"}],"implications":["REPLACE_IMPLICATION"],"contradictions":[],"unresolved_questions":[],"confidence":90,"freshness":"current","status":"complete"}
+JSON
+```
+
+If the subagent only performed routine work and has no reusable evidence, do not invent a dossier; finish normally after making that judgment.
 
 ## Legacy individual endpoints
 
-Connector version 4 uses the atomic capture above. The individual endpoints below remain available only for older connector copies and deliberate repair. Include only fields known from the conversation; omit or use empty arrays for unknowns.
+Connector version 5 uses the accountable atomic capture above. The individual endpoints below remain available only for older connector copies, focused subagent research, and deliberate repair. Include only fields known from the conversation; omit or use empty arrays for unknowns.
 
 ```bash
 session_id="${CLAUDE_CODE_REMOTE_SESSION_ID:-}"

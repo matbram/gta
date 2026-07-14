@@ -32,12 +32,21 @@ print(value)
 PY
 )"
 
+agent_header=()
+if [ -n "${ADH_AGENT_ID:-}" ]; then
+  case "$ADH_AGENT_ID" in
+    *[!A-Za-z0-9_-]*) printf '%s\n' 'ADH_AGENT_ID has invalid characters.' >&2; exit 1 ;;
+  esac
+  agent_header=(--header "X-ADH-Agent-ID: ${ADH_AGENT_ID}")
+fi
+
 curl --fail --silent --show-error --max-time 10 \
   --request POST \
   --header "Authorization: Bearer ${ADH_PROJECT_TOKEN}" \
   --header "X-ADH-Session-ID: ${session_id}" \
   --header "X-ADH-Repository: ${repository}" \
   --header 'X-ADH-Connector-Version: 5' \
+  "${agent_header[@]}" \
   --header 'Content-Type: application/json' \
   --data-binary "$payload" \
-  "${ADH_API_URL%/}/v1/session-captures"
+  "${ADH_API_URL%/}/v1/research-dossiers"
