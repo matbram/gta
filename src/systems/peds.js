@@ -9,7 +9,7 @@ import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 // full skinned rigs near the player; the impostor tier (pedimpostors.js)
 // extends the crowd to ~1000 total out to 500m
 const TARGET_PEDS = 250;
-const SPAWN_MIN = 55, SPAWN_MAX = 240, DESPAWN = 300;
+const SPAWN_MIN = 40, SPAWN_MAX = 240, DESPAWN = 300;
 const MAX_CORPSES = 15;   // lingering bodies never eat the live population
 
 // coarse neighbor grid: cell size well above 2× the separation radius so
@@ -113,7 +113,7 @@ export class PedSystem {
     const hour = (game.dayNight?.minutes ?? 720) / 60;
     const nightThin = (hour >= 23 || hour < 5) ? 0.45 : 1;
     const rainThin = game.weather?.state === 'rain' ? 0.65 : 1;
-    const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1) * nightThin * rainThin
+    const want = Math.round(TARGET_PEDS * clamp(density + 0.3, 0.45, 1) * nightThin * rainThin
       * (game.gfx?.density ?? 1));
     if (this.peds.length < want && this.spawnTimer <= 0) {
       // burst-fill when the street is under half strength — several per
@@ -240,6 +240,9 @@ export class PedSystem {
       if (d < SPAWN_MIN || d > SPAWN_MAX) continue;
       if (!city.landAt(x, z)) continue;
       if (Math.random() > this.densityAt(x, z)) continue;
+      // bias toward the near ring so the street around the player reads
+      // flooded — the impostor tier covers the distance anyway
+      if (Math.random() > clamp(1 - d / SPAWN_MAX, 0.25, 1)) continue;
 
       // role + personality by district and hour. Plain civilians draw from
       // the fixed 96-look palette so the character-texture cache always

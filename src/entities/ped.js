@@ -69,8 +69,30 @@ export class Ped {
       this.target.z = this.homeZ + Math.sin(a) * d;
       return;
     }
-    // sidewalk-following: aim for a point further along the current edge
-    if (this.sidewalk) { this.advanceSidewalkTarget(); return; }
+    // sidewalk-following: aim for a point further along the current edge —
+    // unless a flee/knockback carried us far from it (walking back to a
+    // distant edge means cutting across roads mid-block)
+    if (this.sidewalk) {
+      const e = this.sidewalk.edge;
+      const t = Math.max(0, Math.min(1, e.horizontal
+        ? (this.pos.x - e.a.x) / (e.b.x - e.a.x)
+        : (this.pos.z - e.a.z) / (e.b.z - e.a.z)));
+      const px = e.a.x + (e.b.x - e.a.x) * t, pz = e.a.z + (e.b.z - e.a.z) * t;
+      if (dist2d(this.pos.x, this.pos.z, px, pz) > 14) this.sidewalk = null;
+      else { this.advanceSidewalkTarget(); return; }
+    }
+    // no sidewalk: snap to the NEAR side of the closest road instead of
+    // wandering to a random point — that fallback was the jaywalking source
+    // (promoted impostors, ejected passengers, panic survivors)
+    const ep = this.city.nearestEdgePoint?.(this.pos.x, this.pos.z);
+    if (ep) {
+      const e = ep.edge;
+      const side = e.horizontal
+        ? (this.pos.z >= ep.z ? 1 : -1)
+        : (this.pos.x >= ep.x ? 1 : -1);
+      this.setSidewalk(e, undefined, side);
+      return;
+    }
     const a = Math.random() * Math.PI * 2;
     const d = 15 + Math.random() * 28;
     this.target.x = this.pos.x + Math.cos(a) * d;
@@ -84,7 +106,10 @@ export class Ped {
   }
 
   sidewalkPoint(edge, t, side) {
-    const off = edge.width / 2 + this.city.SIDEWALK * 0.55;
+    // per-ped lane offset spreads the crowd across the sidewalk width
+    // instead of everyone marching a single line
+    if (this.laneOff === undefined) this.laneOff = ((this.id % 5) - 2) * 0.2;
+    const off = edge.width / 2 + this.city.SIDEWALK * 0.55 + this.laneOff;
     const x = edge.a.x + (edge.b.x - edge.a.x) * t;
     const z = edge.a.z + (edge.b.z - edge.a.z) * t;
     return edge.horizontal ? { x, z: z + off * side } : { x: x + off * side, z };
