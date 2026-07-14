@@ -8,10 +8,14 @@ import { UnrealBloomPass } from '../../vendor/jsm/postprocessing/UnrealBloomPass
 import { OutputPass } from '../../vendor/jsm/postprocessing/OutputPass.js';
 import { FXAAPass } from '../../vendor/jsm/postprocessing/FXAAPass.js';
 
+// density scales the ped/car population targets so the auto-degrade
+// relieves CPU (animation, AI, physics) as well as GPU. pixelRatio tops
+// out at 1.5 — 2.0 on a high-DPI display quadruples the shaded pixels
+// for a barely visible sharpness gain.
 export const QUALITY = {
-  low: { post: false, shadow: 1024, pixelRatio: 1, bloom: 0 },
-  medium: { post: true, shadow: 2048, pixelRatio: 1.5, bloom: 0.35 },
-  high: { post: true, shadow: 4096, pixelRatio: 2, bloom: 0.5 },
+  low: { post: false, shadow: 1024, pixelRatio: 1, bloom: 0, density: 0.4 },
+  medium: { post: true, shadow: 2048, pixelRatio: 1.25, bloom: 0.35, density: 0.7 },
+  high: { post: true, shadow: 4096, pixelRatio: 1.5, bloom: 0.5, density: 1.0 },
 };
 
 export class Graphics {
@@ -88,6 +92,9 @@ export class Graphics {
     const q = QUALITY[this.quality];
     if (this.bloomPass) this.bloomPass.strength = q.bloom * mult;
   }
+
+  // population multiplier for the spawn systems (peds/traffic)
+  get density() { return QUALITY[this.quality].density; }
 
   setExposure(v) { this.renderer.toneMappingExposure = v; }
 

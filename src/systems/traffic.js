@@ -62,8 +62,9 @@ export class TrafficSystem {
     this._frame = (this._frame ?? 0) + 1;   // scan-stagger clock (see drive)
 
     this.spawnTimer -= dt;
-    if (this.cars.length < TARGET_CARS && this.spawnTimer <= 0) {
-      this.spawnTimer = this.cars.length < TARGET_CARS * 0.5 ? 0.15 : 0.35;
+    const target = Math.round(TARGET_CARS * (this.game.gfx?.density ?? 1));
+    if (this.cars.length < target && this.spawnTimer <= 0) {
+      this.spawnTimer = this.cars.length < target * 0.5 ? 0.15 : 0.35;
       this.trySpawn(p);
     }
 

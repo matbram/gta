@@ -93,7 +93,8 @@ export class PedSystem {
     const hour = (game.dayNight?.minutes ?? 720) / 60;
     const nightThin = (hour >= 23 || hour < 5) ? 0.45 : 1;
     const rainThin = game.weather?.state === 'rain' ? 0.65 : 1;
-    const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1) * nightThin * rainThin);
+    const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1) * nightThin * rainThin
+      * (game.gfx?.density ?? 1));
     if (this.peds.length < want && this.spawnTimer <= 0) {
       // burst-fill when the street is under half strength
       this.spawnTimer = this.peds.length < want * 0.5 ? 0.08 : 0.22;
