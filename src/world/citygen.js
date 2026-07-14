@@ -279,7 +279,7 @@ export function generateCity(seed = 1337) {
 
   // ---------------------------------------------------------------- buildings & props
   const buildings = []; // {kind, style, x, z, w, d, h, district}   axis-aligned
-  const props = [];     // {kind, x, z, rot, s}
+  let props = [];       // {kind, x, z, rot, s}
   const doors = [];     // enterable shopfronts: {id, x, z, face} (face = outward z sign)
 
   function addBuilding(kind, style, x, z, w, d, h, district, collide = true) {
@@ -598,6 +598,32 @@ export function generateCity(seed = 1337) {
         }
       }
     }
+  }
+
+  // doorstep clearance: with every building enterable, a tree or pole
+  // planted right on a doorstep would block the entrance — drop props
+  // within a short radius of any door
+  {
+    const doorCells = new Map();
+    const dKey = (cx, cz) => cx + '|' + cz;
+    for (const d of doors) {
+      const cx = Math.floor(d.x / 8), cz = Math.floor(d.z / 8);
+      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+        const k = dKey(cx + ox, cz + oz);
+        let arr = doorCells.get(k);
+        if (!arr) { arr = []; doorCells.set(k, arr); }
+        arr.push(d);
+      }
+    }
+    props = props.filter((p) => {
+      const near = doorCells.get(dKey(Math.floor(p.x / 8), Math.floor(p.z / 8)));
+      if (!near) return true;
+      for (const d of near) {
+        const dx = p.x - d.x, dz = p.z - d.z;
+        if (dx * dx + dz * dz < 2.4 * 2.4) return false;
+      }
+      return true;
+    });
   }
 
   // ---------------------------------------------------------------- prop colliders

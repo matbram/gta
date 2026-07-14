@@ -78,11 +78,15 @@ await page.evaluate(() => window.__game.tick(0.5));
     g.player.teleport(keeper.pos.x, keeper.pos.z + (rec.door.face > 0 ? 3 : -3));
     g.input.mouseDown[2] = true;
     window.__game.tick(6);
+    // sample while still aiming: drops live on the rec (heists survive
+    // stepping out), and the hands-up pose resets once the gun drops
+    const drops = rec.robDrops ?? 0;
+    const keeperAnim = keeper.rig.anim;
     g.input.mouseDown[2] = false;
     return {
-      drops: g.interiors.robDrops,
+      drops,
       pendingHeat: g.interiors.pendingHeat,
-      keeperAnim: keeper.rig.anim,
+      keeperAnim,
     };
   });
   console.log('robbery:', JSON.stringify(r),

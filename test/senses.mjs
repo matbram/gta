@@ -44,6 +44,10 @@ await page.evaluate(() => {
   const r = await page.evaluate((plantSrc) => {
     const g = window.__game.game;
     const plant2 = eval(plantSrc);
+    // clear stage: mid-road is guaranteed free of trees/poles (the spawn
+    // sidewalk isn't — universal doors moved the spawn point)
+    const ep = g.city.nearestEdgePoint(g.player.pos.x, g.player.pos.z);
+    if (ep) g.player.teleport(ep.x, ep.z, 0);
     g.combat.give('pistol', 30);
     g.combat.select('pistol');
     // facing away (player is at -dz relative to ped → ped looks +z away)
@@ -121,6 +125,10 @@ await page.evaluate(() => {
 {
   const r = await page.evaluate((plantSrc) => {
     const g = window.__game.game;
+    // holster: this section tests corner turf, not brandishing — with the
+    // pistol still drawn from earlier sections the gangster (rightly)
+    // scurries off from the gun instead of squaring up
+    g.combat.select('fists');
     const ped = eval(plantSrc)(0, 2.2, Math.PI);
     ped.archetype = 'gangster';
     ped.loiter = true;
