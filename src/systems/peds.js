@@ -9,11 +9,52 @@ import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 const TARGET_PEDS = 60;
 const SPAWN_MIN = 55, SPAWN_MAX = 150, DESPAWN = 230;
 
+// coarse neighbor grid: cell size well above 2× the separation radius so
+// same-cell + adjacent-cell checks cover every possible overlap
+const CELL = 4;
+const cellKey = (x, z) => ((Math.floor(x / CELL) + 512) << 11) | (Math.floor(z / CELL) + 512);
+
 export class PedSystem {
   constructor(game) {
     this.game = game;
     this.peds = [];
     this.spawnTimer = 0;
+    this._grid = new Map();
+    this._nearBuf = [];
+  }
+
+  // rebuild the neighbor grid (live, walking peds only — corpses and seated
+  // peds are excluded by the same rules the old brute-force loops used)
+  buildGrid() {
+    const g = this._grid;
+    g.clear();
+    for (const ped of this.peds) {
+      if (ped.dead || ped.inVehicle) continue;
+      const key = cellKey(ped.pos.x, ped.pos.z);
+      const list = g.get(key);
+      if (list) list.push(ped); else g.set(key, [ped]);
+    }
+  }
+
+  // live peds within r of (x,z) — via the grid — plus the small dynamic
+  // lists (goons, foot cops, dispatch crews) that callers distance-check
+  // themselves. Reuses one buffer; don't hold the result across calls.
+  nearTargets(x, z, r) {
+    const out = this._nearBuf;
+    out.length = 0;
+    const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL);
+    const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cz = z0; cz <= z1; cz++) {
+        const list = this._grid.get(((cx + 512) << 11) | (cz + 512));
+        if (list) for (const p of list) out.push(p);
+      }
+    }
+    const g = this.game;
+    for (const p of g.missions?.activeGoons?.() ?? []) out.push(p);
+    for (const p of g.wanted?.footCops ?? []) out.push(p);
+    for (const p of g.dispatch?.crewPeds?.() ?? []) out.push(p);
+    return out;
   }
 
   densityAt(x, z) {
@@ -59,42 +100,51 @@ export class PedSystem {
       this.trySpawn(p);
     }
 
-    // update + cleanup
-    for (const ped of [...this.peds]) {
+    // update + cleanup (reverse-index so splices don't need a copy)
+    for (let i = this.peds.length - 1; i >= 0; i--) {
+      const ped = this.peds[i];
       ped.update(dt, game);
       const d = dist2d(ped.pos.x, ped.pos.z, p.x, p.z);
       if (d > DESPAWN || (ped.dead && ped.removeTimer > 22)) {
         ped.dispose();
-        this.peds.splice(this.peds.indexOf(ped), 1);
+        this.peds.splice(i, 1);
       }
     }
 
+    this.buildGrid();
     this.separate();
   }
 
   // soft ped-vs-ped (and ped-vs-player) pushout so crowds never merge into
-  // one another. Positional only — cheap and stable at ≤41 entities.
+  // one another. Grid-bucketed: only same-cell and adjacent-cell pairs are
+  // tested, so cost scales with crowd density instead of population².
   separate() {
     const R = 0.35, RR = (R * 2) * (R * 2);
-    const list = this.peds;
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i];
-      if (a.dead || a.noSeparate) continue;
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j];
-        if (b.dead || b.noSeparate) continue;
-        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 >= RR || d2 < 1e-8) continue;
-        const d = Math.sqrt(d2);
-        const push = (R * 2 - d) * 0.5;
-        const nx = dx / d, nz = dz / d;
-        a.pos.x -= nx * push; a.pos.z -= nz * push;
-        b.pos.x += nx * push; b.pos.z += nz * push;
+    const g = this._grid;
+    // forward half-neighborhood so every cell pair is visited exactly once
+    const NEIGH = [[1, 0], [0, 1], [1, 1], [-1, 1]];
+    for (const [key, list] of g) {
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (a.noSeparate) continue;
+        for (let j = i + 1; j < list.length; j++) this._pushApart(a, list[j], R, RR);
       }
-      // keep walkers from standing inside the player too
-      const pl = this.game.player;
-      if (!pl.dead && !pl.vehicle) {
+      const cx = (key >> 11) - 512, cz = (key & 2047) - 512;
+      for (const [ox, oz] of NEIGH) {
+        const nlist = g.get(((cx + ox + 512) << 11) | (cz + oz + 512));
+        if (!nlist) continue;
+        for (const a of list) {
+          if (a.noSeparate) continue;
+          for (const b of nlist) this._pushApart(a, b, R, RR);
+        }
+      }
+    }
+    // keep walkers from standing inside the player too (O(n), same
+    // entity set as before the grid — civilians only)
+    const pl = this.game.player;
+    if (!pl.dead && !pl.vehicle) {
+      for (const a of this.peds) {
+        if (a.dead || a.noSeparate) continue;
         const dx = pl.pos.x - a.pos.x, dz = pl.pos.z - a.pos.z;
         const d2 = dx * dx + dz * dz;
         if (d2 < RR && d2 > 1e-8) {
@@ -112,6 +162,18 @@ export class PedSystem {
         }
       }
     }
+  }
+
+  _pushApart(a, b, R, RR) {
+    if (b.noSeparate) return;
+    const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= RR || d2 < 1e-8) return;
+    const d = Math.sqrt(d2);
+    const push = (R * 2 - d) * 0.5;
+    const nx = dx / d, nz = dz / d;
+    a.pos.x -= nx * push; a.pos.z -= nz * push;
+    b.pos.x += nx * push; b.pos.z += nz * push;
   }
 
   trySpawn(p) {
@@ -232,15 +294,19 @@ export class PedSystem {
   }
 
   // every human a car or blast can hit: civilians, mission goons, foot
-  // cops, and fire/medic crews working a scene
+  // cops, and fire/medic crews working a scene. Memoized per frame — it
+  // used to be rebuilt by every vehicle every frame. Treat as read-only.
   hitTargets() {
     const g = this.game;
-    return [
+    if (this._htTime === g.time && this._ht) return this._ht;
+    this._htTime = g.time;
+    this._ht = [
       ...this.peds,
       ...(g.missions?.activeGoons?.() ?? []),
       ...(g.wanted?.footCops ?? []),
       ...(g.dispatch?.crewPeds?.() ?? []),
     ];
+    return this._ht;
   }
 
   // --- interactions -------------------------------------------------
@@ -258,8 +324,15 @@ export class PedSystem {
     this.senseEvent(x, z, 'explosion');
   }
 
+  // vehicles query the grid instead of scanning every human in the city
+  // (grid is one frame stale for vehicle systems — peds move <0.1m/frame)
+  _vehicleTargets(vehicle, r) {
+    if (this._grid.size === 0 && this.peds.length) return this.hitTargets();
+    return this.nearTargets(vehicle.pos.x, vehicle.pos.z, r);
+  }
+
   checkRunOver(vehicle, speed) {
-    for (const ped of this.hitTargets()) {
+    for (const ped of this._vehicleTargets(vehicle, vehicle.radius + 3.6)) {
       if (ped.dead) continue;
       const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
       if (d < vehicle.radius + 0.4) {
@@ -287,7 +360,7 @@ export class PedSystem {
   // slow rolling cars shoulder people aside instead of passing through them
   nudgeAside(vehicle, dt) {
     const r = vehicle.radius + 0.45;
-    for (const ped of this.hitTargets()) {
+    for (const ped of this._vehicleTargets(vehicle, r + 0.5)) {
       if (ped.dead || ped.inVehicle) continue;
       const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
       if (d >= r || d < 1e-4) continue;

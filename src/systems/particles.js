@@ -75,9 +75,11 @@ class Cloud {
   }
 
   update(dt) {
+    let any = false;
     for (let i = 0; i < MAX; i++) {
       const P = this.p[i];
       if (!P.live) continue;
+      any = true;
       P.life += dt;
       if (P.life >= P.maxLife) {
         P.live = false;
@@ -95,10 +97,15 @@ class Cloud {
       this.size[i] = P.s0 + (P.s1 - P.s0) * t;
       this.alpha[i] = P.a0 * (1 - t);
     }
-    this.geo.attributes.position.needsUpdate = true;
-    this.geo.attributes.pcolor.needsUpdate = true;
-    this.geo.attributes.size.needsUpdate = true;
-    this.geo.attributes.alpha.needsUpdate = true;
+    // skip the GPU re-upload when the pool is idle (one extra frame after
+    // the last particle dies so its cleared slot still reaches the GPU)
+    if (any || this._wasLive) {
+      this.geo.attributes.position.needsUpdate = true;
+      this.geo.attributes.pcolor.needsUpdate = true;
+      this.geo.attributes.size.needsUpdate = true;
+      this.geo.attributes.alpha.needsUpdate = true;
+    }
+    this._wasLive = any;
   }
 }
 

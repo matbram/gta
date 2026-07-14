@@ -50,6 +50,7 @@ export class TrafficSystem {
 
   update(dt) {
     const p = this.game.player.pos;
+    this._frame = (this._frame ?? 0) + 1;   // scan-stagger clock (see drive)
 
     this.spawnTimer -= dt;
     if (this.cars.length < TARGET_CARS && this.spawnTimer <= 0) {
@@ -128,6 +129,7 @@ export class TrafficSystem {
       vehicle: v, edge, dir, t,
       targetSpeed: (edge.artery ? 12 : 8.5) * (forceType ? 1.4 : 1),
       waitT: 0, honkT: 0, panicT: 0, stuckT: 0,
+      slot: (this._slotSeq = ((this._slotSeq ?? 0) + 1)) % 3,   // scan stagger
     };
     v.aiControlled = true;
     if (forceType && ['police', 'ambulance', 'firetruck'].includes(forceType)) {
@@ -238,15 +240,23 @@ export class TrafficSystem {
     // desired speed with obstacle checks
     let want = car.targetSpeed * (car.panicT > 0 ? 1.5 : 1);
 
+    // obstacle scans (sirens, cars ahead, crossing peds) are the expensive
+    // part of driving — each car re-scans every 3rd frame and drives on its
+    // cached results in between. A ~50ms reaction delay is invisible.
+    const scanNow = car._scanned === undefined || (car.slot + this._frame) % 3 === 0;
+
     // an active siren nearby (police, fire, ambulance — or YOU driving one):
     // pull toward the curb and slow until it passes
-    let sirenNear = false;
-    if (car.panicT <= 0) {
-      for (const o of game.vehicles.vehicles) {
-        if (!o.sirenOn || o.dead || o === v) continue;
-        if (distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z) < 32 * 32) { sirenNear = true; break; }
+    if (scanNow) {
+      car._sirenNear = false;
+      if (car.panicT <= 0) {
+        for (const o of game.vehicles.vehicles) {
+          if (!o.sirenOn || o.dead || o === v) continue;
+          if (distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z) < 32 * 32) { car._sirenNear = true; break; }
+        }
       }
     }
+    const sirenNear = car._sirenNear;
     const bias = sirenNear ? 0.16 : 0;
     car.curbBias = (car.curbBias || 0) + (bias - (car.curbBias || 0)) * Math.min(1, dt * 2.5);
     if (sirenNear) want = Math.min(want, 3);
@@ -265,18 +275,38 @@ export class TrafficSystem {
     const fx = Math.sin(v.heading), fz = Math.cos(v.heading);
     let blocked = false;
     const aheadDist = 4 + Math.abs(v.speed) * 0.8;
-    for (const o of game.vehicles.vehicles) {
-      if (o === v) continue;
-      const ox = o.pos.x - v.pos.x, oz = o.pos.z - v.pos.z;
-      const along = ox * fx + oz * fz;
-      const side = Math.abs(ox * -fz + oz * fx);
-      if (along > 0 && along < aheadDist && side < 2.2) {
-        const oSpeed = Math.hypot(o.vel.x, o.vel.y);
-        if (along < 6) { want = 0; blocked = true; }
-        else want = Math.min(want, oSpeed * 0.9);
+    if (scanNow) {
+      car._scanned = true;
+      car._followCap = Infinity;
+      car._followBlock = false;
+      for (const o of game.vehicles.vehicles) {
+        if (o === v) continue;
+        const ox = o.pos.x - v.pos.x, oz = o.pos.z - v.pos.z;
+        const along = ox * fx + oz * fz;
+        const side = Math.abs(ox * -fz + oz * fx);
+        if (along > 0 && along < aheadDist && side < 2.2) {
+          const oSpeed = Math.hypot(o.vel.x, o.vel.y);
+          if (along < 6) { car._followCap = 0; car._followBlock = true; }
+          else car._followCap = Math.min(car._followCap, oSpeed * 0.9);
+        }
+      }
+      // pedestrians crossing
+      car._pedBlock = false;
+      if (car.panicT <= 0) {
+        for (const ped of game.peds.peds) {
+          if (ped.dead) continue;
+          const ox = ped.pos.x - v.pos.x, oz = ped.pos.z - v.pos.z;
+          if (ox * ox + oz * oz > 200) continue;
+          const along = ox * fx + oz * fz;
+          const side = Math.abs(ox * -fz + oz * fx);
+          if (along > 0 && along < 9 && side < 1.8) { car._pedBlock = true; break; }
+        }
       }
     }
-    // player on foot in the road
+    if (car._followCap < want) { want = car._followCap; }
+    if (car._followBlock) blocked = true;
+    if (car._pedBlock && car.panicT <= 0) { want = Math.min(want, 1); blocked = true; }
+    // player on foot in the road — one dot product, checked every frame
     const pp = game.player.pos;
     if (!game.player.vehicle && !game.player.dead) {
       const ox = pp.x - v.pos.x, oz = pp.z - v.pos.z;
@@ -284,17 +314,6 @@ export class TrafficSystem {
       const side = Math.abs(ox * -fz + oz * fx);
       if (along > 0 && along < aheadDist + 2 && side < 2 && car.panicT <= 0) {
         want = 0; blocked = true;
-      }
-    }
-    // pedestrians crossing
-    if (car.panicT <= 0) {
-      for (const ped of game.peds.peds) {
-        if (ped.dead) continue;
-        const ox = ped.pos.x - v.pos.x, oz = ped.pos.z - v.pos.z;
-        if (ox * ox + oz * oz > 200) continue;
-        const along = ox * fx + oz * fz;
-        const side = Math.abs(ox * -fz + oz * fx);
-        if (along > 0 && along < 9 && side < 1.8) { want = Math.min(want, 1); blocked = true; }
       }
     }
 
