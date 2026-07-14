@@ -182,6 +182,10 @@ class Game {
       this.weather = new weather.Weather(this);
       const voice = await import('./core/voice.js');
       this.voice = new voice.Voice(this);
+      // must construct before the shader warm-up: its pooled lights have to
+      // be in the scene when renderer.compile() runs
+      const nl = await import('./world/nightlights.js');
+      this.nightLights = new nl.NightLights(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -387,6 +391,14 @@ class Game {
       this.terrain.setStarAlpha(night * 0.9 * (1 - (this.weather?.cloud ?? 0)));
       this.terrain.update(dt, this.time);
       this.vehicles?.setNight?.(night);
+      this.nightLights?.update(dt, night);
+      // chunk-distance LOD: cull city geometry beyond the fog (4Hz)
+      this._lodT = (this._lodT ?? 0) - dt;
+      if (this._lodT <= 0) {
+        this._lodT = 0.25;
+        const far = this.scene.fog?.far ?? 900;
+        this.cityMeshes.lod?.(this.camera.position.x, this.camera.position.z, far);
+      }
       this.refreshEnv();
     }
 

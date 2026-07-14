@@ -567,5 +567,20 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
       if (propDefs.lampPools) propDefs.lampPools.mat.opacity = intensity * 0.16;
       if (propDefs.signalLens) propDefs.signalLens.mat.emissiveIntensity = 0.35 + intensity * 1.45;
     },
+    // geometry LOD: chunk meshes beyond the fog stop rendering entirely and
+    // distant chunks stop feeding the shadow pass (its biggest cost). The
+    // citywide InstancedMeshes (bands, props) are skipped — one bounding
+    // sphere covers the whole map, so culling them would be all-or-nothing.
+    lod(x, z, far) {
+      for (const m of cityGroup.children) {
+        if (m.isInstancedMesh) continue;
+        let bs = m.geometry.boundingSphere;
+        if (!bs) { m.geometry.computeBoundingSphere(); bs = m.geometry.boundingSphere; }
+        const dx = bs.center.x - x, dz = bs.center.z - z;
+        const d = Math.sqrt(dx * dx + dz * dz) - bs.radius;
+        m.visible = d < far;
+        m.castShadow = d < 150;
+      }
+    },
   };
 }
