@@ -93,6 +93,21 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/adh.sh",
+              "subagent-stop"
+            ],
+            "command": "bash",
+            "timeout": 4,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
