@@ -381,6 +381,23 @@ export class PedSystem {
 
   // an impostor walked into the live bubble: promote it to a real ped
   // (called by PedImpostors; returns false when the rig budget is full)
+  // spawn a specific archetype at a spot (chaos director: brawlers, etc.)
+  spawnPed(archetype, x, z) {
+    if (this.peds.length >= TARGET_PEDS + 6) return null;   // small overage for events
+    const city = this.game.city;
+    const arch = ARCHETYPES[archetype];
+    const plain = !arch?.look && !arch?.tints;
+    const look = plain ? budgetLook() : enrichLook({ ...(arch?.look ?? {}) });
+    if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
+    const ped = new Ped(city, this.game.scene, look, {
+      archetype, personality: makePersonality(archetype),
+      faction: (archetype === 'gangster' || archetype === 'thug') ? 'gang' : 'civ',
+    });
+    ped.place(x, z);
+    this.peds.push(ped);
+    return ped;
+  }
+
   spawnFromImpostor(rec) {
     if (this.peds.length >= TARGET_PEDS) return false;
     const city = this.game.city;

@@ -25,7 +25,10 @@ export class ChaosDirector {
   get CATALOG() {
     return {
       npcChase:      { size: 'big',   cd: 150, w: 1.0 },
+      gangBrawl:     { size: 'big',   cd: 120, w: 0.9 },
       runawayDriver: { size: 'small', cd: 80,  w: 1.2 },
+      streetRace:    { size: 'small', cd: 100, w: 0.9 },
+      fireBreak:     { size: 'small', cd: 200, w: 0.6 },
       drunk:         { size: 'small', cd: 60,  w: 1.0, night: true },
       performer:     { size: 'small', cd: 90,  w: 0.8 },
     };
@@ -167,6 +170,79 @@ export class ChaosDirector {
       },
       cleanup() { if (!ped.dead) ped.drunk = false; },
     };
+  }
+
+  // two thugs square off — the fight is witnessed and the cops respond
+  spawn_gangBrawl() {
+    const game = this.game;
+    const p = game.player.pos;
+    // a spot on the sidewalk 30-70m out
+    const a = Math.random() * Math.PI * 2;
+    const d = 32 + Math.random() * 35;
+    const ep = game.city.nearestEdgePoint?.(p.x + Math.cos(a) * d, p.z + Math.sin(a) * d);
+    if (!ep) return null;
+    const ax = ep.x, az = ep.z;
+    const t1 = game.peds?.spawnPed?.('thug', ax, az);
+    const t2 = game.peds?.spawnPed?.('thug', ax + 1.5, az + 1.0);
+    if (!t1 || !t2) return null;
+    // mutual threat → the existing fight state + alertAllies escalation
+    t1.threat = t2; t1.threatT = 30; t1.state = 'fight'; t1.panicked = true;
+    t2.threat = t1; t2.threatT = 30; t2.state = 'fight'; t2.panicked = true;
+    t1.bark?.('bark_fight');
+    game.peds?.senseEvent?.(ax, az, 'scream', 'ai');
+    game.peds?.spectacleAt?.(ax, az, 22);
+    return {
+      key: 'gangBrawl', size: 'big', ttl: 40, t1, t2,
+      update() {
+        if ((t1.dead || t1.state !== 'fight') && (t2.dead || t2.state !== 'fight')) return true;
+        return false;
+      },
+      cleanup() {},
+    };
+  }
+
+  // two cars tear down an artery running signals
+  spawn_streetRace() {
+    const game = this.game;
+    const p = game.player.pos;
+    const racers = [];
+    for (const c of game.traffic?.cars ?? []) {
+      if (c.vehicle.dead || !c.driverPed) continue;
+      const d = dist2d(c.vehicle.pos.x, c.vehicle.pos.z, p.x, p.z);
+      if (d >= 25 && d <= 90) { racers.push(c); if (racers.length >= 2) break; }
+    }
+    if (racers.length < 2) return null;
+    for (const c of racers) { c.panicT = 999; c._racer = true; }
+    game.hud?.showToast?.('Street race!', 2);
+    return {
+      key: 'streetRace', size: 'small', ttl: 50, racers,
+      update() {
+        if (racers.every((c) => c.vehicle.dead)) return true;
+        for (const c of racers) {
+          if (!c.vehicle.dead && game.time - (c._raceHonk ?? 0) > 2.2) {
+            c._raceHonk = game.time;
+            game.audio?.horn?.(c.vehicle.pos.x, c.vehicle.pos.z);
+          }
+        }
+        return false;
+      },
+      cleanup() { for (const c of racers) { if (!c.vehicle.dead) { c.panicT = 0; c._racer = false; } } },
+    };
+  }
+
+  // a street fire breaks out — the fire brigade responds (existing theater)
+  spawn_fireBreak() {
+    const game = this.game;
+    const p = game.player.pos;
+    const a = Math.random() * Math.PI * 2;
+    const d = 30 + Math.random() * 40;
+    const ep = game.city.nearestEdgePoint?.(p.x + Math.cos(a) * d, p.z + Math.sin(a) * d);
+    if (!ep) return null;
+    // offset onto the curb so it's not in the middle of the road
+    const fx = ep.x + Math.cos(a) * 2.5, fz = ep.z + Math.sin(a) * 2.5;
+    game.dispatch?.reportFire?.(fx, fz, null, { radius: 2.0, dur: 30, dmgPeds: true, culprit: 'ai', strength: 1.4 });
+    game.peds?.spectacleAt?.(fx, fz, 20);
+    return { key: 'fireBreak', size: 'small', ttl: 32, update() { return false; }, cleanup() {} };
   }
 
   // a street performer draws a small gawking crowd
