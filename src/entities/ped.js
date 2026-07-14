@@ -291,6 +291,26 @@ export class Ped {
     game.dispatch?.reportDeath(this);
   }
 
+  // cheap between-ticks frame for staggered AI: keep moving on the current
+  // heading and keep the rig/ragdoll animating, but skip the brain, the
+  // collision query and the head-tracking — those run on tick frames
+  integrate(dt) {
+    if (this.dead) {
+      if (this.ragdoll) this.ragdoll.update(dt);
+      else this.rig.update(dt, 0);
+      this.removeTimer += dt;
+      return;
+    }
+    if (this.knockdown || this.inVehicle || this.state === 'driver') return;
+    if (this.speed > 0.01) {
+      this.pos.x += Math.sin(this.heading) * this.speed * dt;
+      this.pos.z += Math.cos(this.heading) * this.speed * dt;
+      this.pos.y = this.interiorY ?? this.city.groundHeight(this.pos.x, this.pos.z);
+    }
+    this.rig.update(dt, this.speed);
+    this.syncRig();
+  }
+
   update(dt, game) {
     this.game = game;             // panic()/bark() reach the game through this
     if (this.dead) {

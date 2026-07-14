@@ -287,6 +287,23 @@ export function randomLook(rng) {
   }, rng);
 }
 
+// A fixed palette of 96 fully-frozen civilian looks. At crowd scale, fully
+// random looks thrash the character-texture cache (every spawn repaints and
+// re-uploads a canvas atlas); drawing plain civilians from this palette makes
+// texture lookups ~always hit. Uniformed/bespoke characters stay unique.
+let BUDGET_LOOKS = null;
+export function budgetLook(i = -1) {
+  if (!BUDGET_LOOKS) {
+    // tiny deterministic LCG so the palette is identical every session
+    let s = 1337;
+    const rng = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    BUDGET_LOOKS = Array.from({ length: 96 }, () => randomLook(rng));
+  }
+  const idx = i >= 0 ? i % BUDGET_LOOKS.length
+    : Math.floor(Math.random() * BUDGET_LOOKS.length);
+  return { ...BUDGET_LOOKS[idx] };
+}
+
 // Fill any missing "rich" look fields (face, age, hair style, outfit cut)
 // so legacy {skin, shirt, pants, hair} colour looks keep working while the
 // character factory gets everything it needs. Idempotent.
@@ -446,7 +463,14 @@ export class SkinnedHumanoid {
     _lodSphere.center.set(p.x, p.y + 0.9, p.z);
     _lodSphere.radius = 1.4;
     const visible = d2 < 30 * 30 || _lodFrustum.intersectsSphere(_lodSphere);
-    if (this.group.visible !== visible) this.group.visible = visible;
+    if ((this._lodVis ?? true) !== visible) {
+      this._lodVis = visible;
+      this.group.visible = visible;
+      // frozen rigs also stop composing their ~60 bone matrices every frame
+      // (the scene graph walks invisible objects too — this is real CPU)
+      this.group.traverse((o) => { o.matrixAutoUpdate = visible; });
+      if (visible) this.group.updateMatrixWorld(true);
+    }
     if (!visible) return 0;
     // distant characters don't cast shadows (halves their draw cost)
     const cast = d2 < 40 * 40;

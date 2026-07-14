@@ -2,11 +2,13 @@
 // runs their brains, handles run-overs, panic waves and cleanup.
 
 import { Ped, randomLook } from '../entities/ped.js';
-import { enrichLook } from '../entities/humanoid.js';
+import { enrichLook, budgetLook } from '../entities/humanoid.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
 import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 
-const TARGET_PEDS = 200;
+// full skinned rigs near the player; the impostor tier (pedimpostors.js)
+// extends the crowd to ~1000 total out to 500m
+const TARGET_PEDS = 250;
 const SPAWN_MIN = 55, SPAWN_MAX = 240, DESPAWN = 300;
 const MAX_CORPSES = 15;   // lingering bodies never eat the live population
 
@@ -21,7 +23,11 @@ export class PedSystem {
     this.peds = [];
     this.spawnTimer = 0;
     this._grid = new Map();
-    this._nearBuf = [];
+    // rotating result buffers: queries can nest (a run-over damages a ped,
+    // whose faction assist queries the grid mid-iteration)
+    this._nearBufs = [[], [], [], []];
+    this._nearBufI = 0;
+    this._frame = 0;
   }
 
   // rebuild the neighbor grid (live, walking peds only — corpses and seated
@@ -37,12 +43,7 @@ export class PedSystem {
     }
   }
 
-  // live peds within r of (x,z) — via the grid — plus the small dynamic
-  // lists (goons, foot cops, dispatch crews) that callers distance-check
-  // themselves. Reuses one buffer; don't hold the result across calls.
-  nearTargets(x, z, r) {
-    const out = this._nearBuf;
-    out.length = 0;
+  _gridQuery(x, z, r, out) {
     const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL);
     const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
     for (let cx = x0; cx <= x1; cx++) {
@@ -51,6 +52,24 @@ export class PedSystem {
         if (list) for (const p of list) out.push(p);
       }
     }
+    return out;
+  }
+
+  // civilians only, straight from the grid (senses/panic never provoke
+  // cops or goons through this path — they have their own rules)
+  nearPeds(x, z, r) {
+    const out = this._nearBufs[this._nearBufI = (this._nearBufI + 1) & 3];
+    out.length = 0;
+    return this._gridQuery(x, z, r, out);
+  }
+
+  // live peds within r of (x,z) — via the grid — plus the small dynamic
+  // lists (goons, foot cops, dispatch crews) that callers distance-check
+  // themselves. Buffers rotate; don't hold a result across nested queries.
+  nearTargets(x, z, r) {
+    const out = this._nearBufs[this._nearBufI = (this._nearBufI + 1) & 3];
+    out.length = 0;
+    this._gridQuery(x, z, r, out);
     const g = this.game;
     for (const p of g.missions?.activeGoons?.() ?? []) out.push(p);
     for (const p of g.wanted?.footCops ?? []) out.push(p);
@@ -105,13 +124,28 @@ export class PedSystem {
       for (let i = 0; i < n && this.peds.length < want; i++) this.trySpawn(p);
     }
 
-    // update + cleanup (reverse-index so splices don't need a copy)
+    // update + cleanup (reverse-index so splices don't need a copy).
+    // AI is tick-staggered by distance: full brains every frame near the
+    // player, every 2nd frame to 80m, every 4th beyond — skipped frames
+    // just integrate motion + animation (the collision query and the state
+    // machine are the per-ped costs that matter at crowd scale).
+    this._frame++;
     let deadCount = 0, oldestCorpse = null;
     for (let i = this.peds.length - 1; i >= 0; i--) {
       const ped = this.peds[i];
-      ped.update(dt, game);
+      const d2p = distSq2d(ped.pos.x, ped.pos.z, p.x, p.z);
+      const stride = ped.panicked || ped.threat ? 1 : d2p < 30 * 30 ? 1 : d2p < 80 * 80 ? 2 : 4;
+      ped._aiAcc = (ped._aiAcc ?? 0) + dt;
+      if (stride === 1 || (ped.id + this._frame) % stride === 0) {
+        ped.update(ped._aiAcc, game);
+        ped._aiAcc = 0;
+      } else {
+        ped.integrate(dt);
+      }
       const d = dist2d(ped.pos.x, ped.pos.z, p.x, p.z);
       if (d > DESPAWN || (ped.dead && ped.removeTimer > 22)) {
+        // walkers leaving the bubble become impostors instead of vanishing
+        if (!ped.dead && d > DESPAWN) game.impostors?.adopt?.(ped);
         ped.dispose();
         this.peds.splice(i, 1);
       } else if (ped.dead) {
@@ -207,11 +241,14 @@ export class PedSystem {
       if (!city.landAt(x, z)) continue;
       if (Math.random() > this.densityAt(x, z)) continue;
 
-      // role + personality by district and hour
+      // role + personality by district and hour. Plain civilians draw from
+      // the fixed 96-look palette so the character-texture cache always
+      // hits at crowd scale; styled archetypes keep their bespoke looks.
       const district = city.districtAt(x, z);
       const archetype = pickArchetype(district, Math.random, (this.game.dayNight?.minutes ?? 720) / 60);
       const arch = ARCHETYPES[archetype];
-      const look = enrichLook({ ...(arch?.look ?? {}) });
+      const plain = !arch?.look && !arch?.tints;
+      const look = plain ? budgetLook() : enrichLook({ ...(arch?.look ?? {}) });
       if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
       const ped = new Ped(city, this.game.scene, look, {
         archetype, personality: makePersonality(archetype),
@@ -248,7 +285,8 @@ export class PedSystem {
   // toward the sound, and react after a beat
   senseEvent(x, z, kind, culprit = 'player') {
     const R = { gunshot: 34, explosion: 32, crash: 18, scream: 14, alarm: 20 }[kind] ?? 20;
-    for (const ped of this.peds) {
+    // grid-local: only peds actually within earshot are visited
+    for (const ped of this.nearPeds(x, z, R)) {
       if (ped.dead || ped.inVehicle || ped.state === 'driver') continue;
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
       if (d > R) continue;
@@ -267,7 +305,7 @@ export class PedSystem {
     const gunOut = game.combat && !['fists', 'bat'].includes(game.combat.current);
     const onFoot = !player.vehicle && !game.interiors?.playerInside;
     if (gunOut && onFoot) {
-      for (const ped of this.peds) {
+      for (const ped of this.nearPeds(player.pos.x, player.pos.z, 14)) {
         if (ped.dead || ped.panicked || ped.alarm || ped.isCop) continue;
         if ((ped._waryT ?? 0) > game.time) continue;
         const d = dist2d(ped.pos.x, ped.pos.z, player.pos.x, player.pos.z);
@@ -288,12 +326,14 @@ export class PedSystem {
       }
     }
 
-    // corpse discovery: walking into view of a body is an event
+    // corpse discovery: walking into view of a body is an event.
+    // Inverted: iterate the ≤15 corpses and grid-query around each —
+    // never all-peds × all-corpses.
     const corpses = this.peds.filter((c) => c.dead);
     if (corpses.length) {
-      for (const ped of this.peds) {
-        if (ped.dead || ped.panicked || ped.alarm || ped._sawCorpse) continue;
-        for (const c of corpses) {
+      for (const c of corpses) {
+        for (const ped of this.nearPeds(c.pos.x, c.pos.z, 10)) {
+          if (ped.dead || ped.panicked || ped.alarm || ped._sawCorpse) continue;
           const d = dist2d(ped.pos.x, ped.pos.z, c.pos.x, c.pos.z);
           if (d > 10 || !ped.seePoint(c.pos.x, c.pos.z, { range: 10 })) continue;
           ped._sawCorpse = true;
@@ -308,7 +348,6 @@ export class PedSystem {
           } else {
             ped.panic(c.pos.x, c.pos.z, false, null, culprit);
           }
-          break;
         }
       }
     }
@@ -328,6 +367,20 @@ export class PedSystem {
       ...(g.dispatch?.crewPeds?.() ?? []),
     ];
     return this._ht;
+  }
+
+  // an impostor walked into the live bubble: promote it to a real ped
+  // (called by PedImpostors; returns false when the rig budget is full)
+  spawnFromImpostor(rec) {
+    if (this.peds.length >= TARGET_PEDS) return false;
+    const city = this.game.city;
+    const ped = new Ped(city, this.game.scene, budgetLook(rec.lookIdx), {
+      archetype: 'commuter', personality: makePersonality('commuter'),
+    });
+    ped.place(rec.x, rec.z);
+    if (rec.edge) ped.setSidewalk(rec.edge, rec.dir, rec.side);
+    this.peds.push(ped);
+    return true;
   }
 
   // an NPC committed a witnessed crime: flag them and send a cop after

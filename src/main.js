@@ -145,6 +145,8 @@ class Game {
       this.traffic = new traffic.TrafficSystem(this);
       const peds = await import('./systems/peds.js');
       this.peds = new peds.PedSystem(this);
+      const imp = await import('./systems/pedimpostors.js');
+      this.impostors = new imp.PedImpostors(this);
       await prog(92, 'arming the citizens…');
       const combat = await import('./systems/combat.js');
       this.combat = new combat.CombatSystem(this);
@@ -448,6 +450,7 @@ class Game {
     this.traffic?.update(dt);
     this.parkedCars?.update(dt);
     this.peds?.update(dt);
+    this.impostors?.update(dt);
     this.combat?.update(dt, aiming);
     this.wanted?.update(dt);
     this.dispatch?.update(dt);
