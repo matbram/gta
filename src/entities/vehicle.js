@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { clamp, damp, lerp, obbVsAabb, wrapAngle } from '../core/mathutil.js';
-import { buildVehicleMesh, SHARED_MATS, SHARED_GEOS } from './vehiclemesh.js';
+import { buildVehicleMesh, SHARED_MATS, SHARED_GEOS, charredMat } from './vehiclemesh.js';
 
 // All vehicle names are original.
 // seat: where the driver's rig root sits in local space (x right, z forward,
@@ -245,7 +245,11 @@ export class Vehicle {
     if (this.dead) return;
     this.dead = true;
     this.burning = true;
-    this.bodyMat.color.set(0x1c1a18);
+    // paint materials are shared between cars of the same colour — swap the
+    // painted meshes onto the shared charred material instead of tinting
+    const paint = this.bodyMat;
+    this.group.traverse((o) => { if (o.isMesh && o.material === paint) o.material = charredMat; });
+    this.bodyMat = charredMat;
     this.exploded = true;   // consumed by VehicleSystem for boom fx/damage
   }
 

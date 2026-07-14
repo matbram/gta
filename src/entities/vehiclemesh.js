@@ -63,6 +63,46 @@ function getPlateMat() {
   return plateMat;
 }
 
+// paint pool: the per-type colour palettes are small and fixed, so paint
+// materials are shared between cars. explode() swaps the body mesh onto the
+// shared charred material instead of tinting (a tint would blacken every
+// car wearing the same paint).
+export const charredMat = new THREE.MeshLambertMaterial({ color: 0x1c1a18 });
+SHARED_MATS.add(charredMat);
+const paintCache = new Map();      // "p|hex" / "l|hex" → material
+function getPaintMat(color, physical) {
+  const hex = new THREE.Color(color).getHex();
+  const key = (physical ? 'p' : 'l') + hex;
+  let m = paintCache.get(key);
+  if (!m) {
+    m = physical
+      ? new THREE.MeshPhysicalMaterial({
+        color: hex, metalness: 0.25, roughness: 0.42,
+        clearcoat: 0.9, clearcoatRoughness: 0.22, envMapIntensity: 1.0,
+      })
+      : new THREE.MeshLambertMaterial({ color: hex });
+    SHARED_MATS.add(m);
+    paintCache.set(key, m);
+  }
+  return m;
+}
+
+// per-type geometry caches — profiles and dimensions are fixed per type, so
+// the expensive beveled extrusions are identical for every car of a type
+// (rebuilding them per spawn was a repeating hitch)
+const bodyGeoCache = new Map();    // type → geo
+const glassGeoCache = new Map();
+const windowGeoCache = new Map();
+function cached(cache, type, build) {
+  let geo = cache.get(type);
+  if (!geo) {
+    geo = build();
+    SHARED_GEOS.add(geo);
+    cache.set(type, geo);
+  }
+  return geo;
+}
+
 const wheelGeoCache = new Map();   // "r|w" → { tire, rim }
 function wheelGeos(r, w) {
   const key = r.toFixed(2) + '|' + w.toFixed(2);
@@ -225,29 +265,30 @@ const windowMat = new THREE.MeshLambertMaterial({
 SHARED_MATS.add(windowMat);
 
 function addWindows(out, g, type, W, L, H) {
-  const P = PROFILES[type] ?? PROFILES.sedan;
-  // windshield: quad along the rake from windshield base to roof front
-  const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
-  const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
-  const rakeLen = Math.hypot(zA - zB, yA - yB);
-  const panes = [];
-  const ws = new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92);
-  ws.rotateX(-Math.atan2(zA - zB, yB - yA));
-  ws.translate(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
-  panes.push(ws);
-  // front side windows
-  for (const sx of [-1, 1]) {
-    const win = new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7);
-    win.rotateY(sx * Math.PI / 2);
-    win.translate(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
-    panes.push(win);
-  }
-  // one merged mesh per car keeps the draw-call budget flat
-  const merged = mergeBG(panes, false);
-  for (const p of panes) p.dispose();
-  const m = new THREE.Mesh(merged, windowMat);
-  (out._ownGeos = out._ownGeos || new Set()).add(merged);
-  g.add(m);
+  const merged = cached(windowGeoCache, type, () => {
+    const P = PROFILES[type] ?? PROFILES.sedan;
+    // windshield: quad along the rake from windshield base to roof front
+    const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
+    const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
+    const rakeLen = Math.hypot(zA - zB, yA - yB);
+    const panes = [];
+    const ws = new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92);
+    ws.rotateX(-Math.atan2(zA - zB, yB - yA));
+    ws.translate(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
+    panes.push(ws);
+    // front side windows
+    for (const sx of [-1, 1]) {
+      const win = new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7);
+      win.rotateY(sx * Math.PI / 2);
+      win.translate(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
+      panes.push(win);
+    }
+    // one merged mesh per car keeps the draw-call budget flat
+    const geo = mergeBG(panes, false);
+    for (const p of panes) p.dispose();
+    return geo;
+  });
+  g.add(new THREE.Mesh(merged, windowMat));
 }
 
 // ---------------------------------------------------------------- factory
@@ -259,13 +300,7 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   const wheelR = type === 'moto' ? 0.34 : type === 'bus' || type === 'firetruck' ? 0.46 : 0.37;
   out.wheelR = wheelR;
 
-  const paintColor = new THREE.Color(color);
-  out.bodyMat = physical
-    ? new THREE.MeshPhysicalMaterial({
-      color: paintColor, metalness: 0.25, roughness: 0.42,
-      clearcoat: 0.9, clearcoatRoughness: 0.22, envMapIntensity: 1.0,
-    })
-    : new THREE.MeshLambertMaterial({ color: paintColor });
+  out.bodyMat = getPaintMat(color, physical);
 
   if (type === 'moto') {
     buildMoto(out, g, spec, wheelR);
@@ -274,13 +309,15 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   }
 
   // body shell (raised so the bottom clears the ground on its wheels)
-  const body = new THREE.Mesh(bodyGeometry(type, W, L, H, wheelR), out.bodyMat);
+  const body = new THREE.Mesh(
+    cached(bodyGeoCache, type, () => bodyGeometry(type, W, L, H, wheelR)), out.bodyMat);
   body.castShadow = true;
   g.add(body);
   out.bodyMesh = body;
 
   // greenhouse + readable windshield/side panes
-  const glass = new THREE.Mesh(glassGeometry(type, W, L, H), glassMat);
+  const glass = new THREE.Mesh(
+    cached(glassGeoCache, type, () => glassGeometry(type, W, L, H)), glassMat);
   g.add(glass);
   addWindows(out, g, type, W, L, H);
 

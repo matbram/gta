@@ -34,6 +34,15 @@ function pickType(r, district, artery) {
 
 const SIGNAL_CYCLE = 14;   // seconds: 6 green NS, 1 all-red, 6 green EW, 1 all-red
 
+// drivers wear looks from a fixed palette: fully random looks missed the
+// character-texture cache on nearly every spawn, repainting + re-uploading
+// a canvas texture each time a car entered the stream
+let DRIVER_LOOKS = null;
+function driverLook() {
+  if (!DRIVER_LOOKS) DRIVER_LOOKS = Array.from({ length: 12 }, () => randomLook(Math.random));
+  return { ...DRIVER_LOOKS[Math.floor(Math.random() * DRIVER_LOOKS.length)] };
+}
+
 export class TrafficSystem {
   constructor(game) {
     this.game = game;
@@ -139,7 +148,7 @@ export class TrafficSystem {
     }
 
     // put a visible AI driver figure at the wheel (pulled out on carjack)
-    const ped = new Ped(city, this.game.scene, randomLook(Math.random));
+    const ped = new Ped(city, this.game.scene, driverLook());
     ped.state = 'driver';
     ped.inVehicle = v;
     ped.rig.setAnim(v.spec.seat?.pose ?? 'drive');
