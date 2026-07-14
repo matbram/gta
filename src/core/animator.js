@@ -131,6 +131,22 @@ export const OVERLAY_POSES = {
     armR: [0.9, 0, 0.25], foreArmR: [-2.3, 0, 0],
     armL: [-0.9, 0, -0.25], foreArmL: [2.3, 0, 0],
   },
+  // leg-shot hobble: one stiff dragging leg, slight guard lean
+  limp: {
+    hipDrop: 0.06,
+    upLegR: [0.25, 0, 0], legR: [0.5, 0, 0],
+    spine1: [0.12, 0, -0.08],
+  },
+  // belly-crawl for the wounded: body low and pitched forward, arms
+  // clawing ahead, legs trailing (walk clip underneath supplies motion)
+  crawl: {
+    hipDrop: 0.72,
+    spine1: [1.05, 0, 0], head: [-0.5, 0, 0],
+    armR: [1.35, 0, 0.2], foreArmR: [-0.7, 0, 0],
+    armL: [-1.35, 0, -0.2], foreArmL: [0.7, 0, 0],
+    upLegL: [0.5, 0, 0], legL: [0.6, 0, 0],
+    upLegR: [0.35, 0, 0], legR: [0.75, 0, 0],
+  },
   hose: {
     armR: [0.95, 0, 0.15], foreArmR: [-0.4, 0, 0],
     armL: [-0.85, 0, 0.25], foreArmL: [0.6, -0.4, 0],

@@ -284,6 +284,17 @@ export class Ped {
     this.panic(atk.x, atk.z, source === 'melee' || source === 'gun', kind, culprit);
   }
 
+  // a bullet in the leg slows them for good (this life, anyway): speeds
+  // cut hard and the limp overlay takes over their gait
+  legWound() {
+    if (this.legWounded || this.dead) return;
+    this.legWounded = true;
+    this.walkSpeed *= 0.45;
+    this.runSpeed *= 0.4;
+    this.rig.limp = true;
+    this.rig.anim = null;   // force the overlay to refresh mid-stride
+  }
+
   // faction loyalty: allies who see one of their own get hit adopt the
   // attacker as a threat (generalizes the old gang-corner buddy jump).
   // Civilians have no such loyalty — they just panic like before.
@@ -613,7 +624,7 @@ export class Ped {
         const wdx = this.pos.x - this.fleeFrom.x, wdz = this.pos.z - this.fleeFrom.z;
         const wl = Math.hypot(wdx, wdz) || 1;
         this.moveToward(this.pos.x + (wdx / wl) * 6, this.pos.z + (wdz / wl) * 6, 0.5, dt);
-        this.rig.setAnim('kneel');
+        this.rig.setAnim('crawl');
         this._dripT = (this._dripT ?? 0) - dt;
         if (this._dripT <= 0) {
           this._dripT = 1.6;

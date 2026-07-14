@@ -496,9 +496,10 @@ export class SkinnedHumanoid {
     const carryO = this.weaponCarry ?? 'none';
     switch (name) {
       case 'idle': A.play('idle'); A.setOverlay(carryO); break;
-      case 'walk': A.play('walk'); A.setOverlay(carryO); break;
-      case 'run': A.play('run'); A.setOverlay(carryO); break;
-      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay(carryO); break;
+      // a leg-shot survivor hobbles: the limp overlay wins over weapon carry
+      case 'walk': A.play('walk'); A.setOverlay(this.limp ? 'limp' : carryO); break;
+      case 'run': A.play('run'); A.setOverlay(this.limp ? 'limp' : carryO); break;
+      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay(this.limp ? 'limp' : carryO); break;
       case 'jump': A.play('idle', { timeScale: 0.2 }); A.setOverlay('jump'); break;
       case 'swim': A.play('idle', { timeScale: 0.6 }); A.setOverlay('swim'); break;
       case 'drive': A.play('idle', { timeScale: 0.12 }); A.setOverlay('drive'); break;
@@ -510,6 +511,7 @@ export class SkinnedHumanoid {
       case 'phone': A.play('idle', { timeScale: 0.5 }); A.setOverlay('phone'); break;
       case 'handsup': A.play('idle', { timeScale: 0.3 }); A.setOverlay('handsUp'); break;
       case 'kneel': A.play('idle', { timeScale: 0.1 }); A.setOverlay('kneel'); break;
+      case 'crawl': A.play('walk', { timeScale: 0.55 }); A.setOverlay('crawl'); break;
       case 'hose': A.play('idle', { timeScale: 0.4 }); A.setOverlay('hose'); break;
       default: A.play('idle'); A.setOverlay('none');
     }

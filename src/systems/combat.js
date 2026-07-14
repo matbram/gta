@@ -480,9 +480,30 @@ export class CombatSystem {
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 3);
         game.audio?.ricochet(hit.point.x, hit.point.z);
       } else if (hit.type === 'ped' || hit.type === 'cop' || hit.type === 'goon') {
-        const imp = { dx: d.x, dz: d.z, force: 2 + spec.dmg * 0.06, up: 0.8, spin: (Math.random() - 0.5) * 3 };
-        hit.target.damage(spec.dmg, game, 'gun', imp, 'player', game.player);
-        if (hit.target.dead) anyKill = true;
+        const t = hit.target;
+        // locational damage: classify the hit by height above the feet
+        // (rig is ~1.78m: head above 1.45, legs below 0.8)
+        const rel = hit.point.y - t.pos.y;
+        const zone = rel > 1.45 ? 'head' : rel < 0.8 ? 'legs' : 'torso';
+        let dmg = spec.dmg;
+        if (zone === 'head') dmg *= 10;        // headshots end it, any caliber
+        else if (zone === 'legs') dmg *= 0.7;
+        const imp = {
+          dx: d.x, dz: d.z,
+          force: 2 + Math.min(dmg, 40) * 0.06,
+          up: zone === 'head' ? 1.4 : 0.8,
+          spin: (Math.random() - 0.5) * 3,
+        };
+        t.damage(dmg, game, 'gun', imp, 'player', game.player);
+        if (!t.dead && zone === 'legs') t.legWound?.();
+        // arm graze: torso height but wide of the centerline — armed
+        // targets shoot worse with a bullet through the shoulder
+        if (!t.dead && zone === 'torso' && t.accuracy && !t.armWounded &&
+            Math.hypot(hit.point.x - t.pos.x, hit.point.z - t.pos.z) > 0.3) {
+          t.armWounded = true;
+          t.accuracy *= 0.5;
+        }
+        if (t.dead) anyKill = true;
         game.gore?.blood.pool(hit.target.pos.x + d.x, hit.target.pos.z + d.z, hit.target.interiorY ?? undefined);
         // shooting mission goons is gang business — no extra police heat beyond the gunfire itself
         if (hit.type !== 'goon') {
