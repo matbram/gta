@@ -72,6 +72,7 @@ class Game {
     vehMod.setPaintQuality(this.gfx.quality !== 'low');
     const humMod = await import('./entities/humanoid.js');
     humMod.setHumanoidAssets(this.assets);
+    this._updateAnimLod = humMod.updateAnimLod;
 
     await prog(24, 'surveying the bay…');
     this.city = generateCity(SEED);
@@ -416,6 +417,10 @@ class Game {
   updatePlay(dt) {
     const driving = !!this.player.vehicle;
     const aiming = !driving && this.input.mouseDown[2] && !this.player.dead;
+
+    // camera snapshot for character animation LOD (uses last frame's
+    // matrices — one frame of lag is invisible at these thresholds)
+    this._updateAnimLod?.(this.camera);
 
     // camera control
     this.cameraRig.applyMouse(this.input.mouseDX, this.input.mouseDY);

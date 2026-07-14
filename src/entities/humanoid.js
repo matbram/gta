@@ -333,6 +333,24 @@ export function setHumanoidAssets(a) { humanoidAssets = a; }
 const WALK_REF = 1.7;   // m/s the walk clip was authored at (tuned by eye)
 const RUN_REF = 5.0;
 
+// ---- animation LOD ----
+// Skinning ~100 characters at full rate every frame (main + shadow pass)
+// is the game's single biggest steady frame cost. One camera snapshot per
+// frame drives distance-tiered mixer rates, a shadow cutoff, and a
+// freeze-and-hide for far off-screen rigs. Movement/AI is unaffected —
+// only skeletal animation and drawing are throttled.
+const _lodFrustum = new THREE.Frustum();
+const _lodMat = new THREE.Matrix4();
+const _lodSphere = new THREE.Sphere();
+const _lodCamPos = new THREE.Vector3();
+let _lodOn = false;
+export function updateAnimLod(camera) {
+  _lodOn = true;
+  _lodCamPos.copy(camera.position);
+  _lodMat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  _lodFrustum.setFromProjectionMatrix(_lodMat);
+}
+
 export class SkinnedHumanoid {
   constructor(look = {}, modelKey = 'Soldier') {
     this.group = new THREE.Group();
@@ -405,6 +423,44 @@ export class SkinnedHumanoid {
     this.punchAlt = false;
     this.swimTilt = 0;
     this.animator.play('idle');
+
+    // animation LOD state (see updateAnimLod / _lodStep)
+    this.lodExempt = false;      // the player rig sets this
+    this._lodAcc = 0;
+    this._lodCast = true;
+    this._lodMeshes = [];
+    this.modelRoot.traverse((o) => {
+      if (o.isMesh || o.isSkinnedMesh) this._lodMeshes.push(o);
+    });
+  }
+
+  // Returns the dt this rig should animate with this frame: accumulated
+  // time when an update is due, 0 to skip. Far off-screen rigs also hide.
+  _lodStep(dt) {
+    this._lodAcc += dt;
+    if (!_lodOn || this.lodExempt) { const a = this._lodAcc; this._lodAcc = 0; return a; }
+    const p = this.group.position;
+    const dx = p.x - _lodCamPos.x, dz = p.z - _lodCamPos.z;
+    const d2 = dx * dx + dz * dz;
+    // far + off-screen: freeze the skeleton and skip the draw entirely
+    _lodSphere.center.set(p.x, p.y + 0.9, p.z);
+    _lodSphere.radius = 1.4;
+    const visible = d2 < 30 * 30 || _lodFrustum.intersectsSphere(_lodSphere);
+    if (this.group.visible !== visible) this.group.visible = visible;
+    if (!visible) return 0;
+    // distant characters don't cast shadows (halves their draw cost)
+    const cast = d2 < 40 * 40;
+    if (cast !== this._lodCast) {
+      this._lodCast = cast;
+      for (const m of this._lodMeshes) m.castShadow = cast;
+    }
+    // gestures (punches, reloads, hit reactions) always play at full rate
+    const period = (this.animator.gesture || d2 < 25 * 25) ? 0
+      : d2 < 50 * 50 ? 1 / 30 : d2 < 90 * 90 ? 1 / 15 : 1 / 8;
+    if (this._lodAcc < period) return 0;
+    const a = this._lodAcc;
+    this._lodAcc = 0;
+    return a;
   }
 
   setAnim(name) {
@@ -496,6 +552,8 @@ export class SkinnedHumanoid {
   }
 
   update(dt, speed = 0) {
+    dt = this._lodStep(dt);
+    if (dt === 0) return;
     if (this.dead) {
       this.deadT += dt;
       // simple fall (verlet ragdoll replaces this in the combat phase)
