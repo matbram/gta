@@ -38,6 +38,20 @@ if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/11-six
 // ---- respray clears wanted ----
 const respray = await page.evaluate(() => {
   const g = window.__game.game;
+  // isolate the respray check from the chase outcome: at 6 stars the police
+  // can now legitimately wreck the player out of their car (hard PITs flip
+  // it into a sitting duck), so re-establish a clean precondition — a living
+  // player, a car, and a fresh wanted level for the respray to clear.
+  g.deathFlow = null;
+  g.player.dead = false;
+  g.player.rig.dead = false;
+  g.player.health = g.player.maxHealth;
+  g.setMode('play');
+  if (!g.player.vehicle) {
+    window.__game.spawnVehicleOnRoad('sports');
+    window.__game.enterNearestVehicle();
+  }
+  window.__game.setWanted(3);
   g.addMoney(500);
   const m = g.worldlife.markers.find((m) => m.kind === 'respray');
   const v = g.player.vehicle;
