@@ -268,6 +268,7 @@ class Game {
       from ? Math.atan2(from.x - this.player.pos.x, from.z - this.player.pos.z) : null);
     this.player._audio = this.audio;
     this.player._gore = this.gore;
+    this.player._vehicles = this.vehicles;   // standable roofs (jump on cars)
     this.deathFlow = null;
   }
 

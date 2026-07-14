@@ -587,6 +587,7 @@ export class VehicleSystem {
     const pl = game.player;
     if (!pl.vehicle && !pl.dead &&
         game.time - (v._lastPlayerHitT ?? -9) > 0.4 &&
+        pl.pos.y < v.pos.y + v.spec.h - 0.3 &&   // standing ON the roof is fine
         distSq2d(pl.pos.x, pl.pos.z, v.pos.x, v.pos.z) < (v.boundR + 1) * (v.boundR + 1)) {
       const hit = circleVsObb(pl.pos.x, pl.pos.z, 0.38, _solid);
       if (hit) {

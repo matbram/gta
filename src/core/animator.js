@@ -116,9 +116,10 @@ export const OVERLAY_POSES = {
     armL: [0, 0, 1.4], armR: [0, 0, -1.4],
   },
   jump: {
-    upLegL: [-0.6, 0, 0], legL: [1.0, 0, 0],
-    upLegR: [-0.25, 0, 0], legR: [0.55, 0, 0],
-    armL: [0, 0, 0.6], armR: [0, 0, -0.6],
+    upLegL: [-0.75, 0, 0], legL: [1.2, 0, 0],
+    upLegR: [-0.35, 0, 0], legR: [0.7, 0, 0],
+    armL: [-0.35, 0, 0.7], armR: [0.35, 0, -0.7],
+    spine1: [0.14, 0, 0], head: [-0.1, 0, 0],
   },
   // protective kneel: left foot planted in front, right knee to the ground
   // (hipDrop actually lowers the body), torso curled, forearms shielding
@@ -347,6 +348,21 @@ export const GESTURES = {
     }
     if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
     if (bones.head) { e.set(-0.15 * up + 0.2 * ease, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+  },
+  // landing dip: knees give and the torso pitches on touchdown; s scales
+  // the depth with fall speed
+  landDip(bones, q, e, t, s = 1) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI) * s;
+    if (bones.spine1) { e.set(0.35 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    for (const key of ['upLegL', 'upLegR']) {
+      if (bones[key]) { e.set(-0.55 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['legL', 'legR']) {
+      if (bones[key]) { e.set(0.8 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['armL', 'armR']) {
+      if (bones[key]) { e.set(key === 'armL' ? -0.4 * k : 0.4 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
   },
   // combat tuck-and-roll: whole-body curl (the tumble itself is the rig
   // group rotating — this gesture just folds the body into a ball)
