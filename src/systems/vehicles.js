@@ -25,7 +25,7 @@ export class VehicleSystem {
     v.heading = heading;
     v.onCrash = (veh, box, impact) => this.handleStaticCrash(veh, box, impact);
     v.syncMesh(0);
-    v.setNightLights(this.night > 0.5);
+    v.setNightLights(this._lightsOn ?? false);
     this.vehicles.push(v);
     return v;
   }
@@ -91,6 +91,15 @@ export class VehicleSystem {
 
     const v = this.nearestVehicle(player.pos.x, player.pos.z, 4.2, (v) => !v.dead);
     if (!v) return;
+
+    // locked parked cars take a moment to break into
+    if (v.locked && !v.driver) {
+      if (!this._breakIn || this._breakIn.v !== v) {
+        this._breakIn = { v, t: 0.8 };
+        this.game.hud?.showToast('Breaking in…', 1.1);
+      }
+      return;
+    }
 
     // carjack if occupied by AI
     if (v.driver && v.driver !== 'player') {
@@ -177,8 +186,9 @@ export class VehicleSystem {
         player.rig.group.rotation.y = v.heading;
         player.rig.update(dt, 0);
         game.state.stats.distanceDriven += Math.abs(v.speed) * dt;
-        // engine audio
-        game.audio?.setEngine(clamp(Math.abs(v.speed) / v.spec.maxSpeed, 0, 1), this.playerControl.throttle > 0);
+        // engine audio: rpm within the current gear so shifts are audible
+        game.audio?.setEngine(v.rpm ?? clamp(Math.abs(v.speed) / v.spec.maxSpeed, 0, 1),
+          this.playerControl.throttle > 0, v.gear ?? 0);
         // near-miss whoosh: fast pass close to another car
         if (Math.abs(v.speed) > 14) {
           for (const o of this.vehicles) {
@@ -206,6 +216,26 @@ export class VehicleSystem {
       }
     } else if (!player.vehicle && !player.dead) {
       if (input.wasPressed('KeyF') || input.wasPressed('Enter')) this.tryEnterExit();
+    }
+
+    // break-in in progress: hold position near the car until the lock pops
+    if (this._breakIn) {
+      const b = this._breakIn;
+      if (b.v.dead || player.vehicle ||
+          dist2d(player.pos.x, player.pos.z, b.v.pos.x, b.v.pos.z) > 4.6) {
+        this._breakIn = null;
+      } else {
+        b.t -= dt;
+        if (b.t <= 0) {
+          this._breakIn = null;
+          b.v.locked = false;
+          game.audio?.crash?.(6, b.v.pos.x, b.v.pos.z);
+          game.particles?.glassBurst(b.v.pos.x, b.v.pos.y + 0.9, b.v.pos.z);
+          game.wanted?.crime('breakin', b.v.pos.x, b.v.pos.z);
+          if (b.v.alarmed) { b.v.alarmT = 12; b.v.alarmed = false; }
+          this.tryEnterExit();
+        }
+      }
     }
 
     // physics for AI/parked vehicles happens in traffic system (AI) or here (parked drift-stop)
@@ -256,6 +286,10 @@ export class VehicleSystem {
               if (impact > 5) {
                 a.applyDamage(impact * 1.2, 'crash');
                 b.applyDamage(impact * 1.2, 'crash');
+                // bumping an alarmed parked car sets the alarm off
+                for (const c of [a, b]) {
+                  if (c.alarmed && c.parked) { c.alarmT = 12; c.alarmed = false; }
+                }
                 this.game.particles?.sparks((a.pos.x + b.pos.x) / 2, a.pos.y + 0.6, (a.pos.z + b.pos.z) / 2, 6);
                 this.game.audio?.crash?.(impact, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2);
                 if (impact > 12) this.game.particles?.glassBurst((a.pos.x + b.pos.x) / 2, a.pos.y + 1.0, (a.pos.z + b.pos.z) / 2);
@@ -282,7 +316,11 @@ export class VehicleSystem {
     // run-over checks: vehicles vs pedestrians & player
     for (const v of vs) {
       const sp = Math.hypot(v.vel.x, v.vel.y);
-      if (sp < 2.5) continue;
+      if (sp < 2.5) {
+        // slow contact shoulders people aside instead of intersecting
+        if (sp > 0.3) this.game.peds?.nudgeAside(v, dt);
+        continue;
+      }
       this.game.peds?.checkRunOver(v, sp);
       if (v.driver !== 'player' && !player.vehicle && !player.dead) {
         if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
@@ -356,6 +394,18 @@ export class VehicleSystem {
       }
       // siren flash
       if (v.type === 'police') v.flashSiren(this.game.time);
+
+      // car alarm: honk loop + flashing lights after a break-in or hard bump
+      if (v.alarmT > 0) {
+        v.alarmT -= dt;
+        v._alarmBeep = (v._alarmBeep ?? 0) - dt;
+        if (v._alarmBeep <= 0) {
+          v._alarmBeep = 0.55;
+          this.game.audio?.horn(v.pos.x, v.pos.z);
+        }
+        v.updateLightState();
+        if (v.alarmT <= 0) { v.alarmT = 0; v.updateLightState(); }
+      }
     }
   }
 
@@ -408,7 +458,9 @@ export class VehicleSystem {
 
   setNight(night) {
     this.night = night;
-    const on = night > 0.45;
+    // headlights at night, and by day when the weather turns gloomy
+    const gloom = this.game.weather && this.game.weather.state !== 'clear';
+    const on = night > 0.45 || !!gloom;
     if (this._lightsOn === on) return;
     this._lightsOn = on;
     for (const v of this.vehicles) v.setNightLights(on);

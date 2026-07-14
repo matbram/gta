@@ -337,20 +337,23 @@ export class AudioEngine {
     this.engineNodes = null;
   }
 
-  setEngine(speedNorm, throttle) {
+  // rpm is 0..1 within the current gear; the note climbs, drops on the
+  // shift, and climbs again — a 3-speed gearbox you can hear
+  setEngine(rpm, throttle, gear = 0) {
     if (this.engineSample) {
-      // pitch + volume track rpm
-      this.engineSample.src.playbackRate.value = 0.7 + speedNorm * 1.8 + (throttle ? 0.15 : 0);
-      this.engineSample.gain.gain.value = 0.1 + speedNorm * 0.1 + (throttle ? 0.04 : 0);
+      const base = 0.62 + gear * 0.14;
+      this.engineSample.src.playbackRate.value = base + rpm * 0.95 + (throttle ? 0.12 : 0);
+      this.engineSample.gain.gain.value = 0.09 + rpm * 0.09 + (throttle ? 0.04 : 0);
       return;
     }
     if (!this.engineNodes) return;
     const { osc, osc2, f, g } = this.engineNodes;
-    const rpm = 0.18 + speedNorm * 0.82;
-    osc.frequency.value = 50 + rpm * 165 + (throttle ? 14 : 0);
-    osc2.frequency.value = 25 + rpm * 80;
-    f.frequency.value = 260 + rpm * 900;
-    g.gain.value = 0.075 + rpm * 0.075 + (throttle ? 0.03 : 0);
+    const r = 0.16 + rpm * 0.84;
+    const gearBase = 1 + gear * 0.26;
+    osc.frequency.value = 44 * gearBase + r * 150 + (throttle ? 14 : 0);
+    osc2.frequency.value = 22 * gearBase + r * 72;
+    f.frequency.value = 240 + (r + gear * 0.35) * 780;
+    g.gain.value = 0.075 + r * 0.075 + (throttle ? 0.03 : 0);
   }
 
   // ---------------- police siren loops ----------------

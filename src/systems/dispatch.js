@@ -72,6 +72,15 @@ export class Dispatch {
     this.runMedicUnit(dt);
   }
 
+  // everyone currently on foot for a unit — run-over / explosion targets
+  crewPeds() {
+    const out = [];
+    for (const u of [this.fireUnit, this.medicUnit]) {
+      if (u) for (const c of u.crew) if (!c.dead) out.push(c);
+    }
+    return out;
+  }
+
   // ---------------- shared unit helpers ----------------
   spawnUnit(type, near, crewCount, look) {
     const game = this.game;

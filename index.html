@@ -72,6 +72,20 @@
   #hud-weapon .wname{font:700 10px Arial;color:#d8ccb8;letter-spacing:1px;margin-top:1px}
   #hud-weapon .wammo{font:800 15px 'Arial Black',Arial;color:#e8dcc8;text-shadow:var(--hud-shadow)}
 
+  #speedo{position:absolute;left:254px;bottom:22px;text-align:left;
+    background:rgba(0,0,0,.38);border:2px solid rgba(0,0,0,.5);border-radius:4px;padding:5px 12px 7px}
+  #speedo .kmh{font:800 26px 'Arial Black',Arial;color:#e8dcc8;text-shadow:var(--hud-shadow)}
+  #speedo .unit{font:700 11px Arial;color:#d8ccb8;margin-left:5px;letter-spacing:1px}
+  #speedo .sbar{width:118px;height:5px;background:rgba(0,0,0,.55);margin-top:4px;border-radius:2px;overflow:hidden}
+  #speedo .sbar>i{display:block;height:100%;width:0;background:var(--hud-green)}
+
+  #moneyticks{position:relative;height:0}
+  #moneyticks .mtick{position:absolute;right:0;top:-6px;font:800 17px 'Arial Black',Arial;
+    text-shadow:var(--hud-shadow);animation:mtick 1.6s ease-out forwards}
+  #moneyticks .gain{color:#9fe88a}
+  #moneyticks .loss{color:#e07862}
+  @keyframes mtick{0%{opacity:0;transform:translateY(4px)}15%{opacity:1}100%{opacity:0;transform:translateY(-40px)}}
+
   #minimap-wrap{position:absolute;left:20px;bottom:20px;width:224px;height:224px}
   #minimap{width:224px;height:224px;border-radius:50%;border:3px solid rgba(10,10,14,.9);
     box-shadow:0 0 0 2px rgba(232,200,74,.25),0 4px 18px rgba(0,0,0,.6)}
@@ -162,6 +176,7 @@
     <div id="hud-topright">
       <div id="hud-clock">00:00</div>
       <div id="hud-money">$0</div>
+      <div id="moneyticks"></div>
       <div id="hud-stars"></div>
       <div class="hud-bar" id="hud-health"><div style="width:100%"></div></div>
       <div class="hud-bar" id="hud-armor"><div style="width:0%"></div></div>
@@ -169,6 +184,7 @@
       <div id="hud-weapon"><div class="wicon">👊</div><div class="wname">FISTS</div><div class="wammo"></div></div>
     </div>
     <div id="minimap-wrap"><canvas id="minimap" width="448" height="448"></canvas></div>
+    <div id="speedo" class="hidden"><span class="kmh">0</span><span class="unit">KM/H</span><div class="sbar"><i></i></div></div>
     <div id="zonename"></div>
     <div id="vehname"></div>
     <div id="centermsg"></div>

@@ -7,7 +7,7 @@ import { clamp, dist2d, distSq2d, lerp } from '../core/mathutil.js';
 
 const CRIME_HEAT = {
   assault: 6, kill: 34, carjack: 12, crash: 1.5, explosion: 60,
-  gunfire: 3, copAttack: 55, copKill: 95,
+  gunfire: 3, copAttack: 55, copKill: 95, breakin: 5,
 };
 
 const STAR_TH = [0, 25, 80, 180, 330, 500, 650];

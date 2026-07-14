@@ -8,14 +8,27 @@ const TARGET_CARS = 20;
 const SPAWN_MIN = 90, SPAWN_MAX = 200, DESPAWN = 280;
 const LANE = 0.24;            // lane offset as fraction of road width
 
-const CIVILIAN_TYPES = [
-  ['sedan', 0.34], ['taxi', 0.14], ['pickup', 0.14], ['van', 0.12],
-  ['sports', 0.1], ['moto', 0.06], ['bus', 0.06], ['ambulance', 0.04],
-];
+// what drives where: work trucks around the docks and farm, sports cars
+// and cabs in the crown, family sedans out in the suburbs
+const DISTRICT_TYPES = {
+  crown:   [['sedan', 0.28], ['sports', 0.26], ['taxi', 0.22], ['van', 0.06], ['bus', 0.1], ['moto', 0.08]],
+  midtown: [['sedan', 0.3], ['taxi', 0.22], ['van', 0.12], ['sports', 0.12], ['bus', 0.12], ['moto', 0.06], ['pickup', 0.06]],
+  oldtown: [['sedan', 0.3], ['taxi', 0.16], ['van', 0.14], ['pickup', 0.12], ['moto', 0.12], ['sports', 0.08], ['bus', 0.08]],
+  beach:   [['sports', 0.24], ['sedan', 0.26], ['moto', 0.18], ['taxi', 0.12], ['van', 0.1], ['pickup', 0.1]],
+  suburbs: [['sedan', 0.42], ['pickup', 0.2], ['van', 0.18], ['taxi', 0.06], ['moto', 0.06], ['sports', 0.08]],
+  park:    [['sedan', 0.4], ['taxi', 0.15], ['van', 0.15], ['pickup', 0.15], ['sports', 0.08], ['moto', 0.07]],
+  docks:   [['pickup', 0.3], ['van', 0.3], ['sedan', 0.18], ['bus', 0.06], ['moto', 0.08], ['taxi', 0.08]],
+  heights: [['sedan', 0.34], ['pickup', 0.26], ['van', 0.16], ['sports', 0.14], ['moto', 0.1]],
+  farm:    [['pickup', 0.48], ['van', 0.22], ['sedan', 0.22], ['moto', 0.08]],
+};
 
-function pickType(r) {
+function pickType(r, district, artery) {
+  let table = DISTRICT_TYPES[district] ?? DISTRICT_TYPES.midtown;
+  // buses only run the arteries
+  if (!artery) table = table.filter(([t]) => t !== 'bus');
+  const tot = table.reduce((s, [, w]) => s + w, 0);
   let acc = 0;
-  for (const [t, w] of CIVILIAN_TYPES) { acc += w; if (r < acc) return t; }
+  for (const [t, w] of table) { acc += w; if (r * tot < acc) return t; }
   return 'sedan';
 }
 
@@ -106,7 +119,7 @@ export class TrafficSystem {
       if (distSq2d(c.pos.x, c.pos.z, ex, ez) < 100) return;
     }
 
-    const type = pickType(Math.random());
+    const type = pickType(Math.random(), city.districtAt(ex, ez), edge.artery);
     const dir = Math.random() < 0.5 ? 1 : -1;
     const v = this.game.vehicles.spawn(type, ex, ez, 0);
     const car = {

@@ -136,6 +136,18 @@ export class PedSystem {
     }
   }
 
+  // every human a car or blast can hit: civilians, mission goons, foot
+  // cops, and fire/medic crews working a scene
+  hitTargets() {
+    const g = this.game;
+    return [
+      ...this.peds,
+      ...(g.missions?.activeGoons?.() ?? []),
+      ...(g.wanted?.footCops ?? []),
+      ...(g.dispatch?.crewPeds?.() ?? []),
+    ];
+  }
+
   // --- interactions -------------------------------------------------
   panicAt(x, z, radius) {
     for (const ped of this.peds) {
@@ -144,8 +156,7 @@ export class PedSystem {
   }
 
   explosionAt(x, z, radius) {
-    const targets = [...this.peds, ...(this.game.missions?.activeGoons?.() ?? [])];
-    for (const ped of targets) {
+    for (const ped of this.hitTargets()) {
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
       if (d < radius && !ped.dead) ped.damage((radius - d) * 18, this.game, 'explosion');
     }
@@ -153,8 +164,7 @@ export class PedSystem {
   }
 
   checkRunOver(vehicle, speed) {
-    const targets = [...this.peds, ...(this.game.missions?.activeGoons?.() ?? [])];
-    for (const ped of targets) {
+    for (const ped of this.hitTargets()) {
       if (ped.dead) continue;
       const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
       if (d < vehicle.radius + 0.4) {
@@ -169,10 +179,34 @@ export class PedSystem {
           ped.pos.z += nz * 1.4;
         }
         if (vehicle.driver === 'player' && !ped.isGoon) {
-          this.game.wanted?.crime(ped.dead ? 'kill' : 'assault', ped.pos.x, ped.pos.z);
+          this.game.wanted?.crime(
+            ped.dead ? (ped.isCop ? 'copKill' : 'kill') : (ped.isCop ? 'copAttack' : 'assault'),
+            ped.pos.x, ped.pos.z);
         }
       } else if (d < vehicle.radius + 3.2 && speed > 8) {
         ped.panic(vehicle.pos.x, vehicle.pos.z);
+      }
+    }
+  }
+
+  // slow rolling cars shoulder people aside instead of passing through them
+  nudgeAside(vehicle, dt) {
+    const r = vehicle.radius + 0.45;
+    for (const ped of this.hitTargets()) {
+      if (ped.dead || ped.inVehicle) continue;
+      const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
+      if (d >= r || d < 1e-4) continue;
+      const push = Math.min(r - d, 3.5 * dt);
+      ped.pos.x += (ped.pos.x - vehicle.pos.x) / d * push;
+      ped.pos.z += (ped.pos.z - vehicle.pos.z) / d * push;
+    }
+    const pl = this.game.player;
+    if (!pl.vehicle && !pl.dead) {
+      const d = dist2d(pl.pos.x, pl.pos.z, vehicle.pos.x, vehicle.pos.z);
+      if (d < r && d > 1e-4) {
+        const push = Math.min(r - d, 3.5 * dt);
+        pl.pos.x += (pl.pos.x - vehicle.pos.x) / d * push;
+        pl.pos.z += (pl.pos.z - vehicle.pos.z) / d * push;
       }
     }
   }

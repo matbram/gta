@@ -74,6 +74,7 @@ export class Vehicle {
     this.wheelR = built.wheelR;
     this.headMat = built.headMat;
     this.tailMat = built.tailMat;
+    this.reverseMat = built.reverseMat ?? null;
     if (built.lightbarR) { this.lightbarR = built.lightbarR; this.lightbarB = built.lightbarB; }
     this.scene.add(this.group);
   }
@@ -101,12 +102,17 @@ export class Vehicle {
     // engine / brakes
     const top = S.maxSpeed * this.maxHealthSpeedFactor * (this.chaseBoost || 1);
     if (control.throttle > 0) {
-      const t = control.throttle * S.accel * (1 - clamp(vf / top, 0, 1) * 0.75);
-      vf += t * dt;
+      // torque curve: punchy launch that tapers off toward the top end
+      const r = clamp(vf / top, 0, 1);
+      const torque = S.accel * (1.35 - 0.5 * r - 0.6 * r * r);
+      const nvf = vf + control.throttle * torque * dt;
+      vf = nvf > top ? Math.max(vf, top) : nvf;   // engine can't push past top
     } else if (control.throttle < 0) {
       if (vf > 0.5) vf += control.throttle * S.accel * 2.2 * dt;         // braking
       else vf = Math.max(vf + control.throttle * S.accel * 0.7 * dt, -top * 0.3); // reverse
     }
+    this.braking = control.throttle < -0.05 && vf > 0.6;
+    this.reversing = vf < -0.4;
 
     // drag + rolling resistance
     vf -= vf * 0.012 * dt * 60;
@@ -130,6 +136,14 @@ export class Vehicle {
     this.vel.y = nfz * vf + nfx * vl * (control.handbrake ? 1 : 0.55);
     this.speed = vf;
     this.lateral = vl;
+
+    // 3-gear feel for the engine note: rpm climbs within a gear, drops on shift
+    const ratio = clamp(Math.abs(vf) / top, 0, 1);
+    const g3 = ratio < 0.32 ? 0 : ratio < 0.64 ? 1 : 2;
+    const lo = g3 === 0 ? 0 : g3 === 1 ? 0.32 : 0.64;
+    const hi = g3 === 0 ? 0.32 : g3 === 1 ? 0.64 : 1.0001;
+    this.gear = g3;
+    this.rpm = (ratio - lo) / (hi - lo);
 
     // integrate (substepped so fast cars can't tunnel through thin poles)
     const steps = Math.min(4, Math.max(1, Math.ceil((this.vel.length() * dt) / 1.5)));
@@ -228,13 +242,22 @@ export class Vehicle {
     for (const w of this.wheels) w.rotation.x += spin;
     const steer = this.steerVis * (this.type === 'moto' ? 0.5 : 0.45);
     for (const p of this.frontPivots) p.rotation.y = steer;
+    this.updateLightState();
+  }
+
+  updateLightState() {
+    if (!this.headMat) return;
+    // alarm flash overrides; brake tails stack on top of night tails
+    const flash = this.alarmT > 0 && Math.floor(this.alarmT * 2.5) % 2 === 0;
+    this.headMat.emissiveIntensity = (this.lightsOn || flash) ? 1.4 : 0;
+    this.tailMat.emissiveIntensity =
+      (this.braking ? 1.9 : 0) + ((this.lightsOn || flash) ? 0.9 : 0);
+    if (this.reverseMat) this.reverseMat.emissiveIntensity = this.reversing ? 1.5 : 0;
   }
 
   setNightLights(on) {
-    if (!this.headMat) return;
     this.lightsOn = on;
-    this.headMat.emissiveIntensity = on ? 1.4 : 0;
-    this.tailMat.emissiveIntensity = on ? 0.9 : 0;
+    this.updateLightState();
   }
 
   flashSiren(t) {

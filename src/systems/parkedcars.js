@@ -57,6 +57,9 @@ export class ParkedCars {
       const type = TYPES[rand2i(slot.id, 7, game.city.seed) * TYPES.length | 0];
       const v = game.vehicles.spawn(type, slot.x, slot.z, slot.heading + (rand2i(slot.id, 3, 1) < 0.5 ? 0 : Math.PI));
       v.parked = true;
+      // some owners lock up; a few of those cars have alarms
+      v.locked = type !== 'moto' && rand2i(slot.id, 11, game.city.seed) < 0.35;
+      v.alarmed = v.locked && rand2i(slot.id, 13, game.city.seed) < 0.25;
       this.active.set(slot.id, v);
     }
   }

@@ -24,6 +24,10 @@ export class Hud {
       radioToast: document.querySelector('#radiotoast span'),
       timerBox: $('timerbox'), timerText: document.querySelector('#timerbox span'),
       crosshair: $('crosshair'), vignette: $('vignette'), fader: $('fader'),
+      speedo: $('speedo'),
+      speedoKmh: document.querySelector('#speedo .kmh'),
+      speedoBar: document.querySelector('#speedo .sbar i'),
+      ticks: $('moneyticks'),
     };
     this.shownMoney = 0;
     this.damageFlashT = 0;
@@ -36,13 +40,19 @@ export class Hud {
     this.lastStars = -1;
   }
 
-  show() { this.el.hud.classList.remove('hidden'); }
+  show() { this.el.hud.classList.remove('hidden'); this._tickBase = null; }
   hide() { this.el.hud.classList.add('hidden'); }
 
   update(dt, game) {
     const p = game.player;
     // money counts toward the real value
     const target = game.state.money;
+    // floating +$/-$ ticks on every change (baseline set on first frame)
+    if (this._tickBase == null) this._tickBase = target;
+    else if (target !== this._tickBase) {
+      this.moneyTick(target - this._tickBase);
+      this._tickBase = target;
+    }
     if (this.shownMoney !== target) {
       const diff = target - this.shownMoney;
       const step = Math.max(1, Math.abs(diff) * dt * 6);
@@ -77,6 +87,22 @@ export class Hud {
     }
     this.el.vignette.style.opacity = vig;
 
+    // speedometer while driving
+    const veh = p.vehicle;
+    if (veh) {
+      this.el.speedo.classList.remove('hidden');
+      const kmh = Math.round(Math.abs(veh.speed) * 3.6);
+      if (kmh !== this._kmh) {
+        this._kmh = kmh;
+        this.el.speedoKmh.textContent = kmh;
+        this.el.speedoBar.style.width =
+          `${clamp(Math.abs(veh.speed) / veh.spec.maxSpeed, 0, 1) * 100}%`;
+      }
+    } else if (this._kmh != null) {
+      this._kmh = null;
+      this.el.speedo.classList.add('hidden');
+    }
+
     // stamina shown as the blue bar while it's not full
     if (p.stamina < 0.98 && !p.vehicle) {
       this.el.breath.classList.remove('hidden');
@@ -96,6 +122,17 @@ export class Hud {
       this.centerTimer -= dt;
       if (this.centerTimer <= 0) { this.el.center.style.opacity = 0; this.el.centerSub.style.opacity = 0; }
     }
+  }
+
+  moneyTick(diff) {
+    const box = this.el.ticks;
+    if (!box) return;
+    const d = document.createElement('div');
+    d.className = 'mtick ' + (diff > 0 ? 'gain' : 'loss');
+    d.textContent = (diff > 0 ? '+' : '−') + formatMoney(Math.abs(diff));
+    box.appendChild(d);
+    while (box.children.length > 4) box.firstChild.remove();
+    setTimeout(() => d.remove(), 1700);
   }
 
   setWeapon(icon, name, ammoText) {

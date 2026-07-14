@@ -158,10 +158,11 @@ function bodyGeometry(type, W, L, H, wheelR) {
     depth: W - bev * 2, bevelEnabled: true, curveSegments: 7,
     bevelThickness: bev, bevelSize: bev, bevelSegments: 3, steps: 1,
   });
-  // shape space: x = length, y = height, extrusion z = width. Rotate so
-  // length runs along +Z and width along X, centred.
+  // shape space: x = length (+x is the nose), y = height, extrusion z =
+  // width. Rotate −90° so the nose lands on +Z, matching the drive
+  // direction (+90° put every car in reverse — the playtest bug).
   geo.translate(0, 0, -(W - bev * 2) / 2);
-  geo.rotateY(Math.PI / 2);
+  geo.rotateY(-Math.PI / 2);
   geo.computeVertexNormals();
   return geo;
 }
@@ -183,8 +184,36 @@ function glassGeometry(type, W, L, H) {
     bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1, steps: 1,
   });
   geo.translate(0, 0, -W * 0.4);
-  geo.rotateY(Math.PI / 2);
+  geo.rotateY(-Math.PI / 2);
   return geo;
+}
+
+// windshield + front side windows: brighter panes so glass reads from
+// outside (the greenhouse block alone was too subtle)
+const windowMat = new THREE.MeshLambertMaterial({
+  color: 0x7e97a8, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+});
+SHARED_MATS.add(windowMat);
+
+function addWindows(out, g, type, W, L, H) {
+  const P = PROFILES[type] ?? PROFILES.sedan;
+  const wsMat = windowMat;
+  const own = (m) => { (out._ownGeos = out._ownGeos || new Set()).add(m.geometry); return m; };
+  // windshield: quad along the rake from windshield base to roof front
+  const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
+  const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
+  const rakeLen = Math.hypot(zA - zB, yA - yB);
+  const ws = own(new THREE.Mesh(new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92), wsMat));
+  ws.position.set(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
+  ws.rotation.x = -Math.atan2(zA - zB, yB - yA);
+  g.add(ws);
+  // front side windows
+  for (const sx of [-1, 1]) {
+    const win = own(new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7), wsMat));
+    win.position.set(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
+    win.rotation.y = sx * Math.PI / 2;
+    g.add(win);
+  }
 }
 
 // ---------------------------------------------------------------- factory
@@ -216,9 +245,10 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   g.add(body);
   out.bodyMesh = body;
 
-  // greenhouse
+  // greenhouse + readable windshield/side panes
   const glass = new THREE.Mesh(glassGeometry(type, W, L, H), glassMat);
   g.add(glass);
+  addWindows(out, g, type, W, L, H);
 
   // wheels (front wheels wrapped in steering pivots)
   const P = PROFILES[type] ?? PROFILES.sedan;
@@ -266,18 +296,23 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
     (out._ownGeos = out._ownGeos || new Set()).add(m.geometry);
   }
 
-  // head/tail lights
+  // head/tail lights + brake-bright tails + white reverse lamps
   out.headMat = new THREE.MeshLambertMaterial({ color: 0xd8d8c8, emissive: 0xfff2cc, emissiveIntensity: 0 });
   out.tailMat = new THREE.MeshLambertMaterial({ color: 0x551512, emissive: 0xff2a1a, emissiveIntensity: 0 });
+  out.reverseMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d0, emissive: 0xffffff, emissiveIntensity: 0 });
   const noseY = H * (PROFILES[type]?.nose ?? 0.45) * 0.82;
+  const tailY = H * (PROFILES[type]?.tailTop ?? 0.46) - 0.1;
   for (const sx of [-1, 1]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.13, 0.07), out.headMat);
     hl.position.set(sx * (W / 2 - 0.32), noseY + 0.12, L / 2 + 0.01);
     g.add(hl);
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.07), out.tailMat);
-    tl.position.set(sx * (W / 2 - 0.3), H * (PROFILES[type]?.tailTop ?? 0.46) - 0.1, -L / 2 - 0.01);
+    tl.position.set(sx * (W / 2 - 0.3), tailY, -L / 2 - 0.01);
     g.add(tl);
-    (out._ownGeos = out._ownGeos || new Set()).add(hl.geometry).add(tl.geometry);
+    const rv = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.06), out.reverseMat);
+    rv.position.set(sx * (W / 2 - 0.56), tailY, -L / 2 - 0.01);
+    g.add(rv);
+    (out._ownGeos = out._ownGeos || new Set()).add(hl.geometry).add(tl.geometry).add(rv.geometry);
   }
 
   addExtras(out, g, type, spec, W, L, H, wheelR);
