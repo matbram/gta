@@ -415,7 +415,10 @@ const ACCENT_DEFAULT = {
 
 const texCache = new Map();   // hash → { tex, mat, uses, last }
 let cacheTick = 0;
-const CACHE_MAX = 90;         // looks in active use stay; idle looks evict LRU
+const CACHE_MAX = 280;        // looks in active use stay; idle looks evict LRU
+                              // (must exceed the ~200-ped street population,
+                              // or the cache thrashes and every spawn repaints
+                              // + re-uploads a canvas texture)
 
 function evictIdle() {
   if (texCache.size <= CACHE_MAX) return;

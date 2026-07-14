@@ -6,8 +6,9 @@ import { enrichLook } from '../entities/humanoid.js';
 import { dist2d, distSq2d, clamp } from '../core/mathutil.js';
 import { ARCHETYPES, pickArchetype, makePersonality } from './npcmind.js';
 
-const TARGET_PEDS = 60;
-const SPAWN_MIN = 55, SPAWN_MAX = 150, DESPAWN = 230;
+const TARGET_PEDS = 200;
+const SPAWN_MIN = 55, SPAWN_MAX = 240, DESPAWN = 300;
+const MAX_CORPSES = 15;   // lingering bodies never eat the live population
 
 // coarse neighbor grid: cell size well above 2× the separation radius so
 // same-cell + adjacent-cell checks cover every possible overlap
@@ -96,12 +97,16 @@ export class PedSystem {
     const want = Math.round(TARGET_PEDS * clamp(density + 0.25, 0.3, 1) * nightThin * rainThin
       * (game.gfx?.density ?? 1));
     if (this.peds.length < want && this.spawnTimer <= 0) {
-      // burst-fill when the street is under half strength
-      this.spawnTimer = this.peds.length < want * 0.5 ? 0.08 : 0.22;
-      this.trySpawn(p);
+      // burst-fill when the street is under half strength — several per
+      // tick so a 200-strong crowd assembles in seconds, not half a minute
+      const burst = this.peds.length < want * 0.5;
+      this.spawnTimer = burst ? 0.08 : 0.22;
+      const n = burst ? 3 : 1;
+      for (let i = 0; i < n && this.peds.length < want; i++) this.trySpawn(p);
     }
 
     // update + cleanup (reverse-index so splices don't need a copy)
+    let deadCount = 0, oldestCorpse = null;
     for (let i = this.peds.length - 1; i >= 0; i--) {
       const ped = this.peds[i];
       ped.update(dt, game);
@@ -109,7 +114,15 @@ export class PedSystem {
       if (d > DESPAWN || (ped.dead && ped.removeTimer > 22)) {
         ped.dispose();
         this.peds.splice(i, 1);
+      } else if (ped.dead) {
+        deadCount++;
+        if (!oldestCorpse || ped.removeTimer > oldestCorpse.removeTimer) oldestCorpse = ped;
       }
+    }
+    // over the corpse cap: fade the oldest early (one per frame is plenty)
+    if (deadCount > MAX_CORPSES && oldestCorpse) {
+      oldestCorpse.dispose();
+      this.peds.splice(this.peds.indexOf(oldestCorpse), 1);
     }
 
     this.buildGrid();
