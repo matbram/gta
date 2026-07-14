@@ -48,6 +48,26 @@ function post(pathname, body) {
   });
 }
 
+function get(pathname) {
+  return new Promise((resolve, reject) => {
+    const req = https.request('https://api.elevenlabs.io' + pathname, {
+      method: 'GET',
+      headers: { 'xi-api-key': KEY },
+      timeout: 60000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, body: buf.toString() });
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.end();
+  });
+}
+
 const manifest = { sfx: {}, voice: {}, music: {} };
 function manifestPath(kind, name) {
   return `assets/audio/${kind}/${name}.mp3`;
@@ -138,7 +158,7 @@ const SFX = [
 // Using two default ElevenLabs voices for variety.
 const VOICE_A = '21m00Tcm4TlvDq8ikWAM';   // female
 const VOICE_B = 'pNInz6obpgDQGcFmaJgB';   // male
-const VOICE_M = 'TxGEqnHWrfWFTfGW9XjX';   // Marco: deep male
+const VOICE_M = 'iglCbBShWrdr0JEW8MLx';   // Marco ("Marcus" voice)
 const BARKS = [
   // civilians — all clean
   ['bark_hey', 'Hey! Watch where you\'re going!', VOICE_B],
@@ -210,6 +230,22 @@ const MUSIC = [
 
 // ------------------------------------------------------------------ run
 async function run() {
+  // sanity check the configured Marco voice without spending any quota
+  if (args.includes('--marco-check')) {
+    for (const id of [VOICE_M, VOICE_M.replace(/^ID/, '')]) {
+      const r = await get(`/v1/voices/${id}`);
+      let name = '';
+      try { name = JSON.parse(r.body).name ?? ''; } catch {}
+      console.log(`voice ${id}: HTTP ${r.status}${name ? ` (${name})` : ''}${r.status !== 200 ? ' ' + r.body.slice(0, 160) : ''}`);
+    }
+    const sub = await get('/v1/user/subscription');
+    try {
+      const s = JSON.parse(sub.body);
+      console.log(`quota: ${s.character_count}/${s.character_limit} chars used (${s.tier})`);
+    } catch { console.log('subscription check:', sub.status); }
+    return;
+  }
+  if (args.includes('--marco-only')) { await genMarco(); return finishManifest(); }
   if (want('--sfx')) { console.log('\n[SFX]'); for (const [n, t, d, o] of SFX) await genSound(n, t, d, o || {}); }
   if (want('--voice')) {
     console.log('\n[VOICE]');
@@ -217,7 +253,10 @@ async function run() {
     await genMarco();
   }
   if (want('--music')) { console.log('\n[MUSIC]'); for (const [n, p, l] of MUSIC) await genMusic(n, p, l); }
+  finishManifest();
+}
 
+function finishManifest() {
   // merge into existing manifest if present
   const mfPath = path.join(OUT, 'manifest.json');
   let existing = {};
