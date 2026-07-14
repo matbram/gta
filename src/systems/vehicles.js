@@ -341,6 +341,22 @@ export class VehicleSystem {
       }
     }
 
+    // blood tracking: rolling through a fresh pool leaves dark tire
+    // streaks for the next stretch of road
+    this._bloodScanT = (this._bloodScanT ?? 0) - dt;
+    const bloodScan = this._bloodScanT <= 0;
+    if (bloodScan) this._bloodScanT = 0.12;
+    const blood = game.gore?.blood;
+    for (const v of vs) {
+      if (Math.abs(v.speed) < 2) continue;
+      if (bloodScan && blood?.freshPoolAt?.(v.pos.x, v.pos.z)) v._bloodCharge = 24;
+      if (v._bloodCharge > 0 && game.time - (v._lastStreakT ?? -1) > 0.07) {
+        v._lastStreakT = game.time;
+        v._bloodCharge--;
+        blood?.tireStreak?.(v.pos.x, v.pos.z, v.heading);
+      }
+    }
+
     // run-over checks: vehicles vs pedestrians & player
     for (const v of vs) {
       const sp = Math.hypot(v.vel.x, v.vel.y);
@@ -354,7 +370,7 @@ export class VehicleSystem {
         if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
             game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
           v._lastPlayerHitT = game.time;
-          player.damage(sp * 3.2, 'runover');
+          player.damage(sp * 3.2, 'runover', v.pos);
           player.vel.x += v.vel.x * 0.6;
           player.vel.z += v.vel.y * 0.6;
           player.vel.y = 3;

@@ -67,7 +67,7 @@ export class Player {
     this.syncRig();
   }
 
-  damage(amount, source = 'unknown') {
+  damage(amount, source = 'unknown', from = null) {
     if (this.dead) return;
     if (this.iframeT > 0 && source !== 'fall' && source !== 'explosion') return;   // dodge i-frames
     if (this.armor > 0) {
@@ -76,7 +76,7 @@ export class Player {
       amount -= absorbed;
     }
     this.health -= amount;
-    this.onDamaged?.(amount, source);
+    this.onDamaged?.(amount, source, from);
     if (this.health <= 0) {
       this.health = 0;
       this.dead = true;
@@ -211,6 +211,14 @@ export class Player {
         const surface = dist === 'beach' ? 'sand'
           : (dist === 'park' || dist === 'farm' || dist === 'heights') ? 'grass' : 'concrete';
         this._audio?.footstep(this.speed2d > 4, surface);
+        // stepping through fresh blood tracks it for the next several strides
+        const blood = this._gore?.blood;
+        if (blood?.freshPoolAt?.(this.pos.x, this.pos.z)) this._bloodCharge = 9;
+        if (this._bloodCharge > 0 && blood?.footprint) {
+          this._bloodStep = !this._bloodStep;
+          blood.footprint(this.pos.x, this.pos.z, this.heading, this._bloodStep ? 1 : -1);
+          this._bloodCharge--;
+        }
       }
     }
   }

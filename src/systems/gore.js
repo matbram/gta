@@ -155,6 +155,74 @@ export class BloodSystem {
     }
   }
 
+  // fresh enough pool to track blood out of?
+  freshPoolAt(x, z) {
+    for (const d of this.decals) {
+      if (d.t < 30 &&
+          Math.abs(d.mesh.position.x - x) < 1.0 &&
+          Math.abs(d.mesh.position.z - z) < 1.0) return true;
+    }
+    return false;
+  }
+
+  // small alternating footprints tracked out of a pool (instanced ring)
+  footprint(x, z, heading, side) {
+    if (!this._fpPool) {
+      const geo = new THREE.PlaneGeometry(0.11, 0.27);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x6a0806, transparent: true, opacity: 0.55, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2,
+      });
+      this._fpPool = new THREE.InstancedMesh(geo, mat, 120);
+      this._fpPool.frustumCulled = false;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < 120; i++) this._fpPool.setMatrixAt(i, zero);
+      this._fpIdx = 0;
+      this._fpDummy = new THREE.Object3D();
+      this.game.scene.add(this._fpPool);
+    }
+    const g = this.game.city.groundHeight(x, z);
+    const px = Math.cos(heading) * 0.13 * side, pz = -Math.sin(heading) * 0.13 * side;
+    this._fpDummy.position.set(x + px, g + 0.028, z + pz);
+    this._fpDummy.rotation.set(0, heading, 0);
+    this._fpDummy.scale.setScalar(1);
+    this._fpDummy.updateMatrix();
+    this._fpPool.setMatrixAt(this._fpIdx % 120, this._fpDummy.matrix);
+    this._fpPool.instanceMatrix.needsUpdate = true;
+    this._fpIdx++;
+  }
+
+  // dark red tire streaks after driving through a pool
+  tireStreak(x, z, heading) {
+    if (!this._tsPool) {
+      const geo = new THREE.PlaneGeometry(0.26, 1.1);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x5c0a08, transparent: true, opacity: 0.42, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2,
+      });
+      this._tsPool = new THREE.InstancedMesh(geo, mat, 180);
+      this._tsPool.frustumCulled = false;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < 180; i++) this._tsPool.setMatrixAt(i, zero);
+      this._tsIdx = 0;
+      this._tsDummy = new THREE.Object3D();
+      this.game.scene.add(this._tsPool);
+    }
+    const g = this.game.city.groundHeight(x, z);
+    const rx = Math.cos(heading) * 0.72, rz = -Math.sin(heading) * 0.72;
+    for (const s of [-1, 1]) {
+      this._tsDummy.position.set(x + rx * s, g + 0.027, z + rz * s);
+      this._tsDummy.rotation.set(0, heading, 0);
+      this._tsDummy.scale.setScalar(1);
+      this._tsDummy.updateMatrix();
+      this._tsPool.setMatrixAt(this._tsIdx % 180, this._tsDummy.matrix);
+      this._tsIdx++;
+    }
+    this._tsPool.instanceMatrix.needsUpdate = true;
+  }
+
   update(dt) {
     for (const d of this.decals) {
       d.t += dt;

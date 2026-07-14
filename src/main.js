@@ -248,8 +248,10 @@ class Game {
     this.setMode('play');
     // death / arrest hooks
     this.player.onDied = () => this.beginDeathFlow('wasted');
-    this.player.onDamaged = () => this.hud.damageFlash();
+    this.player.onDamaged = (amount, source, from) => this.hud.damageFlash(
+      from ? Math.atan2(from.x - this.player.pos.x, from.z - this.player.pos.z) : null);
     this.player._audio = this.audio;
+    this.player._gore = this.gore;
     this.deathFlow = null;
   }
 

@@ -24,6 +24,7 @@ export class Hud {
       radioToast: document.querySelector('#radiotoast span'),
       timerBox: $('timerbox'), timerText: document.querySelector('#timerbox span'),
       crosshair: $('crosshair'), vignette: $('vignette'), fader: $('fader'),
+      dmgdir: $('dmgdir'),
       speedo: $('speedo'),
       speedoKmh: document.querySelector('#speedo .kmh'),
       speedoBar: document.querySelector('#speedo .sbar i'),
@@ -76,6 +77,18 @@ export class Hud {
       let html = '';
       for (let i = 0; i < 6; i++) html += `<span class="${i < stars ? 'on' : 'off'}">★</span>`;
       this.el.stars.innerHTML = html;
+    }
+
+    // directional damage arc: rotates to face where the hit came from
+    if (this._dmgT > 0) {
+      this._dmgT -= dt;
+      const yaw = game.cameraRig?.yaw ?? 0;
+      // screen-up is the camera's forward (yaw + π in world terms)
+      const rel = (this._dmgAngle ?? 0) - (yaw + Math.PI);
+      this.el.dmgdir.style.transform = `rotate(${-rel}rad)`;
+      this.el.dmgdir.style.opacity = Math.min(1, this._dmgT * 2.2);
+    } else if (this.el.dmgdir.style.opacity !== '0') {
+      this.el.dmgdir.style.opacity = 0;
     }
 
     // vignette when hurt + brief flash on damage
@@ -198,7 +211,13 @@ export class Hud {
     this.el.timerText.textContent = formatTimer(seconds);
   }
 
-  damageFlash() { this.damageFlashT = 0.28; }
+  // worldAngle: direction the hit came FROM (atan2 toward the attacker);
+  // shown as a red arc on that side of the screen
+  damageFlash(worldAngle = null) {
+    this.damageFlashT = 0.28;
+    this._dmgAngle = worldAngle;
+    this._dmgT = worldAngle != null ? 0.75 : 0;
+  }
 
   setCrosshair(visible, hit = false, bloom = 0) {
     this.el.crosshair.style.display = visible ? 'block' : 'none';

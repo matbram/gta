@@ -186,6 +186,19 @@ export class Ped {
       this.die(game, impact);
       return;
     }
+    // a hard non-fatal hit can leave them wounded on the ground, crawling
+    if (!this.wounded && !this.isCop && this.health < 12 &&
+        (source === 'gun' || source === 'melee') && Math.random() < 0.55) {
+      this.wounded = true;
+      this.state = 'wounded';
+      this.woundT = 0;
+      this.stateT = 0;
+      this.panicked = true;
+      this.fleeFrom.x = game.player.pos.x; this.fleeFrom.z = game.player.pos.z;
+      game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
+      game.dispatch?.reportDeath?.(this);   // medics respond to the wounded too
+      return;
+    }
     // flinch on non-fatal hits (skinned rig)
     this.rig.flinch?.();
     this.panic(game.player.pos.x, game.player.pos.z, source === 'melee' || source === 'gun');
@@ -404,6 +417,22 @@ export class Ped {
         }
         break;
       }
+      case 'wounded': {
+        // dragging themselves away from the shooter, bleeding
+        this.woundT = (this.woundT ?? 0) + dt;
+        const wdx = this.pos.x - this.fleeFrom.x, wdz = this.pos.z - this.fleeFrom.z;
+        const wl = Math.hypot(wdx, wdz) || 1;
+        this.moveToward(this.pos.x + (wdx / wl) * 6, this.pos.z + (wdz / wl) * 6, 0.5, dt);
+        this.rig.setAnim('kneel');
+        this._dripT = (this._dripT ?? 0) - dt;
+        if (this._dripT <= 0) {
+          this._dripT = 1.6;
+          game.particles?.blood(this.pos.x, this.pos.y + 0.4, this.pos.z, 2);
+          if (Math.random() < 0.4) game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
+        }
+        if (this.woundT > 30) this.die(game);
+        break;
+      }
       case 'fight': {
         // brave ped charges the player and swings
         const d = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
@@ -420,7 +449,7 @@ export class Ped {
             this.attackCooldown = 1.1;
             this.rig.startPunch();
             if (!player.vehicle) {
-              player.damage(6, 'ped');
+              player.damage(6, 'ped', this.pos);
               game.audio?.punch();
             }
           }

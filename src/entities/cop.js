@@ -144,7 +144,7 @@ export class Cop extends Ped {
     if (Math.random() < chance) {
       if (player.vehicle) player.vehicle.applyDamage(6, 'copfire');
       else {
-        player.damage(this.tough ? 12 : 8, 'cop');
+        player.damage(this.tough ? 12 : 8, 'cop', this.pos);
         game.particles?.blood(player.pos.x, player.pos.y + 1.1, player.pos.z, 3);
       }
     } else {

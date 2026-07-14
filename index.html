@@ -79,6 +79,12 @@
   #speedo .sbar{width:118px;height:5px;background:rgba(0,0,0,.55);margin-top:4px;border-radius:2px;overflow:hidden}
   #speedo .sbar>i{display:block;height:100%;width:0;background:var(--hud-green)}
 
+  #dmgdir{position:absolute;left:50%;top:50%;width:150vmax;height:150vmax;margin:-75vmax 0 0 -75vmax;
+    pointer-events:none;opacity:0;transition:opacity .12s;border-radius:50%;
+    background:radial-gradient(closest-side, rgba(180,20,12,0) 55%, rgba(180,20,12,0) 62%, rgba(190,24,14,.5) 88%, rgba(190,24,14,0) 100%);
+    -webkit-mask-image:conic-gradient(rgba(0,0,0,1) 0 40deg, rgba(0,0,0,0) 75deg 285deg, rgba(0,0,0,1) 320deg 360deg);
+    mask-image:conic-gradient(rgba(0,0,0,1) 0 40deg, rgba(0,0,0,0) 75deg 285deg, rgba(0,0,0,1) 320deg 360deg)}
+
   #moneyticks{position:relative;height:0}
   #moneyticks .mtick{position:absolute;right:0;top:-6px;font:800 17px 'Arial Black',Arial;
     text-shadow:var(--hud-shadow);animation:mtick 1.6s ease-out forwards}
@@ -198,6 +204,7 @@
     <div id="lockon" class="hidden"></div>
     <div id="weaponwheel" class="hidden"></div>
     <div id="vignette"></div>
+    <div id="dmgdir"></div>
   </div>
 
   <div id="fader"></div>

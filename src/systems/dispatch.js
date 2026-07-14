@@ -65,7 +65,7 @@ export class Dispatch {
     // prune stale death reports
     for (const r of [...this.deathReports]) {
       r.t += dt;
-      if (r.t > 50 || !r.ped.dead) this.deathReports.splice(this.deathReports.indexOf(r), 1);
+      if (r.t > 50 || (!r.ped.dead && !r.ped.wounded)) this.deathReports.splice(this.deathReports.indexOf(r), 1);
     }
 
     this.runFireUnit(dt);
@@ -251,6 +251,18 @@ export class Dispatch {
         m.syncRig();
       }
       if (near && unit.workT > 5.5) {
+        // the wounded are always stabilized — back on their feet, shaken
+        if (target.ped.wounded && !target.ped.dead) {
+          const p = target.ped;
+          p.wounded = false;
+          p.health = 30;
+          p.state = 'flee';
+          p.panicked = true;
+          p.stateT = 0;
+          game.hud?.showToast('The medics patched someone up.', 3);
+          this.deathReports.splice(this.deathReports.indexOf(target), 1);
+          unit.state = 'return';
+        } else
         // sometimes they walk away from the light
         if (Math.random() < 0.35 && target.ped.rig && !target.ped.isCop) {
           const p = target.ped;
