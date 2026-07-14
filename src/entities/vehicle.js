@@ -85,6 +85,7 @@ export class Vehicle {
     this.flipped = false;              // at rest on the roof
     this.rightT = 0;                   // player auto-right countdown
     this.onFlipped = null;             // set by VehicleSystem
+    this.wheelPull = 0;                // late-game busted-axle steering drift
 
     this.buildMesh(colorOverride);
   }
@@ -110,6 +111,8 @@ export class Vehicle {
     this.tailMat = built.tailMat;
     this.reverseMat = built.reverseMat ?? null;
     if (built.lightbarR) { this.lightbarR = built.lightbarR; this.lightbarB = built.lightbarB; }
+    this.parts = built.parts ?? {};
+    this.partState = {};   // per part: undefined attached, 1 loose, 2 gone
     this.scene.add(this.group);
   }
 
@@ -180,6 +183,10 @@ export class Vehicle {
       (control.handbrake ? 1.5 : 1);
     this.heading += this.angKick * dt;
     this.angKick *= Math.max(0, 1 - dt * 3.3);
+    // a battered chassis pulls to one side (set once at health < 15)
+    if (this.wheelPull && !this.airborne) {
+      this.heading += this.wheelPull * clamp(Math.abs(vf) / 10, 0, 1) * dt;
+    }
     this.steerVis = damp(this.steerVis, control.steer, 10, dt);
 
     // recompose velocity
@@ -373,6 +380,16 @@ export class Vehicle {
       this.health = 0;
       this.explode(cause);
     }
+  }
+
+  // the greenhouse pane hides = glass gone (glassBurst FX comes from the caller)
+  shatterGlass() {
+    if (this.partState.windows) return false;
+    const w = this.parts?.windows;
+    if (!w) return false;
+    w.visible = false;
+    this.partState.windows = 2;
+    return true;
   }
 
   drown() {

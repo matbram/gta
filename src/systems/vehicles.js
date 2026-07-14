@@ -18,6 +18,84 @@ export class VehicleSystem {
     this.night = 0;
     this.playerControl = { throttle: 0, steer: 0, handbrake: false };
     this.exitRequested = false;
+    this.partDebris = [];   // knocked-off bumpers/mirrors tumbling on the ground
+  }
+
+  // classify an impact side (normal points INTO v) and knock the matching
+  // panel loose, then off. Reuses crashKick's fwd/side decomposition.
+  partDamage(v, nx, nz, impact) {
+    if (!v.parts) return;
+    const s = Math.sin(v.heading), c = Math.cos(v.heading);
+    const fwd = nx * s + nz * c;
+    const side = nx * c - nz * s;
+    const bump = (key) => {
+      const st = v.partState[key] ?? 0;
+      if (st >= 2 || !v.parts[key]) return;
+      if (st === 0 && impact > 10) {
+        v.partState[key] = 1;                       // loose: drop + tilt
+        v.parts[key].position.y -= 0.06;
+        v.parts[key].rotation.z += (Math.random() - 0.5) * 0.3;
+      }
+      if ((st === 1 && impact > 8) || impact > 16) this.detachPart(v, key, nx, nz);
+    };
+    if (fwd > 0.6) { bump('bumperF'); }
+    else if (fwd < -0.6) { bump('bumperR'); }
+    else if (impact > 12) { this.detachPart(v, side > 0 ? 'mirrorR' : 'mirrorL', nx, nz); }
+    if (impact > 12 && v.shatterGlass()) this.game.particles?.glassBurst(v.pos.x, v.pos.y + 1.1, v.pos.z);
+  }
+
+  // reparent a part to the world and let it tumble to the ground, then fade
+  detachPart(v, key, nx = 0, nz = 0) {
+    const mesh = v.parts?.[key];
+    if (!mesh || (v.partState[key] ?? 0) >= 2) return;
+    v.partState[key] = 2;
+    // a plate rides off with its bumper
+    if (key === 'bumperF' && v.parts.plateF) this.detachPart(v, 'plateF', nx, nz);
+    if (key === 'bumperR' && v.parts.plateR) this.detachPart(v, 'plateR', nx, nz);
+    const wp = new THREE.Vector3(), wq = new THREE.Quaternion();
+    mesh.getWorldPosition(wp);
+    mesh.getWorldQuaternion(wq);
+    v.group.remove(mesh);
+    this.game.scene.add(mesh);
+    mesh.position.copy(wp);
+    mesh.quaternion.copy(wq);
+    if (this.partDebris.length >= 12) {
+      const old = this.partDebris.shift();
+      old.mesh.removeFromParent();
+    }
+    this.partDebris.push({
+      mesh, t: 0,
+      vx: v.vel.x * 0.8 + nx * 3 + (Math.random() - 0.5) * 2,
+      vy: 2.5 + Math.random() * 2,
+      vz: v.vel.y * 0.8 + nz * 3 + (Math.random() - 0.5) * 2,
+      spinX: (Math.random() - 0.5) * 10, spinY: (Math.random() - 0.5) * 10,
+    });
+    this.game.particles?.sparks(wp.x, wp.y, wp.z, 4);
+    this.game.audio?.crash?.(5, wp.x, wp.z);
+  }
+
+  updatePartDebris(dt) {
+    for (let i = this.partDebris.length - 1; i >= 0; i--) {
+      const d = this.partDebris[i];
+      d.t += dt;
+      d.vy -= 18 * dt;
+      d.mesh.position.x += d.vx * dt;
+      d.mesh.position.y += d.vy * dt;
+      d.mesh.position.z += d.vz * dt;
+      const gy = this.game.city.groundHeight(d.mesh.position.x, d.mesh.position.z) + 0.05;
+      if (d.mesh.position.y <= gy) {
+        d.mesh.position.y = gy;
+        d.vy *= -0.3; d.vx *= 0.6; d.vz *= 0.6;
+        d.spinX *= 0.5; d.spinY *= 0.5;
+      }
+      d.mesh.rotation.x += d.spinX * dt;
+      d.mesh.rotation.y += d.spinY * dt;
+      if (d.t > 4) {
+        const k = Math.max(0, 1 - (d.t - 4) / 0.3);
+        d.mesh.scale.setScalar(k);
+        if (k <= 0) { d.mesh.removeFromParent(); this.partDebris.splice(i, 1); }
+      }
+    }
   }
 
   spawn(type, x, z, heading = 0, colorOverride = null) {
@@ -72,6 +150,7 @@ export class VehicleSystem {
       // wall hits rock the body; truly violent ones get a little air
       veh.crashKick(-Math.sin(veh.heading), -Math.cos(veh.heading), impact,
         impact > 14 ? 2 : 0);
+      this.partDamage(veh, -Math.sin(veh.heading), -Math.cos(veh.heading), impact);
       if (veh.type === 'moto' && impact > 8 && veh.driver) this.ejectRider(veh, impact);
       if (impact > 7) {
         this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash',
@@ -98,6 +177,9 @@ export class VehicleSystem {
     game.peds?.spectacleAt?.(v.pos.x, v.pos.z, 22);
     game.traffic?.releaseVehicle(v);
     v.aiControlled = false;
+    // roof parts scrape off on the way over
+    for (const k of ['taxiSign', 'lightbar1', 'lightbar2']) this.detachPart(v, k, 0, 0);
+    if (v.shatterGlass()) game.particles?.glassBurst(v.pos.x, v.pos.y + 1.1, v.pos.z);
     if (v.driver === 'player') {
       v.rightT = 4;                       // auto-right after a beat
       game.cameraRig?.addShake(0.6);
@@ -400,6 +482,9 @@ export class VehicleSystem {
                   impact > 10 && ma <= mb ? Math.min(6, impact * 0.22) : 0);
                 b.crashKick(-nx, -nz, impact * (ma / tot),
                   impact > 10 && mb <= ma ? Math.min(6, impact * 0.22) : 0);
+                // the panels take it: the hit normal points a→b
+                this.partDamage(a, nx, nz, impact * (mb / tot));
+                this.partDamage(b, -nx, -nz, impact * (ma / tot));
                 if (a.type === 'moto' && impact > 8 && a.driver) this.ejectRider(a, impact);
                 if (b.type === 'moto' && impact > 8 && b.driver) this.ejectRider(b, impact);
               }
@@ -494,6 +579,8 @@ export class VehicleSystem {
       this.resolvePeopleVsVehicle(v);
     }
 
+    if (this.partDebris.length) this.updatePartDebris(dt);
+
     // damage visuals + explosions
     for (const v of [...vs]) {
       if (v.exploded) {
@@ -505,6 +592,8 @@ export class VehicleSystem {
       if (v.flipped && v.driver == null && !v.dead) {
         v.applyDamage(2 * dt, 'crash', v._lastHitBy ?? 'ai');
       }
+      // a wrecked chassis develops a permanent pull to one side
+      if (v.health < 15 && !v.wheelPull && !v.dead) v.wheelPull = (Math.random() < 0.5 ? -1 : 1) * 0.14;
       if (v.health < 55 && !v.dead) {
         v.smokeTimer -= dt;
         if (v.smokeTimer <= 0) {
@@ -669,6 +758,10 @@ export class VehicleSystem {
     const y = v.pos.y;
     // splash damage — chain explosions inherit the culprit of the first blast
     const culprit = v._lastHitBy === 'player' ? 'player' : 'ai';
+    // the blast blows every loose panel off the charred hulk
+    if (v.parts) for (const k of Object.keys(v.parts)) {
+      if (k !== 'windows') this.detachPart(v, k, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+    }
     this.explodeAt(x, y, z, 8, culprit, v);
     const player = this.game.player;
     if (v.driver === 'player') {

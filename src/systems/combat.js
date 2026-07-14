@@ -578,6 +578,10 @@ export class CombatSystem {
       } else if (hit.type === 'vehicle') {
         hit.target.applyDamage(spec.dmg * 0.55, 'gun', 'player');
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 4);
+        // a round through the greenhouse shatters it
+        if (Math.random() < 0.3 && hit.target.shatterGlass?.()) {
+          game.particles?.glassBurst(hit.point.x, hit.point.y, hit.point.z);
+        }
         if (hit.target.aiControlled) game.traffic?.panic(hit.target);
         anyHit = true;
       }

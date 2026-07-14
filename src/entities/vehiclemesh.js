@@ -288,14 +288,17 @@ function addWindows(out, g, type, W, L, H) {
     for (const p of panes) p.dispose();
     return geo;
   });
-  g.add(new THREE.Mesh(merged, windowMat));
+  const mesh = new THREE.Mesh(merged, windowMat);
+  g.add(mesh);
+  return mesh;
 }
 
 // ---------------------------------------------------------------- factory
 
 export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   const g = new THREE.Group();
-  const out = { group: g, wheels: [], frontPivots: [] };
+  // parts: refs the damage system can knock loose (absent = attached)
+  const out = { group: g, wheels: [], frontPivots: [], parts: {} };
   const W = spec.w, L = spec.l, H = spec.h;
   const wheelR = type === 'moto' ? 0.34 : type === 'bus' || type === 'firetruck' ? 0.46 : 0.37;
   out.wheelR = wheelR;
@@ -319,7 +322,7 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   const glass = new THREE.Mesh(
     cached(glassGeoCache, type, () => glassGeometry(type, W, L, H)), glassMat);
   g.add(glass);
-  addWindows(out, g, type, W, L, H);
+  out.parts.windows = addWindows(out, g, type, W, L, H);
 
   // wheels (front wheels wrapped in steering pivots)
   const P = PROFILES[type] ?? PROFILES.sedan;
@@ -344,7 +347,7 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
     out.wheels.push(tire);
   }
 
-  // bumpers
+  // bumpers (+ plates riding on them) — detachable
   for (const zs of [1, -1]) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.16, 0.14), trimMat);
     b.position.set(0, H * (PROFILES[type]?.bottom ?? 0.2) + 0.09, zs * (L / 2 - 0.02));
@@ -356,15 +359,18 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
     if (zs < 0) pl.rotation.y = Math.PI;
     g.add(pl);
     out._ownGeos.add(pl.geometry);
+    out.parts[zs > 0 ? 'bumperF' : 'bumperR'] = b;
+    out.parts[zs > 0 ? 'plateF' : 'plateR'] = pl;
   }
 
-  // mirrors
+  // mirrors — detachable
   for (const sx of [-1, 1]) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.06), trimMat);
     const wsZ = (PROFILES[type]?.windshield?.[0] ?? 0.27) * L;
     m.position.set(sx * (W / 2 + 0.06), H * 0.62, wsZ * 0.9);
     g.add(m);
     (out._ownGeos = out._ownGeos || new Set()).add(m.geometry);
+    out.parts[sx < 0 ? 'mirrorL' : 'mirrorR'] = m;
   }
 
   // head/tail lights + brake-bright tails + white reverse lamps
@@ -403,6 +409,7 @@ function addExtras(out, g, type, spec, W, L, H, wheelR) {
     sign.position.set(0, roofY + 0.08, -0.1);
     g.add(sign);
     out._extraMats = [sign.material];
+    out.parts.taxiSign = sign;
   }
   if (type === 'police' || type === 'firetruck' || type === 'ambulance') {
     out.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
@@ -415,6 +422,8 @@ function addExtras(out, g, type, spec, W, L, H, wheelR) {
     const lb2 = own(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.3), out.lightbarB));
     lb2.position.set(0.24, y, z);
     g.add(lb2);
+    out.parts.lightbar1 = lb1;
+    out.parts.lightbar2 = lb2;
   }
   if (type === 'police') {
     const doors = own(new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, H * 0.26, L * 0.3),
@@ -472,6 +481,8 @@ function buildMoto(out, g, spec, wheelR) {
   const seat = own(new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.09, 0.6), trimMat));
   seat.position.set(0, wheelR + 0.5, -0.32);
   g.add(seat);
+  out.parts.tank = tank;
+  out.parts.seat = seat;
   // forks + bars
   for (const sx of [-1, 1]) {
     const fork = own(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.62, 6), steelMat));
