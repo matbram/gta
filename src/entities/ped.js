@@ -112,6 +112,30 @@ export class Ped {
     }
   }
 
+  // ---- senses ----------------------------------------------------
+  // sight: ~110° cone, limited range, real line of sight through walls
+  seePoint(x, z, { fov = 1.92, range = 28 } = {}) {
+    const dx = x - this.pos.x, dz = z - this.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > range) return false;
+    if (d > 1.2) {
+      let rel = Math.atan2(dx, dz) - this.heading;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      if (Math.abs(rel) > fov / 2) return false;
+    }
+    return this.game?.wanted?.lineOfSight(
+      this.pos.x, this.pos.y + 1.5, this.pos.z, x, this.pos.y + 1.2, z) ?? true;
+  }
+
+  // hearing: something loud happened out of view — turn toward it, take a
+  // beat to understand, THEN react. No more psychic instant panics.
+  hearThreat(x, z, kind) {
+    if (this.dead || this.state === 'driver' || this.panicked || this.alarm) return;
+    const b = this.personality?.bravery ?? 0.4;
+    this.alarm = { x, z, kind, t: 0.25 + (1 - b) * 0.45 + Math.random() * 0.25 };
+  }
+
   panic(fromX, fromZ, directlyTargeted = false) {
     if (this.dead || this.state === 'driver') return;
     // already reacting? repeated scares escalate to flat-out fleeing
@@ -184,8 +208,8 @@ export class Ped {
     game.audio?.scream(this.pos.x, this.pos.z);
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.state.stats.kills++;
-    // panic everyone nearby
-    game.peds?.panicAt(this.pos.x, this.pos.z, 26);
+    // the death scream carries — those who see it panic, others turn to look
+    game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream');
     // drop some cash; an ambulance may come for the body
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 10 + Math.floor(Math.random() * 30));
     game.dispatch?.reportDeath(this);
@@ -217,6 +241,65 @@ export class Ped {
     }
     this.stateT += dt;
     const player = game.player;
+
+    // heard something: freeze, turn toward the sound, then react
+    if (this.alarm && this.state !== 'fight' && this.state !== 'driver') {
+      const a = this.alarm;
+      this.speed = 0;
+      this.rig.setAnim('idle');
+      this.heading = angleDamp(this.heading,
+        Math.atan2(a.x - this.pos.x, a.z - this.pos.z), 7, dt);
+      a.t -= dt;
+      if (a.t <= 0) {
+        this.alarm = null;
+        this.panic(a.x, a.z);
+      }
+      this.rig.update(dt, 0);
+      this.syncRig();
+      return;
+    }
+
+    // fear memory: someone who barrelled into you keeps their distance
+    if (this.avoidPlayerT > 0) {
+      this.avoidPlayerT -= dt;
+      const dxp = this.pos.x - player.pos.x, dzp = this.pos.z - player.pos.z;
+      const dp = Math.hypot(dxp, dzp);
+      if (dp < 3.5 && dp > 0.01 && !player.vehicle) {
+        this.pos.x += (dxp / dp) * dt * 1.6;
+        this.pos.z += (dzp / dp) * dt * 1.6;
+      }
+    }
+
+    // gang corners are owned turf: linger and you get warned, then jumped
+    if (this.archetype === 'gangster' && this.loiter && !this.dead &&
+        !player.dead && !player.vehicle && this.state !== 'fight') {
+      const dg = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
+      if (dg < 6) {
+        this._lingerT = (this._lingerT ?? 0) + dt;
+        if (this._lingerT > 4 && !this._warned) {
+          this._warned = true;
+          this.bark('bark_backoff');
+          this.heading = Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z);
+        }
+        if (this._lingerT > 9) {
+          // the whole corner jumps you
+          this.state = 'fight';
+          this.panicked = true;
+          this.stateT = 0;
+          for (const buddy of game.peds?.peds ?? []) {
+            if (buddy !== this && !buddy.dead && buddy.archetype === 'gangster' &&
+                dist2d(buddy.pos.x, buddy.pos.z, this.pos.x, this.pos.z) < 15) {
+              buddy.state = 'fight';
+              buddy.panicked = true;
+              buddy.stateT = 0;
+            }
+          }
+        }
+      } else if (dg > 8) {
+        this._lingerT = 0;
+        this._warned = false;
+      }
+    }
 
     switch (this.state) {
       case 'wander': {

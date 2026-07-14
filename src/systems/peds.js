@@ -28,6 +28,13 @@ export class PedSystem {
     const game = this.game;
     const p = game.player.pos;
 
+    // slow scanner: brandished weapons and corpse discovery (0.5s cadence)
+    this.scanT = (this.scanT ?? 0) - dt;
+    if (this.scanT <= 0) {
+      this.scanT = 0.5;
+      this.senseScan();
+    }
+
     // spawn up to target count
     this.spawnTimer -= dt;
     const density = this.densityAt(p.x, p.z);
@@ -80,6 +87,13 @@ export class PedSystem {
           const push = (R * 2 - d) * 0.5;
           a.pos.x -= (dx / d) * push;
           a.pos.z -= (dz / d) * push;
+          // sprinting into someone: they stumble, protest, and remember you
+          if (pl.speed2d > 5.5 && this.game.time - (a._bumpT ?? -9) > 3) {
+            a._bumpT = this.game.time;
+            a.rig.flinch?.();
+            a.bark?.('bark_backoff');
+            a.avoidPlayerT = 20;
+          }
         }
       }
     }
@@ -136,6 +150,72 @@ export class PedSystem {
     }
   }
 
+  // ---- senses ------------------------------------------------------
+  // a loud event: peds who SEE it panic at once; the rest hear it, turn
+  // toward the sound, and react after a beat
+  senseEvent(x, z, kind) {
+    const R = { gunshot: 34, explosion: 32, crash: 18, scream: 14, alarm: 20 }[kind] ?? 20;
+    for (const ped of this.peds) {
+      if (ped.dead || ped.inVehicle || ped.state === 'driver') continue;
+      const d = dist2d(ped.pos.x, ped.pos.z, x, z);
+      if (d > R) continue;
+      if (d < 6 || ped.seePoint?.(x, z, { range: R })) ped.panic(x, z);
+      else ped.hearThreat(x, z, kind);
+    }
+  }
+
+  senseScan() {
+    const game = this.game;
+    const player = game.player;
+    if (player.dead || game.state.mode !== 'play') return;
+
+    // brandishing: walking around with a gun out makes people who SEE it
+    // nervous — they clear off, and civic types may call it in
+    const gunOut = game.combat && !['fists', 'bat'].includes(game.combat.current);
+    const onFoot = !player.vehicle && !game.interiors?.playerInside;
+    if (gunOut && onFoot) {
+      for (const ped of this.peds) {
+        if (ped.dead || ped.panicked || ped.alarm || ped.isCop) continue;
+        if ((ped._waryT ?? 0) > game.time) continue;
+        const d = dist2d(ped.pos.x, ped.pos.z, player.pos.x, player.pos.z);
+        if (d > 14 || !ped.seePoint(player.pos.x, player.pos.z, { range: 14 })) continue;
+        ped._waryT = game.time + 8;
+        const P = ped.personality ?? {};
+        if ((P.civic ?? 0) > 0.65 && Math.random() < 0.4) {
+          ped.fleeFrom.x = player.pos.x; ped.fleeFrom.z = player.pos.z;
+          ped.panicked = true; ped.state = 'call'; ped.callT = 0; ped.stateT = 0;
+          ped.bark('bark_help');
+        } else if ((P.bravery ?? 0) < 0.45 || d < 6) {
+          ped.fleeFrom.x = player.pos.x; ped.fleeFrom.z = player.pos.z;
+          ped.panicked = true; ped.state = 'flee'; ped.stateT = 4;   // short scurry
+          ped.bark('bark_run');
+        }
+        // brave ones just stare — the head-tracking already sells it
+      }
+    }
+
+    // corpse discovery: walking into view of a body is an event
+    const corpses = this.peds.filter((c) => c.dead);
+    if (corpses.length) {
+      for (const ped of this.peds) {
+        if (ped.dead || ped.panicked || ped.alarm || ped._sawCorpse) continue;
+        for (const c of corpses) {
+          const d = dist2d(ped.pos.x, ped.pos.z, c.pos.x, c.pos.z);
+          if (d > 10 || !ped.seePoint(c.pos.x, c.pos.z, { range: 10 })) continue;
+          ped._sawCorpse = true;
+          ped.bark('bark_help');
+          if ((ped.personality?.civic ?? 0) > 0.55) {
+            ped.fleeFrom.x = c.pos.x; ped.fleeFrom.z = c.pos.z;
+            ped.panicked = true; ped.state = 'call'; ped.callT = 0; ped.stateT = 0;
+          } else {
+            ped.panic(c.pos.x, c.pos.z);
+          }
+          break;
+        }
+      }
+    }
+  }
+
   // every human a car or blast can hit: civilians, mission goons, foot
   // cops, and fire/medic crews working a scene
   hitTargets() {
@@ -160,7 +240,7 @@ export class PedSystem {
       const d = dist2d(ped.pos.x, ped.pos.z, x, z);
       if (d < radius && !ped.dead) ped.damage((radius - d) * 18, this.game, 'explosion');
     }
-    this.panicAt(x, z, radius * 4);
+    this.senseEvent(x, z, 'explosion');
   }
 
   checkRunOver(vehicle, speed) {
@@ -215,6 +295,9 @@ export class PedSystem {
   ejectDriver(pedLike, vehicle) {
     if (!pedLike || pedLike === 'player') return;
     const door = vehicle.seatWorldPos();
+    // the victim yells — anyone in earshot turns to look
+    this.game.audio?.scream?.(door.x, door.z);
+    this.senseEvent(door.x, door.z, 'scream');
     pedLike.inVehicle = null;
     pedLike.state = 'flee';
     pedLike.panicked = true;

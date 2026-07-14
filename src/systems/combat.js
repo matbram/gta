@@ -390,7 +390,7 @@ export class CombatSystem {
     game.particles?.muzzleLight?.(mx, my, mz);
     game.audio?.gunshot(spec.sfx);
     game.wanted?.crime('gunfire', player.pos.x, player.pos.z);
-    game.peds?.panicAt(player.pos.x, player.pos.z, 34);
+    game.peds?.senseEvent?.(player.pos.x, player.pos.z, 'gunshot');
     game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : 0.12);
     // recoil kick (stronger for big guns) + crosshair bloom
     const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'rifle' ? 0.05 : 0.035;

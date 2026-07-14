@@ -8,7 +8,7 @@
     "test:drive": "node test/drive.mjs",
     "test:combat": "node test/combat.mjs",
     "test:missions": "node test/missions.mjs",
-    "test": "node test/boot.mjs && node test/drive.mjs && node test/collision.mjs && node test/people.mjs && node test/sky.mjs && node test/vehicles-i1.mjs && node test/seating.mjs && node test/weapon-anims.mjs && node test/combat.mjs && node test/missions.mjs && node test/deep.mjs && node test/npc.mjs && node test/interiors.mjs && node test/g6.mjs && node test/audio.mjs && node test/chase.mjs && node test/full.mjs"
+    "test": "node test/boot.mjs && node test/drive.mjs && node test/collision.mjs && node test/people.mjs && node test/sky.mjs && node test/vehicles-i1.mjs && node test/seating.mjs && node test/weapon-anims.mjs && node test/senses.mjs && node test/combat.mjs && node test/missions.mjs && node test/deep.mjs && node test/npc.mjs && node test/interiors.mjs && node test/g6.mjs && node test/audio.mjs && node test/chase.mjs && node test/full.mjs"
   },
   "repository": {
     "type": "git",

@@ -67,6 +67,7 @@ export class VehicleSystem {
     if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
       veh._lastCrashSfxT = this.game.time;
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
+      if (impact > 7) this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash');
       if (impact > 12) this.game.particles?.glassBurst(veh.pos.x, veh.pos.y + 1.0, veh.pos.z);
       if (veh.driver === 'player') this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
     }
@@ -416,6 +417,10 @@ export class VehicleSystem {
         if (v._alarmBeep <= 0) {
           v._alarmBeep = 0.55;
           this.game.audio?.horn(v.pos.x, v.pos.z);
+          if (!v._alarmNoticed) {
+            v._alarmNoticed = true;   // heads turn when the alarm first trips
+            this.game.peds?.senseEvent?.(v.pos.x, v.pos.z, 'alarm');
+          }
         }
         v.updateLightState();
         if (v.alarmT <= 0) { v.alarmT = 0; v.updateLightState(); }
