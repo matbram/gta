@@ -59,21 +59,36 @@ dismantling **Ray Corvo**'s grip on the city, one mission at a time.
   medics with the cross, keepers in aprons — all driven by real animation
   clips and six personality-driven roles that decide how they react: flee,
   cower, film you on their phone, fight back, or call the police.
+- **People who actually perceive** — everyone has a field of view and
+  hearing: gunfire behind their back makes them turn and look before they
+  react, brandished weapons only worry people who can see them, corpses
+  get discovered, gang corners warn you off before they jump you, and the
+  cast changes with the clock — joggers at dawn, rush-hour crowds, thin
+  dangerous streets at 3 a.m.
 - **Original vehicles** — ten types, each a profile-extruded body with real
-  wheel arches, smoked-glass greenhouse, clearcoat paint, license plates,
-  mirrors, and working lightbars/sirens/liveries for the services.
+  wheel arches, windshields, clearcoat paint, license plates, mirrors, and
+  working lightbars/sirens/liveries for the services. They drive like
+  vehicles: torque curves with audible gear shifts, brake and reverse
+  lights, a km/h speedometer, per-type seating (you straddle the bike, sit
+  the driver's side in cars), locked cars with alarms, and sirens that
+  part traffic — including the one you stole.
 - **Combat 2.0** — first-person and third-person, six weapons with recoil,
   tracers, ejected shells and muzzle flashes; melee combos with lunges,
   hit-stop and knockdowns; hard lock-on (Tab), dodge rolls, a weapon wheel;
   ragdoll physics and blood pools on every takedown.
 - **Wanted system** — six stars: foot patrols → cruisers (with PIT maneuvers
   and rubber-banding) → roadblocks → tactical units → a searchlight
-  helicopter. Break line of sight, duck into a store, or respray.
+  helicopter. The police work with information, not telepathy: quiet
+  crimes need witnesses, unseen cops converge on your last known position
+  and search it, switching cars unseen breaks their description of you,
+  and a stolen cruiser makes you one of them until you blow your cover.
 - **Missions** — 12 story missions across three contacts (drive, chase, tail,
   escort, defend, assault), plus taxi fares and 30 hidden lucky coins.
-- **Audio** — generated weapon/vehicle/world SFX with distance + stereo pan,
-  role-based voice barks, police-scanner chatter, ambient beds per district
-  and time of day, and three radio stations of real music.
+- **Audio** — generated weapon/vehicle/world SFX with distance + stereo pan
+  and per-take pitch variation, role-based voice barks, police-scanner
+  chatter, Marco's running self-talk, surface-aware footsteps that splash
+  in the rain, a rain bed, seagulls over the bay, interiors that muffle
+  the street, and three radio stations of real music.
 - **Progression** — money, weapons, armor, safehouse saving (localStorage),
   quality presets (Low/Med/High) with auto-degrade.
 
