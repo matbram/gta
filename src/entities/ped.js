@@ -36,6 +36,9 @@ export class Ped {
     this.removeTimer = 0;         // counts up after death
     this.isCop = false;
     this.inVehicle = null;
+    this.threat = null;           // entity this ped is angry at (any NPC or player)
+    this.threatT = 0;
+    this.faction = opts.faction ?? 'civ';   // civ | cop | gang | keeper | crew
 
     // mind: role + personality (assigned fully by PedSystem for civilians)
     this.archetype = opts.archetype ?? 'commuter';
@@ -183,15 +186,23 @@ export class Ped {
     if (this.game && Math.random() < 0.6) this.game.audio?.bark(name, this.pos.x, this.pos.z);
   }
 
-  damage(amount, game, source = 'player', impact = null, culprit = 'player') {
+  // attacker: the entity that dealt this hit (player, ped, cop, goon…).
+  // Threading it through lets ANY NPC fight or be fought by any other,
+  // and keeps blame (culprit) separate from targeting.
+  damage(amount, game, source = 'player', impact = null, culprit = 'player', attacker = null) {
     if (this.dead) return;
     this.killedBy = culprit;   // remembered by the corpse for witness calls
+    if (attacker && !attacker.dead) {
+      this.lastAttacker = attacker;
+      if (attacker !== this) { this.threat = attacker; this.threatT = 12; }
+      this.alertAllies(game, attacker);
+    }
+    const atk = attacker?.pos ?? game.player.pos;
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
     if (this.health <= 0) {
-      // impact from the player if not otherwise supplied
       if (!impact) {
-        const dx = this.pos.x - game.player.pos.x, dz = this.pos.z - game.player.pos.z;
+        const dx = this.pos.x - atk.x, dz = this.pos.z - atk.z;
         const l = Math.hypot(dx, dz) || 1;
         impact = { dx: dx / l, dz: dz / l, force: source === 'runover' ? 6 : 2.5, up: 1 };
       }
@@ -206,16 +217,36 @@ export class Ped {
       this.woundT = 0;
       this.stateT = 0;
       this.panicked = true;
-      this.fleeFrom.x = game.player.pos.x; this.fleeFrom.z = game.player.pos.z;
+      this.fleeFrom.x = atk.x; this.fleeFrom.z = atk.z;
       game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
       game.dispatch?.reportDeath?.(this);   // medics respond to the wounded too
       return;
     }
-    // flinch on non-fatal hits (skinned rig)
-    this.rig.flinch?.();
+    // flinch away from the side the hit came from (skinned rig)
+    const rel = Math.atan2(atk.x - this.pos.x, atk.z - this.pos.z) - this.heading;
+    this.rig.flinch?.(Math.sin(rel) >= 0 ? 1 : -1);
     const kind = source === 'gun' ? 'gunshot' : source === 'runover' ? 'runover' : null;
-    this.panic(game.player.pos.x, game.player.pos.z,
-      source === 'melee' || source === 'gun', kind, culprit);
+    this.panic(atk.x, atk.z, source === 'melee' || source === 'gun', kind, culprit);
+  }
+
+  // faction loyalty: allies who see one of their own get hit adopt the
+  // attacker as a threat (generalizes the old gang-corner buddy jump).
+  // Civilians have no such loyalty — they just panic like before.
+  alertAllies(game, attacker) {
+    if (this.faction === 'civ' || !game.peds?.nearTargets) return;
+    if ((this._assistT ?? 0) > game.time) return;
+    this._assistT = game.time + 0.5;
+    for (const ally of game.peds.nearTargets(this.pos.x, this.pos.z, 15)) {
+      if (ally === this || ally === attacker || ally.dead || ally.faction !== this.faction) continue;
+      if (!ally.seePoint?.(this.pos.x, this.pos.z, { range: 15 })) continue;
+      ally.threat = attacker;
+      ally.threatT = 10;
+      if (ally.isCop) continue;               // cops keep their own rules
+      ally.state = ally.isGoon ? 'attack' : 'fight';
+      ally.panicked = true;
+      ally.stateT = 0;
+      ally.bark?.('bark_backoff');
+    }
   }
 
   // knocked down but alive: brief ragdoll-style topple, then get up
@@ -249,6 +280,12 @@ export class Ped {
     }
     // the death scream carries — those who see it panic, others turn to look
     game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream', this.killedBy ?? 'player');
+    // an NPC murderer with witnesses gets the police called on THEM
+    const atk = this.lastAttacker;
+    if (atk && atk !== game.player && !atk.isCop && !atk.dead &&
+        game.wanted?.hasWitness?.(this.pos.x, this.pos.z)) {
+      game.peds?.reportNpcCrime?.(atk, 'kill', this.pos.x, this.pos.z);
+    }
     // drop some cash; an ambulance may come for the body
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 10 + Math.floor(Math.random() * 30));
     game.dispatch?.reportDeath(this);
@@ -280,6 +317,16 @@ export class Ped {
     }
     this.stateT += dt;
     const player = game.player;
+
+    // threat memory + criminal-flag decay
+    if (this.threatT > 0) {
+      this.threatT -= dt;
+      if (this.threatT <= 0 || this.threat?.dead) this.threat = null;
+    }
+    if (this.criminal) {
+      this.criminal.t -= dt;
+      if (this.criminal.t <= 0) this.criminal = null;
+    }
 
     // heard something: freeze, turn toward the sound, then react
     if (this.alarm && this.state !== 'fight' && this.state !== 'driver') {
@@ -458,22 +505,30 @@ export class Ped {
         break;
       }
       case 'fight': {
-        // brave ped charges the player and swings
-        const d = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
-        if (player.dead || d > 30 || this.stateT > 25) { this.state = 'wander'; this.stateT = 0; break; }
+        // brave ped charges their threat (any entity — player or NPC) and swings
+        const tgt = (this.threat && !this.threat.dead) ? this.threat : player;
+        const tgtDead = tgt === player ? player.dead : tgt.dead;
+        const tp = tgt.pos;
+        const d = dist2d(this.pos.x, this.pos.z, tp.x, tp.z);
+        if (tgtDead || d > 30 || this.stateT > 25) { this.state = 'wander'; this.stateT = 0; break; }
         if (d > 1.4) {
-          this.moveToward(player.pos.x, player.pos.z, this.runSpeed * 0.85, dt);
+          this.moveToward(tp.x, tp.z, this.runSpeed * 0.85, dt);
           this.rig.setAnim('run');
         } else {
           this.speed = 0;
           this.rig.setAnim('idle');
-          this.heading = Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z);
+          this.heading = Math.atan2(tp.x - this.pos.x, tp.z - this.pos.z);
           this.attackCooldown -= dt;
           if (this.attackCooldown <= 0) {
             this.attackCooldown = 1.1;
             this.rig.startPunch();
-            if (!player.vehicle) {
-              player.damage(6, 'ped', this.pos);
+            if (tgt === player) {
+              if (!player.vehicle) {
+                player.damage(6, 'ped', this.pos);
+                game.audio?.punch();
+              }
+            } else if (!tgt.inVehicle) {
+              tgt.damage?.(6, game, 'melee', null, 'ai', this);
               game.audio?.punch();
             }
           }

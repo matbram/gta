@@ -296,7 +296,7 @@ export class Interiors {
       const look = KEEPER_LOOKS[rec.id % KEEPER_LOOKS.length];
       const keeper = new Goon(this.game.city, this.game.scene, {
         health: 60, aggroRange: 0, shootRange: 10, damage: 14, accuracy: 0.55,
-        shirt: look.shirt,
+        shirt: look.shirt, faction: 'keeper',
       });
       keeper.isKeeper = true;
       keeper.state = 'guard';
@@ -314,6 +314,7 @@ export class Interiors {
         if (rec.dancerDead?.[k]) continue;
         const d = new Goon(this.game.city, this.game.scene, {
           health: 40, shirt: [0xe84a8a, 0x4ae8d8, 0xe8d84a, 0x8a4ae8][k],
+          faction: 'keeper',
         });
         d._slot = k;
         d.isKeeper = true;
@@ -482,13 +483,16 @@ export class Interiors {
           if (rec.keeper.dead && !rec.keeperLooted) {
             rec.keeperLooted = true;
             rec.keeperDead = true;
-            // killing a clerk is serious. If the player is inside, the heat
-            // waits for the street; killed from outside, it lands right now.
-            if (this.playerInside === rec) {
-              this.pendingHeat = Math.max(this.pendingHeat, 200);
-            } else {
-              game.wanted.state.heat = clamp(game.wanted.state.heat + 200, 0, 900);
-              game.wanted.recalcStars();
+            // killing a clerk is serious — but only if the PLAYER did it.
+            // If the player is inside, the heat waits for the street;
+            // killed from outside, it lands right now.
+            if ((rec.keeper.killedBy ?? 'player') === 'player') {
+              if (this.playerInside === rec) {
+                this.pendingHeat = Math.max(this.pendingHeat, 200);
+              } else {
+                game.wanted.state.heat = clamp(game.wanted.state.heat + 200, 0, 900);
+                game.wanted.recalcStars();
+              }
             }
             if (rec.register) game.worldlife?.dropCash(rec.register.x, rec.register.z - 0.8, 60 + Math.random() * 80);
           }

@@ -11,6 +11,7 @@ export class Cop extends Ped {
   constructor(city, scene, tough = false) {
     super(city, scene, tough ? { ...COP_LOOK, body: 'heavy', female: false } : { ...COP_LOOK }, { health: tough ? 110 : 60 });
     this.isCop = true;
+    this.faction = 'cop';
     this.tough = tough;
     this.walkSpeed = 1.25;
     this.state = 'chase';
@@ -42,9 +43,10 @@ export class Cop extends Ped {
       return;
     }
 
-    // no heat: walk the beat / investigate reports instead of chasing
+    // no heat: police NPC criminals, walk the beat, investigate reports
     if (game.wanted.state.stars === 0 && !this.provoked) {
       this.arrestT = 0;
+      if (this.npcTarget && this.pursueNpc(dt, game)) return;
       if (this.investigate) {
         const inv = this.investigate;
         const dd = dist2d(this.pos.x, this.pos.z, inv.x, inv.z);
@@ -131,13 +133,73 @@ export class Cop extends Ped {
     this.syncRig();
   }
 
-  shoot(game, d) {
+  // chase / arrest / shoot an NPC criminal (0★ police work). Returns true
+  // while handling one so the caller skips the player logic this frame.
+  pursueNpc(dt, game) {
+    const t = this.npcTarget;
+    if (!t || t.dead || !t.criminal) { this.npcTarget = null; return false; }
+    const d = dist2d(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
+    if (d > 120) { this.npcTarget = null; return false; }
+    this.shootCooldown -= dt;   // the 0★ branch returns before the shared tick
+    const los = game.wanted.lineOfSight(this.pos.x, this.pos.y + 1.5, this.pos.z,
+      t.pos.x, t.pos.y + 1.2, t.pos.z);
+    if (t.criminal.level >= 2) {
+      // killer: lethal response
+      if (los && d < 22 && d > 2) {
+        this.speed = 0;
+        this.heading = angleDamp(this.heading, Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), 10, dt);
+        this.rig.setAnim('aim');
+        if (this.shootCooldown <= 0) {
+          this.shootCooldown = 1.1;
+          this.shoot(game, d, t);
+        }
+      } else {
+        this.moveToward(t.pos.x, t.pos.z, this.runSpeed, dt);
+        this.rig.setAnim('run');
+      }
+    } else {
+      // minor crime: close in and make the arrest
+      if (d > 1.9) {
+        this.moveToward(t.pos.x, t.pos.z, this.runSpeed * 0.9, dt);
+        this.rig.setAnim('run');
+      } else {
+        this.speed = 0;
+        this.heading = angleDamp(this.heading, Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), 12, dt);
+        this.rig.setAnim('aim');
+        this._npcArrestT = (this._npcArrestT ?? 0) + dt;
+        if (this._npcArrestT > 1.15) {
+          this._npcArrestT = 0;
+          t.criminal = null;
+          t.threat = null;
+          t.state = t.isGoon ? 'guard' : 'cower';   // hands up / stand down
+          t.panicked = !t.isGoon;
+          t.stateT = 0;
+          this.npcTarget = null;
+          this.investigate = { x: t.pos.x, z: t.pos.z, t: 0 };
+        }
+      }
+    }
+    this.rig.update(dt, this.speed);
+    this.syncRig();
+    return true;
+  }
+
+  shoot(game, d, tgt = null) {
     const player = game.player;
     game.audio?.gunshot('pistol', this.pos.x, this.pos.z);
     game.particles?.muzzleFlash(
       this.pos.x + Math.sin(this.heading) * 0.5, this.pos.y + 1.35,
       this.pos.z + Math.cos(this.heading) * 0.5,
       Math.sin(this.heading), Math.cos(this.heading));
+    if (tgt && tgt !== player) {
+      // firing on an NPC criminal
+      if (Math.random() < this.accuracy * clamp(1 - d / 34, 0.15, 1)) {
+        tgt.damage?.(this.tough ? 12 : 8, game, 'gun', null, 'ai', this);
+      } else {
+        game.particles?.sparks(tgt.pos.x, tgt.pos.y + 0.5, tgt.pos.z, 2);
+      }
+      return;
+    }
     // hit chance falls with distance and player speed
     const speedDodge = clamp((player.vehicle ? Math.abs(player.vehicle.speed) : player.speed2d) / 14, 0, 0.55);
     const chance = this.accuracy * clamp(1 - d / 34, 0.15, 1) * (1 - speedDodge);
@@ -156,10 +218,15 @@ export class Cop extends Ped {
     }
   }
 
-  damage(amount, game, source, impact = null, culprit = 'player') {
+  damage(amount, game, source, impact = null, culprit = 'player', attacker = null) {
     // a stray AI car clipping a beat cop must not put him in execution
     // mode — only a direct player attack provokes lethal response at 0★
     if (culprit === 'player') this.provoked = true;
+    else if (attacker && !attacker.dead && !attacker.isCop && attacker !== game.player) {
+      // attacked by an NPC: they're now a lethal-response criminal
+      attacker.criminal = { level: 2, t: 60 };
+      this.npcTarget = attacker;
+    }
     this.killedBy = culprit;
     if (this.dead) return;
     this.health -= amount;

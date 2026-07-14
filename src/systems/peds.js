@@ -215,6 +215,7 @@ export class PedSystem {
       if (arch?.tints) look.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
       const ped = new Ped(city, this.game.scene, look, {
         archetype, personality: makePersonality(archetype),
+        faction: archetype === 'gangster' ? 'gang' : 'civ',
       });
       ped.place(x, z);
       if (arch?.loiter) {
@@ -231,6 +232,7 @@ export class PedSystem {
           gl.shirt = arch.tints[Math.floor(Math.random() * arch.tints.length)];
           const buddy = new Ped(city, this.game.scene, gl, {
             archetype, personality: makePersonality(archetype),
+            faction: 'gang',
           });
           buddy.place(x + (Math.random() - 0.5) * 4, z + (Math.random() - 0.5) * 4);
           buddy.loiter = true;
@@ -326,6 +328,20 @@ export class PedSystem {
       ...(g.dispatch?.crewPeds?.() ?? []),
     ];
     return this._ht;
+  }
+
+  // an NPC committed a witnessed crime: flag them and send a cop after
+  // THEM — the player's wanted level is never involved
+  reportNpcCrime(perp, kind, x, z) {
+    if (!perp || perp.dead) return;
+    const level = kind === 'kill' ? 2 : 1;
+    if (!perp.criminal || perp.criminal.level < level) perp.criminal = { level, t: 60 };
+    else perp.criminal.t = 60;
+    const w = this.game.wanted;
+    if (!w) return;
+    let cop = w.nearestCop?.(x, z, 120);
+    if (!cop) cop = w.spawnFootCop?.(false, true);
+    if (cop && !cop.npcTarget) cop.npcTarget = perp;
   }
 
   // --- interactions -------------------------------------------------

@@ -402,16 +402,39 @@ export const GESTURES = {
       bones.spine1.quaternion.multiply(q);
     }
   },
-  // flinch away from a hit
-  flinch(bones, q, e, t) {
+  // flinch away from a hit; side (+1/-1) leans the recoil away from the
+  // side the blow came from so reactions read directionally
+  flinch(bones, q, e, t, side = 1) {
     const k = Math.sin(clamp(t, 0, 1) * Math.PI);
     if (bones.spine1) {
-      e.set(-0.3 * k, 0.15 * k, 0); q.setFromEuler(e);
+      e.set(-0.3 * k, 0.15 * k * side, 0.12 * k * -side); q.setFromEuler(e);
       bones.spine1.quaternion.multiply(q);
     }
     if (bones.head) {
-      e.set(-0.25 * k, 0, 0.1 * k); q.setFromEuler(e);
+      e.set(-0.25 * k, 0, 0.14 * k * -side); q.setFromEuler(e);
       bones.head.quaternion.multiply(q);
+    }
+  },
+  // front kick with the right leg: chamber, extend, recover
+  kick(bones, q, e, t) {
+    const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.upLegR) {
+      e.set(-1.35 * ext, 0, 0.05 * ext); q.setFromEuler(e);
+      bones.upLegR.quaternion.multiply(q);
+    }
+    if (bones.legR) {
+      // knee stays bent through the chamber, snaps straight at full extension
+      const bend = t < 0.45 ? 1.1 * (t / 0.45) : 1.1 * Math.max(0, 1 - (t - 0.45) / 0.25);
+      e.set(bend, 0, 0); q.setFromEuler(e);
+      bones.legR.quaternion.multiply(q);
+    }
+    if (bones.spine1) {
+      e.set(0.22 * ext, 0, 0); q.setFromEuler(e);   // lean back for balance
+      bones.spine1.quaternion.multiply(q);
+    }
+    if (bones.armL) {
+      e.set(0.5 * ext, 0, 0.3 * ext); q.setFromEuler(e);   // guard arm rises
+      bones.armL.quaternion.multiply(q);
     }
   },
 };

@@ -286,8 +286,11 @@ export class CombatSystem {
       this.lastMeleeT = game.time;
       const finisher = this.comboStep === 3;
       this.cooldown = finisher ? spec.rate * 1.5 : spec.rate;
-      // bat gets its own swings — horizontal, overhead on the finisher
+      // bat gets its own swings — horizontal, overhead on the finisher;
+      // bare fists mix a snap kick into the second combo beat
       if (spec.animSet?.swing && player.rig.batSwing) player.rig.batSwing(finisher);
+      else if (this.comboStep === 2 && this.current === 'fists' &&
+               Math.random() < 0.5 && player.rig.kickGesture) player.rig.kickGesture();
       else player.rig.startPunch();
 
       // small lunge toward the aim/lock direction
@@ -313,7 +316,7 @@ export class CombatSystem {
         const knock = finisher ? { dx: fx, dz: fz, force: 5, up: 2.5, spin: 4 } : null;
         game.combat?.hitStop?.();
         this.hitStop();
-        target.damage(dmg, game, 'melee', target.health - dmg <= 0 ? knock : null);
+        target.damage(dmg, game, 'melee', target.health - dmg <= 0 ? knock : null, 'player', player);
         game.particles?.blood(target.pos.x, target.pos.y + 1.2, target.pos.z, finisher ? 6 : 3);
         // non-fatal finisher still knocks them down
         if (!target.dead && finisher) target.stagger?.(game, { dx: fx, dz: fz });
@@ -437,7 +440,7 @@ export class CombatSystem {
         game.audio?.ricochet(hit.point.x, hit.point.z);
       } else if (hit.type === 'ped' || hit.type === 'cop' || hit.type === 'goon') {
         const imp = { dx: d.x, dz: d.z, force: 2 + spec.dmg * 0.06, up: 0.8, spin: (Math.random() - 0.5) * 3 };
-        hit.target.damage(spec.dmg, game, 'gun', imp);
+        hit.target.damage(spec.dmg, game, 'gun', imp, 'player', game.player);
         game.gore?.blood.pool(hit.target.pos.x + d.x, hit.target.pos.z + d.z, hit.target.interiorY ?? undefined);
         // shooting mission goons is gang business — no extra police heat beyond the gunfire itself
         if (hit.type !== 'goon') {

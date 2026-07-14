@@ -499,8 +499,12 @@ export class SkinnedHumanoid {
     this.animator.startGesture(0.38, (t, bones, q, e) => g(bones, q, e, t));
   }
 
-  flinch() {
-    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t));
+  flinch(side = 1) {
+    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t, side));
+  }
+
+  kickGesture() {
+    this.animator.startGesture(0.5, (t, bones, q, e) => GESTURES.kick(bones, q, e, t));
   }
 
   reachGesture(dur = 0.4) {
