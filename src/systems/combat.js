@@ -676,7 +676,11 @@ export class CombatSystem {
       const cols = game.city.queryColliders(x, z, 0.4);
       let inside = false;
       for (const b of cols) {
-        if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < ground + b.h) { inside = true; break; }
+        if (x <= b.minX || x >= b.maxX || z <= b.minZ || z >= b.maxZ) continue;
+        // upper-floor walls only block bullets within their own Y band
+        const top = b.baseY != null ? b.baseY + b.h : ground + b.h;
+        const bottom = b.baseY ?? -Infinity;
+        if (y < top && y > bottom) { inside = true; break; }
       }
       if (inside) {
         best = { t, type: 'static', target: null };

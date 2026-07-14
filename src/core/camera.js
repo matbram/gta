@@ -119,8 +119,11 @@ export class CameraRig {
       let hit = false;
       for (const b of cols) {
         if (sx > b.minX - 0.3 && sx < b.maxX + 0.3 && sz > b.minZ - 0.3 && sz < b.maxZ + 0.3) {
-          const groundY = this.city.groundHeight(sx, sz);
-          if (sy < groundY + b.h) { hit = true; break; }
+          // upper-floor walls occupy an absolute-Y band; ground boxes rise
+          // from the terrain
+          const top = b.baseY != null ? b.baseY + b.h : this.city.groundHeight(sx, sz) + b.h;
+          const bottom = b.baseY ?? -Infinity;
+          if (sy < top && sy > bottom - 0.3) { hit = true; break; }
         }
       }
       if (hit) { bestT = Math.max(0.12, (s - 1) / steps); break; }

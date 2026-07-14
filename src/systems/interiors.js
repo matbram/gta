@@ -14,6 +14,7 @@ const BUILD_R = 95, TEARDOWN_R = 125;     // shell + collider bubble
 const FURNISH_R = 45, UNFURNISH_R = 62;   // people + lights bubble
 const DOOR_GAP = 2.4;
 const WALL_T = 0.25;
+const FLOOR_H = 3.2;                      // storey height for multi-floor buildings
 
 const KEEPER_LOOKS = [
   { uniform: 'keeper', shirt: 0x6a8a5a },
@@ -25,6 +26,7 @@ const LABELS = {
   store: 'CORNER STORE', diner: 'DINER', laundry: 'LAUNDROMAT',
   gunshop: 'BULLSEYE ROUNDS', food: 'PRONTO BURGER',
   club: 'THE VELVET IGUANA', safehouse: 'SAFEHOUSE',
+  lobby: 'LOBBY', home: 'RESIDENCE', storage: 'WAREHOUSE',
 };
 
 export class Interiors {
@@ -97,11 +99,31 @@ export class Interiors {
     for (const d of city.doors) {
       const b = city.buildings[d.b];
       if (!b) continue;
+      // template by building kind: shops stay shops; towers/hotels get
+      // lobbies, houses get homes, warehouses get storage floors
+      const template =
+        b.kind === 'tower' || b.kind === 'hotel' ? 'lobby'
+        : b.kind === 'house' || b.kind === 'mansion' ? 'home'
+        : b.kind === 'warehouse' || b.kind === 'barn' ? 'storage'
+        : generic[d.id % generic.length];
+      // floor plan: every storey of the building is enterable via the
+      // stairwell (and an elevator in tall towers)
+      const wIn = b.w + 0.5, dIn = b.d + 0.5;
+      const canStair = wIn >= 8.5 && dIn >= 8;
+      const floors = canStair ? Math.max(1, Math.min(32, Math.floor(b.h / FLOOR_H))) : 1;
       const rec = {
         id: d.id, door: d, b,
-        template: generic[d.id % generic.length],
+        template,
         built: null, furnished: false,
         keeper: null, dancers: [], keeperDead: false, keeperLooted: false,
+        plan: {
+          floors,
+          stair: floors > 1,
+          elevator: floors >= 6 && wIn >= 11.5,
+        },
+        curFloor: 0,
+        floorBuilt: new Map(),
+        deadFloors: new Set(),
       };
       this.recs.push(rec);
     }
@@ -218,8 +240,291 @@ export class Interiors {
 
     this.furnishStatic(rec, solid, mesh, mz);
 
+    // stairwell (and elevator cab walls) on the ground floor
+    if (rec.plan?.stair) {
+      const zn = this.stairZone(rec);
+      const roomZ = rec.door.face > 0 ? zn.z1 : zn.z0;
+      boxes.push(city.addBox(zn.x0, roomZ - 0.08, zn.x1, roomZ + 0.08, 2.6, 'interior', rec));
+      this.addStairFlight(rec, 0, g);
+      if (rec.plan.elevator) this.addCabWalls(rec, solid);
+    }
+
     game.scene.add(g);
     this.builtSet.add(rec);
+  }
+
+  // ---------------------------------------------------- multi-floor helpers
+  // stairwell footprint (world coords; buildings are axis-aligned). Two
+  // 0.75m lanes make a switchback: even flights ride the near lane, odd
+  // flights the far lane, all rising +x from x0 to x1.
+  stairZone(rec) {
+    const b = rec.b;
+    const w = b.w + 0.5, dep = b.d + 0.5;
+    const zin = dep / 2 - WALL_T - 0.1;
+    const x0 = b.x - w / 2 + WALL_T + 0.55;
+    const x1 = Math.min(x0 + 5, b.x + w / 2 - (rec.plan?.elevator ? 3.2 : 1));
+    const z0 = rec.door.face > 0 ? b.z - zin : b.z + zin - 1.5;
+    return { x0, x1: Math.max(x1, x0 + 3.5), z0, z1: z0 + 1.5 };
+  }
+
+  elevZone(rec) {
+    const zn = this.stairZone(rec);
+    return { x0: zn.x1 + 0.35, x1: zn.x1 + 2.35, z0: zn.z0, z1: zn.z1 };
+  }
+
+  // sloped ramp mesh for the flight starting at this group's floor level
+  addStairFlight(rec, flight, group) {
+    const zn = this.stairZone(rec);
+    const b = rec.b;
+    const lane = flight % 2;
+    const len = zn.x1 - zn.x0;
+    const ramp = new THREE.Mesh(
+      new THREE.BoxGeometry(Math.hypot(len, FLOOR_H), 0.14, 0.72), this.counterMat);
+    ramp.position.set((zn.x0 + zn.x1) / 2 - b.x, FLOOR_H / 2, zn.z0 + lane * 0.75 + 0.375 - b.z);
+    ramp.rotation.z = Math.atan2(FLOOR_H, len);
+    group.add(ramp);
+  }
+
+  addCabWalls(rec, solid) {
+    const ez = this.elevZone(rec);
+    const b = rec.b;
+    const cz = (ez.z0 + ez.z1) / 2 - b.z;
+    solid(ez.x0 + 0.05 - b.x, cz, 0.1, 1.5, 3.0, this.registerMat);
+    solid(ez.x1 - 0.05 - b.x, cz, 0.1, 1.5, 3.0, this.registerMat);
+  }
+
+  buildFloor(rec, n) {
+    if (!rec.built || n < 1 || n >= rec.plan.floors || rec.floorBuilt.has(n)) return;
+    const game = this.game, city = game.city, b = rec.b;
+    const base = rec.built.gy + n * FLOOR_H;
+    const w = b.w + 0.5, dep = b.d + 0.5;
+    const g = new THREE.Group();
+    g.position.set(b.x, base, b.z);
+    const boxes = [];
+    const mesh = (geo, mat, x, y, z) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      g.add(m);
+      return m;
+    };
+    const solid = (cx, cz, sx, sz, h, mat = this.wallMat) => {
+      mesh(new THREE.BoxGeometry(sx, h, sz), mat, cx, h / 2, cz);
+      boxes.push(city.addBox(b.x + cx - sx / 2, b.z + cz - sz / 2,
+        b.x + cx + sx / 2, b.z + cz + sz / 2, h, 'interior', rec, base));
+    };
+    // shell: 4 solid walls (street doors are a ground-floor thing), slab,
+    // ceiling, a light fixture. Colliders carry baseY so they only exist
+    // for whoever is actually at this height.
+    solid(0, -(dep / 2 - WALL_T / 2), w - WALL_T * 2, WALL_T, FLOOR_H);
+    solid(0, dep / 2 - WALL_T / 2, w - WALL_T * 2, WALL_T, FLOOR_H);
+    solid(-(w / 2 - WALL_T / 2), 0, WALL_T, dep, FLOOR_H);
+    solid(w / 2 - WALL_T / 2, 0, WALL_T, dep, FLOOR_H);
+    mesh(new THREE.BoxGeometry(w, 0.14, dep), this.floorMat, 0, -0.07, 0);
+    mesh(new THREE.BoxGeometry(w, 0.14, dep), this.ceilMat, 0, FLOOR_H + 0.07, 0);
+    mesh(new THREE.BoxGeometry(1.2, 0.08, 1.2), this.lampMat, 0, FLOOR_H - 0.08, 0);
+    // stairwell guard + this floor's up-flight (none on the roof floor)
+    const zn = this.stairZone(rec);
+    const roomZ = rec.door.face > 0 ? zn.z1 : zn.z0;
+    boxes.push(city.addBox(zn.x0, roomZ - 0.08, zn.x1, roomZ + 0.08, 2.6, 'interior', rec, base));
+    if (n < rec.plan.floors - 1) this.addStairFlight(rec, n, g);
+    if (rec.plan.elevator) this.addCabWalls(rec, solid);
+
+    // seeded furnishing: office / residence / storage floor
+    const kind = Math.floor(rand2i(rec.id * 3 + n, n * 7 + 1, 12345) * 3);
+    const hw = w / 2 - 1, hd = dep / 2 - 1;
+    if (kind === 0) {
+      solid(hw * 0.4, hd * 0.3, Math.min(2.2, hw), 1.0, 0.78, this.counterMat);
+      solid(-hw * 0.4, -hd * 0.2, Math.min(2.2, hw), 1.0, 0.78, this.counterMat);
+      solid(-hw * 0.6, hd * 0.5, 0.5, Math.min(2.4, hd), 1.7, this.shelfMat);
+    } else if (kind === 1) {
+      solid(hw * 0.5, -hd * 0.4, 1.7, 2.3, 0.55, this.bedMat);
+      solid(-hw * 0.45, hd * 0.35, Math.min(2.4, hw * 0.8), 1.0, 0.8, this.couchMat);
+      mesh(new THREE.BoxGeometry(1.4, 0.8, 0.12), this.tvMat, -hw * 0.45, 1.3, -hd * 0.35);
+    } else {
+      solid(0, -hd * 0.35, Math.min(w * 0.6, 7), 0.7, 2.0, this.shelfMat);
+      solid(0, hd * 0.35, Math.min(w * 0.6, 7), 0.7, 2.0, this.shelfMat);
+    }
+
+    // residents: 0-2 seeded per floor; the dead stay dead across rebuilds
+    const residents = [];
+    const rCount = Math.floor(rand2i(rec.id + n * 11, 5, 999) * 2.6);
+    for (let k = 0; k < rCount; k++) {
+      if (rec.deadFloors.has(n + '|' + k)) continue;
+      const res = new Goon(city, game.scene, {
+        health: 40, aggroRange: 0, shootRange: 8, damage: 8, accuracy: 0.4,
+        shirt: [0x6a8a5a, 0x8a6a4a, 0x5a6a8a, 0xb08a4a][(rec.id + k) % 4],
+        faction: 'civ',
+      });
+      res._slot = k;
+      res.isKeeper = true;
+      res.state = 'guard';
+      res.interiorY = base;
+      res.place(
+        b.x + (rand2i(rec.id, n * 3 + k, 77) - 0.5) * Math.max(2, w - 5),
+        b.z + (rand2i(rec.id, n * 5 + k, 78) - 0.5) * Math.max(2, dep - 5));
+      res.heading = rand2i(rec.id, n + k, 79) * 6.28;
+      residents.push(res);
+    }
+    rec.floorBuilt.set(n, { group: g, boxes, residents, base });
+    game.scene.add(g);
+  }
+
+  teardownFloor(rec, n) {
+    const f = rec.floorBuilt.get(n);
+    if (!f) return;
+    for (const box of f.boxes) this.game.city.removeBox(box);
+    for (const r of f.residents) {
+      if (r.dead) rec.deadFloors.add(n + '|' + r._slot);
+      r.dispose();
+    }
+    f.group.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+    f.group.removeFromParent();
+    rec.floorBuilt.delete(n);
+  }
+
+  syncFloors(rec) {
+    for (const n of [...rec.floorBuilt.keys()]) {
+      if (Math.abs(n - rec.curFloor) > 1) this.teardownFloor(rec, n);
+    }
+    this.buildFloor(rec, rec.curFloor);
+  }
+
+  teardownUpper(rec) {
+    for (const n of [...rec.floorBuilt.keys()]) this.teardownFloor(rec, n);
+    rec.curFloor = 0;
+    this._stairFlight = null;
+    this._elevRide = null;
+    this.closeElevUI();
+  }
+
+  // stairwell + elevator + floor pinning for the occupied building
+  updateFloors(rec, dt) {
+    const game = this.game;
+    const player = game.player;
+    const gy = rec.built.gy;
+
+    // elevator ride in progress: hold the player, then arrive
+    if (this._elevRide) {
+      const r = this._elevRide;
+      r.t -= dt;
+      const ez = this.elevZone(rec);
+      player.pos.x = (ez.x0 + ez.x1) / 2;
+      player.pos.z = (ez.z0 + ez.z1) / 2;
+      if (r.t <= 0) {
+        rec.curFloor = r.target;
+        this._stairFlight = null;
+        this.buildFloor(rec, r.target);
+        this.syncFloors(rec);
+        player.interiorY = gy + r.target * FLOOR_H;
+        player.pos.y = player.interiorY;
+        game.hud?.fade(false);
+        game.audio?.chime?.();
+        game.hud?.showZone(r.target === 0 ? (LABELS[rec.template] ?? 'LOBBY') : `FLOOR ${r.target + 1}`);
+        this._elevRide = null;
+      }
+      return;
+    }
+
+    const zn = this.stairZone(rec);
+    const px = player.pos.x, pz = player.pos.z;
+    if (px >= zn.x0 && px <= zn.x1 && pz >= zn.z0 && pz <= zn.z1) {
+      // on the stairs: Y follows position along the flight in this lane
+      const s = clamp((px - zn.x0) / (zn.x1 - zn.x0), 0, 1);
+      const lane = pz < (zn.z0 + zn.z1) / 2 ? 0 : 1;
+      let f = this._stairFlight;
+      if (f == null || f % 2 !== lane) {
+        f = (rec.curFloor % 2 === lane) ? rec.curFloor : rec.curFloor - 1;
+        f = clamp(f, 0, rec.plan.floors - 2);
+      }
+      const cand = gy + (f + s) * FLOOR_H;
+      const curY = player.interiorY ?? (gy + rec.curFloor * FLOOR_H);
+      if (Math.abs(cand - curY) < 2.2) {
+        this._stairFlight = f;
+        this.buildFloor(rec, f);
+        this.buildFloor(rec, f + 1);
+        player.interiorY = cand;
+        const newFloor = s > 0.9 ? f + 1 : s < 0.1 ? f : rec.curFloor;
+        if (newFloor !== rec.curFloor) {
+          rec.curFloor = newFloor;
+          this.syncFloors(rec);
+          if (newFloor > 0) game.hud?.showZone(`FLOOR ${newFloor + 1}`);
+        }
+      }
+      return;
+    }
+
+    // off the stairs: pinned to the current floor
+    this._stairFlight = null;
+    player.interiorY = gy + rec.curFloor * FLOOR_H;
+
+    // elevator cab: prompt + floor picker
+    if (!rec.plan.elevator) return;
+    const ez = this.elevZone(rec);
+    const inCab = px >= ez.x0 && px <= ez.x1 && pz >= ez.z0 && pz <= ez.z1;
+    if (!inCab) { this.closeElevUI(); return; }
+    if (!this._elevUI) {
+      this._elevToastT = (this._elevToastT ?? 0) - dt;
+      if (this._elevToastT <= 0) {
+        this._elevToastT = 5;
+        game.hud?.showToast('Press E — elevator', 2.2);
+      }
+      if (game.input?.wasPressed('KeyE')) this.openElevUI(rec);
+      return;
+    }
+    if (game.input?.wasPressed('ArrowUp')) { this._elevUI.sel = Math.min(rec.plan.floors - 1, this._elevUI.sel + 1); this.renderElevUI(rec); }
+    if (game.input?.wasPressed('ArrowDown')) { this._elevUI.sel = Math.max(0, this._elevUI.sel - 1); this.renderElevUI(rec); }
+    if (game.input?.wasPressed('KeyE') || game.input?.wasPressed('Enter')) {
+      const target = this._elevUI.sel;
+      this.closeElevUI();
+      if (target !== rec.curFloor) {
+        game.hud?.fade(true);
+        game.audio?.chime?.();
+        this._elevRide = { rec, target, t: 0.8 + 0.1 * Math.abs(target - rec.curFloor) };
+      }
+    }
+  }
+
+  openElevUI(rec) {
+    if (!this._elevBox) {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;right:4vw;top:50%;transform:translateY(-50%);z-index:60;' +
+        'background:rgba(10,12,16,.88);border:1px solid rgba(255,255,255,.25);border-radius:8px;' +
+        'padding:14px 18px;font:14px/1.7 monospace;color:#e8e4da;min-width:150px;display:none;';
+      document.body.appendChild(d);
+      this._elevBox = d;
+    }
+    this._elevUI = { sel: rec.curFloor };
+    this.renderElevUI(rec);
+    this._elevBox.style.display = 'block';
+  }
+
+  renderElevUI(rec) {
+    if (!this._elevBox || !this._elevUI) return;
+    const sel = this._elevUI.sel;
+    const floors = rec.plan.floors;
+    const lo = Math.max(0, Math.min(sel - 4, floors - 9));
+    const hi = Math.min(floors - 1, lo + 8);
+    let html = '<div style="opacity:.7;margin-bottom:4px">ELEVATOR ▲▼ + E</div>';
+    for (let n = hi; n >= lo; n--) {
+      const name = n === 0 ? 'LOBBY' : 'FLOOR ' + (n + 1);
+      const here = n === rec.curFloor ? ' ·' : '';
+      html += n === sel
+        ? `<div style="color:#f2d24a">▶ ${name}${here}</div>`
+        : `<div style="opacity:.75">&nbsp;&nbsp;${name}${here}</div>`;
+    }
+    this._elevBox.innerHTML = html;
+  }
+
+  closeElevUI() {
+    this._elevUI = null;
+    if (this._elevBox) this._elevBox.style.display = 'none';
+  }
+
+  // camera ceiling for whatever height the player currently occupies
+  currentCeilY() {
+    const rec = this.playerInside;
+    if (!rec?.built) return null;
+    return (this.game.player.interiorY ?? rec.built.gy) + 2.95;
   }
 
   // fixed furniture per template, scaled into the building footprint
@@ -280,6 +585,20 @@ export class Interiors {
       solid(hw * 0.5, mz(-hd * 0.6), Math.min(2.6, hw * 0.8), 1.0, 0.8, this.couchMat);
       mesh(new THREE.BoxGeometry(1.6, 0.9, 0.12), this.tvMat, hw * 0.5, 1.4, mz(hd * 0.1));
       rec.bed = { x: b.x - hw * 0.55, z: b.z + mz(-hd * 0.5) };
+    } else if (t === 'lobby') {
+      // reception desk + planters — the stairwell/elevator do the real work
+      addCounter(hw * 0.35, -hd * 0.3, Math.min(4, w * 0.35));
+      solid(-hw * 0.5, mz(hd * 0.25), 0.8, 0.8, 0.9, this.shelfMat);
+      solid(hw * 0.55, mz(hd * 0.3), 0.8, 0.8, 0.9, this.shelfMat);
+    } else if (t === 'home') {
+      solid(-hw * 0.5, mz(-hd * 0.45), 1.7, 2.4, 0.55, this.bedMat);
+      solid(hw * 0.45, mz(-hd * 0.5), Math.min(2.4, hw * 0.7), 1.0, 0.8, this.couchMat);
+      mesh(new THREE.BoxGeometry(1.5, 0.85, 0.12), this.tvMat, hw * 0.45, 1.35, mz(hd * 0.15));
+    } else if (t === 'storage') {
+      const rows2 = Math.min(3, Math.floor(dep / 4));
+      for (let rr = 0; rr < rows2; rr++) {
+        solid(0, mz(-hd * 0.5 + rr * Math.min(3, hd * 0.5)), Math.min(w * 0.65, 8), 0.7, 2.0, this.shelfMat);
+      }
     }
   }
 
@@ -292,7 +611,7 @@ export class Interiors {
     rec.furnished = true;
     const b = rec.b, mzf = rec.built.face;
     const mz = (z) => (mzf > 0 ? z : -z);
-    if (rec.template !== 'safehouse' && !rec.keeperDead) {
+    if (!['safehouse', 'home', 'storage'].includes(rec.template) && !rec.keeperDead) {
       const look = KEEPER_LOOKS[rec.id % KEEPER_LOOKS.length];
       const keeper = new Goon(this.game.city, this.game.scene, {
         health: 60, aggroRange: 0, shootRange: 10, damage: 14, accuracy: 0.55,
@@ -348,6 +667,7 @@ export class Interiors {
     if (!rec.built) return;
     if (this.playerInside === rec) return;   // never yank the room out from under the player
     if (this.roomLightRec === rec) { this.roomLight.intensity = 0; this.roomLightRec = null; }
+    this.teardownUpper(rec);
     this.unfurnish(rec);
     const city = this.game.city;
     for (const box of rec.built.boxes) city.removeBox(box);
@@ -395,6 +715,11 @@ export class Interiors {
     for (const rec of this.builtSet) {
       if (rec.keeper && !rec.keeper.dead) list.push(rec.keeper);
       for (const d of rec.dancers) if (!d.dead) list.push(d);
+      if (rec.floorBuilt?.size) {
+        for (const f of rec.floorBuilt.values()) {
+          for (const r of f.residents) if (!r.dead) list.push(r);
+        }
+      }
     }
     return list;
   }
@@ -405,6 +730,7 @@ export class Interiors {
     if (!this.playerInside) return;
     const rec = this.playerInside;
     this.setRoomLight(rec, 0);
+    this.teardownUpper(rec);
     game.player.interiorY = null;
     game.audio?.setIndoors?.(false);
     this.playerInside = null;
@@ -417,6 +743,8 @@ export class Interiors {
     const game = this.game;
     this.playerInside = rec;
     this.current = rec.template;
+    rec.curFloor = 0;            // you come in off the street
+    this._stairFlight = null;
     this.robT = 0;               // robDrops lives on the rec — stepping out
     this.counterArmed = true;    // and back in can't reset a half-done heist
     game.player.interiorY = rec.built.gy;
@@ -431,6 +759,7 @@ export class Interiors {
     const game = this.game;
     const rec = this.playerInside;
     if (rec?.built) this.setRoomLight(rec, 0.6);   // dim spill from the last room
+    if (rec) this.teardownUpper(rec);
     this.playerInside = null;
     this.current = null;
     game.player.interiorY = null;
@@ -518,11 +847,21 @@ export class Interiors {
           );
         });
       }
+
+      // upper-floor residents (floors only exist in the occupied building)
+      if (rec.floorBuilt?.size) {
+        for (const f of rec.floorBuilt.values()) {
+          for (const r of f.residents) r.update(dt, game);
+        }
+      }
     }
 
     // ---- gameplay inside the current room ----
     const rec = this.playerInside;
     if (!rec) return;
+
+    // multi-floor: stairwell riding, elevator, per-floor Y pinning
+    if (rec.plan?.stair) this.updateFloors(rec, dt);
 
     // counter shop — opens once per approach; step away to re-arm
     if (rec.counterAction && rec.register) {

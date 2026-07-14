@@ -470,7 +470,8 @@ class Game {
     const insideRec = this.interiors?.playerInside;
     this.cameraRig.update(dt, camTarget, veh ? 2.1 : 1.55, {
       driving: !!veh, speed, aimMode: aiming,
-      ceilY: insideRec ? insideRec.built.gy + 2.95 : null,   // stay under the room ceiling
+      // stay under whatever ceiling the player's current floor has
+      ceilY: insideRec ? this.interiors.currentCeilY() : null,
     });
     // hide the player body in on-foot first-person so it doesn't clip the camera
     if (!veh && !this.player.dead) {

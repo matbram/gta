@@ -189,7 +189,15 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     arr.push(geo);
   }
 
-  const bandLists = [[], [], []];   // walk-in shopfront ground floors per variant
+  // walk-in ground floors, grouped by band material: shopfront variants for
+  // the shop blocks, the building's own facade material for everything else
+  // (every door'd building needs a hollow-able instanced ground band)
+  const bandLists = new Map();
+  const bandPush = (key, b) => {
+    let list = bandLists.get(key);
+    if (!list) { list = []; bandLists.set(key, list); }
+    list.push(b);
+  };
   const towerMats = ['glassA', 'glassB', 'office'];
   const blockMats = ['brick', 'stucco', 'office', 'concrete'];
   const houseMats = ['houseA', 'houseB', 'houseA', 'stucco'];
@@ -203,10 +211,23 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
     const ck = chunkOf(b.x, b.z);
     const H = b.h + 1.5;
 
+    // door'd buildings of ANY kind split their shell: the merged facade
+    // starts above the ground floor and the ground floor becomes a
+    // swappable instanced band the interiors system can hollow out
+    const shell = (mk, uvw, uvh) => {
+      if (b.hasDoor) {
+        const upperH = Math.max(b.h - 3.2, 1);
+        push(ck, mk, translated(facadeBox(b.w, upperH, b.d, uvw, uvh), b.x, ground + 3.2 + upperH / 2, b.z));
+        bandPush(mk, b);
+      } else {
+        push(ck, mk, translated(facadeBox(b.w, H, b.d, uvw, uvh), b.x, baseY + H / 2, b.z));
+      }
+    };
+
     switch (b.kind) {
       case 'tower': {
         const mk = towerMats[b.style % towerMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
+        shell(mk);
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w, 0.5, b.d), b.x, baseY + H + 0.25, b.z));
         // rooftop unit
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w * 0.3, 2.2, b.d * 0.3), b.x + b.w * 0.15, baseY + H + 1.35, b.z));
@@ -223,12 +244,9 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
         const sfv = Math.abs(Math.round(b.x * 7 + b.z * 3)) % 3;
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w, 0.45, b.d), b.x, baseY + H + 0.22, b.z));
         if (b.hasDoor) {
-          // walk-in shopfront: the merged shell starts above the ground
-          // floor; the ground floor is a swappable instanced band that the
-          // interiors system hides when it hollows the building out
           const upperH = Math.max(b.h - 3.2, 1);
           push(ck, mk, translated(facadeBox(b.w, upperH, b.d), b.x, ground + 3.2 + upperH / 2, b.z));
-          bandLists[sfv].push(b);
+          bandPush('shopfront' + sfv, b);
         } else {
           push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
           // street-level shopfront band, slightly proud of the facade
@@ -238,31 +256,27 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
         break;
       }
       case 'house': {
-        const mk = houseMats[b.style % houseMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d, 6, 6), b.x, baseY + H / 2, b.z));
+        shell(houseMats[b.style % houseMats.length], 6, 6);
         push(ck, 'roofShingle', translated(roofPrism(b.w + 0.8, 2.2, b.d + 0.8), b.x, baseY + H, b.z));
         break;
       }
       case 'warehouse': {
-        const mk = metalMats[b.style % metalMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
+        shell(metalMats[b.style % metalMats.length]);
         push(ck, 'roofMetal', translated(roofPrism(b.w + 0.5, 1.6, b.d + 0.5), b.x, baseY + H, b.z));
         break;
       }
       case 'hotel': {
-        const mk = hotelMats[b.style % hotelMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d), b.x, baseY + H / 2, b.z));
+        shell(hotelMats[b.style % hotelMats.length]);
         push(ck, 'roof', translated(new THREE.BoxGeometry(b.w, 0.4, b.d), b.x, baseY + H + 0.2, b.z));
         break;
       }
       case 'mansion': {
-        const mk = mansionMats[b.style % mansionMats.length];
-        push(ck, mk, translated(facadeBox(b.w, H, b.d, 8, 8), b.x, baseY + H / 2, b.z));
+        shell(mansionMats[b.style % mansionMats.length], 8, 8);
         push(ck, 'roofShingle', translated(roofPrism(b.w + 1, 2.6, b.d + 1), b.x, baseY + H, b.z));
         break;
       }
       case 'barn': {
-        push(ck, 'barnred', translated(facadeBox(b.w, H, b.d, 8, 8), b.x, baseY + H / 2, b.z));
+        shell('barnred', 8, 8);
         push(ck, 'roofMetal', translated(roofPrism(b.w + 0.6, 2.8, b.d + 0.6), b.x, baseY + H, b.z));
         break;
       }
@@ -291,10 +305,9 @@ export function buildCityMeshes(city, scene, seed = 1, assets = null) {
   {
     const dummy2 = new THREE.Object3D();
     const bandGeo = facadeBox(12, 3.2, 12, FACADE_TILE, 3.2);
-    for (let v = 0; v < 3; v++) {
-      const list = bandLists[v];
+    for (const [matKey, list] of bandLists) {
       if (!list.length) continue;
-      const im = new THREE.InstancedMesh(bandGeo, mats['shopfront' + v], list.length);
+      const im = new THREE.InstancedMesh(bandGeo, mats[matKey], list.length);
       im.castShadow = true;
       im.receiveShadow = true;
       for (let k = 0; k < list.length; k++) {

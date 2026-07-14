@@ -429,6 +429,35 @@ export function generateCity(seed = 1337) {
     }
   }
 
+  // -------- universal doors: every building gets a walk-in entrance --------
+  // Same convention the shop blocks use (door on the ±z face, flat ground);
+  // the interiors system turns each door'd building into real floors. A
+  // building whose faces are all blocked or sloped stays sealed — fine.
+  for (let bi = 0; bi < buildings.length; bi++) {
+    const b = buildings[bi];
+    if (b.hasDoor) continue;
+    for (const face of [-1, 1]) {
+      const dx = b.x, dz = b.z + face * (b.d / 2 + 0.6);
+      const g00 = groundHeight(b.x - b.w / 2, b.z - b.d / 2);
+      const g11 = groundHeight(b.x + b.w / 2, b.z + b.d / 2);
+      const gd = groundHeight(dx, dz);
+      if (Math.abs(g00 - gd) > 0.5 || Math.abs(g11 - gd) > 0.5) continue;
+      if (!landAt(dx, dz)) continue;
+      // the doorstep must not sit inside a neighbouring building
+      let blocked = false;
+      for (const box of queryColliders(dx, dz, 1.2)) {
+        if (box.kind === 'building' && box.owner !== b &&
+            dx > box.minX - 0.5 && dx < box.maxX + 0.5 &&
+            dz > box.minZ - 0.5 && dz < box.maxZ + 0.5) { blocked = true; break; }
+      }
+      if (blocked) continue;
+      b.doorId = doors.length;
+      b.hasDoor = true;
+      doors.push({ id: doors.length, x: dx, z: dz, face, b: bi });
+      break;
+    }
+  }
+
   // street furniture + greenery along every road (reference look: green streets)
   const TREE_DISTRICTS = { crown: 0.5, oldtown: 0.6, midtown: 0.55, suburbs: 0.85, heights: 0.5, park: 0.9, docks: 0.15, farm: 0.3, beach: 0 };
   for (const e of edges) {
