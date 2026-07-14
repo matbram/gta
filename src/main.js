@@ -150,6 +150,8 @@ class Game {
       await prog(92, 'arming the citizens…');
       const combat = await import('./systems/combat.js');
       this.combat = new combat.CombatSystem(this);
+      const proj = await import('./systems/projectiles.js');
+      this.projectiles = new proj.ProjectileSystem(this);
       const wanted = await import('./systems/wanted.js');
       this.wanted = new wanted.WantedSystem(this);
       this.state.wanted = this.wanted.state;
@@ -453,6 +455,7 @@ class Game {
     this.peds?.update(dt);
     this.impostors?.update(dt);
     this.combat?.update(dt, aiming);
+    this.projectiles?.update(dt);
     this.wanted?.update(dt);
     this.dispatch?.update(dt);
     this.interiors?.update(dt);

@@ -189,13 +189,15 @@ export class WorldLife {
 
     if (kind === 'gunshop') {
       $('shop-title').textContent = 'BULLSEYE ROUNDS';
-      for (const id of ['bat', 'pistol', 'smg', 'shotgun', 'rifle']) {
+      for (const id of ['bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov']) {
         const w = WEAPONS[id];
         const owned = game.combat.inventory[id];
+        const packSize = w.thrown ? 5 : (w.mag ?? 0) * 2;
         if (owned && !w.melee) {
-          addItem(w.icon, `${w.name} ammo`, Math.round(w.price * 0.25), () => game.combat.give(id, w.mag * 2), `+${w.mag * 2} rounds`);
+          addItem(w.icon, `${w.name} ${w.thrown ? '×5' : 'ammo'}`, Math.round(w.price * 0.25),
+            () => game.combat.give(id, packSize), w.thrown ? '+5' : `+${packSize} rounds`);
         } else if (!owned) {
-          addItem(w.icon, w.name, w.price, () => game.combat.give(id, w.melee ? 0 : w.mag * 2));
+          addItem(w.icon, w.name, w.price, () => game.combat.give(id, w.melee ? 0 : packSize));
         }
       }
       addItem('🦺', 'BODY ARMOR', 350, () => { game.player.armor = 100; });

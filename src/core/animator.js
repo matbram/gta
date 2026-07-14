@@ -349,6 +349,18 @@ export const GESTURES = {
     if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
     if (bones.head) { e.set(-0.15 * up + 0.2 * ease, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
   },
+  // overhand throw: wind back, torso counter-twist, whip forward
+  throwItem(bones, q, e, t) {
+    const wind = Math.min(t / 0.35, 1);
+    const whip = clamp((t - 0.35) / 0.3, 0, 1);
+    const ease = whip * whip * (3 - 2 * whip);
+    const arm = -1.6 * wind + 3.1 * ease;         // back over the shoulder, then rip forward
+    if (bones.armR) { e.set(arm, 0, 0.2 * wind); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.foreArmR) { e.set(-1.1 * wind * (1 - ease), 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.spine2) { e.set(0, 0.5 * wind - 0.9 * ease, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
+    if (bones.spine1) { e.set(0.12 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.armL) { e.set(-0.5 * ease, 0, 0.2 * ease); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+  },
   // landing dip: knees give and the torso pitches on touchdown; s scales
   // the depth with fall speed
   landDip(bones, q, e, t, s = 1) {

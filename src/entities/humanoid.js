@@ -545,6 +545,10 @@ export class SkinnedHumanoid {
     this.animator.startGesture(0.32, (t, bones, q, e) => GESTURES.landDip(bones, q, e, t, strength));
   }
 
+  throwGesture() {
+    this.animator.startGesture(0.45, (t, bones, q, e) => GESTURES.throwItem(bones, q, e, t));
+  }
+
   // ---- weapon animation API (combat.js drives these) ----
   setWeaponOverlays(aim, carry) {
     this.weaponAim = aim;

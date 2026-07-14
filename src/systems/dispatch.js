@@ -30,9 +30,19 @@ export class Dispatch {
     this.fxT = 0;
   }
 
-  reportFire(x, z, wreck = null) {
+  // opts (molotov fire patches): radius widens the burn/damage circle,
+  // dur caps the burn time, dmgPeds burns NPCs too (with the culprit
+  // carried into their deaths), strength scales the flame FX
+  reportFire(x, z, wreck = null, opts = null) {
     if (this.fires.some((f) => dist2d(f.x, f.z, x, z) < 8)) return;
-    this.fires.push({ x, z, t: 0, wreck, out: false });
+    this.fires.push({
+      x, z, t: 0, wreck, out: false,
+      radius: opts?.radius ?? 1.6,
+      dur: opts?.dur ?? 100,
+      dmgPeds: opts?.dmgPeds ?? false,
+      culprit: opts?.culprit ?? 'ai',
+      strength: opts?.strength ?? 1,
+    });
   }
 
   reportDeath(ped) {
@@ -48,16 +58,30 @@ export class Dispatch {
     // fires burn + hurt
     for (const f of [...this.fires]) {
       f.t += dt;
-      if (f.out || f.t > 100 || (f.wreck && !f.wreck.burning && f.t > 5)) {
+      if (f.out || f.t > (f.dur ?? 100) || (f.wreck && !f.wreck.burning && f.t > 5)) {
         this.fires.splice(this.fires.indexOf(f), 1);
         continue;
       }
+      const rad = f.radius ?? 1.6;
       if (this.fxT <= 0) {
-        game.particles?.fire(f.x, game.city.groundHeight(f.x, f.z) + 0.4, f.z, 2);
+        game.particles?.fire(f.x, game.city.groundHeight(f.x, f.z) + 0.4, f.z,
+          Math.round(2 * (f.strength ?? 1)));
+        if (rad > 2) {
+          // wide patches (molotov) burn across their whole footprint
+          const a = Math.random() * Math.PI * 2, r = Math.random() * rad * 0.8;
+          const fx = f.x + Math.cos(a) * r, fz = f.z + Math.sin(a) * r;
+          game.particles?.fire(fx, game.city.groundHeight(fx, fz) + 0.3, fz, 1);
+        }
       }
       const p = game.player.pos;
-      if (!game.player.vehicle && dist2d(p.x, p.z, f.x, f.z) < 1.6) {
+      if (!game.player.vehicle && dist2d(p.x, p.z, f.x, f.z) < rad) {
         game.player.damage(14 * dt, 'fire');
+      }
+      // molotov patches cook anyone standing in them
+      if (f.dmgPeds && game.peds) {
+        for (const ped of game.peds.nearPeds(f.x, f.z, rad)) {
+          if (!ped.dead) ped.damage(11 * dt, game, 'fire', null, f.culprit);
+        }
       }
     }
     if (this.fxT <= 0) this.fxT = 0.1;

@@ -25,9 +25,16 @@ export const WEAPONS = {
   rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500,
     animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7,
       vm: [0.24, -0.23, -0.5], ads: [0, -0.165, -0.38], scope: true } },
+  revolver: { name: 'JUDGE',   icon: '🔫', dmg: 60, rate: 0.75, range: 70, spread: 0.006, mag: 6, auto: false, sfx: 'pistol', price: 1600,
+    animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 1.3, reload: 'pistol', reloadTime: 2.0,
+      vm: [0.28, -0.26, -0.55], ads: [0, -0.175, -0.42] } },
+  grenade: { name: 'PINEAPPLE', icon: '💣', thrown: true, rate: 0.9, price: 900,
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.3, -0.3, -0.5] } },
+  molotov: { name: 'BAYSIDE COCKTAIL', icon: '🍾', thrown: true, rate: 0.9, price: 600,
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.3, -0.3, -0.5] } },
 };
 
-const ORDER = ['fists', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'];
+const ORDER = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov'];
 
 // tiny procedural weapon meshes held in the right hand
 function buildWeaponMesh(id) {
@@ -63,6 +70,18 @@ function buildWeaponMesh(id) {
       add(new THREE.BoxGeometry(0.04, 0.14, 0.05), dark, 0, -0.05, 0.05);
       add(new THREE.BoxGeometry(0.04, 0.1, 0.16), wood, 0, 0.02, 0.26);
       break;
+    case 'revolver':
+      add(new THREE.BoxGeometry(0.05, 0.1, 0.07), dark, 0, -0.025, 0.02);
+      add(new THREE.CylinderGeometry(0.028, 0.028, 0.09, 6), dark, 0, 0.04, -0.02).rotation.x = Math.PI / 2;
+      add(new THREE.CylinderGeometry(0.016, 0.016, 0.24, 6), dark, 0, 0.045, -0.14).rotation.x = Math.PI / 2;
+      break;
+    case 'grenade':
+      add(new THREE.SphereGeometry(0.075, 8, 6), new THREE.MeshLambertMaterial({ color: 0x27301f }), 0, -0.02, 0);
+      break;
+    case 'molotov':
+      add(new THREE.CylinderGeometry(0.045, 0.06, 0.26, 7),
+        new THREE.MeshLambertMaterial({ color: 0x3a5a2a }), 0, 0.04, 0);
+      break;
   }
   return g;
 }
@@ -86,7 +105,9 @@ export class CombatSystem {
     if (!this.inventory[id]) {
       this.inventory[id] = spec.melee
         ? { ammo: Infinity, inMag: Infinity }
-        : { ammo: Math.max(0, ammo - spec.mag), inMag: Math.min(ammo, spec.mag) };
+        : spec.thrown
+          ? { ammo, inMag: 0 }                    // thrown: a simple count
+          : { ammo: Math.max(0, ammo - spec.mag), inMag: Math.min(ammo, spec.mag) };
       this.select(id);
     } else if (!spec.melee) {
       this.inventory[id].ammo += ammo;
@@ -182,7 +203,7 @@ export class CombatSystem {
   updateHud() {
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
-    const ammoText = spec.melee ? '' : `${inv.inMag} · ${inv.ammo}`;
+    const ammoText = spec.melee ? '' : spec.thrown ? `×${inv.ammo}` : `${inv.inMag} · ${inv.ammo}`;
     this.game.hud?.setWeapon(spec.icon, spec.name, ammoText);
   }
 
@@ -198,6 +219,34 @@ export class CombatSystem {
     if (this.drawT != null) {
       this.drawT -= dt;
       if (this.drawT <= 0) { this.drawT = null; this.attachWeaponMesh(); }
+    }
+
+    // a wound-up throw releases on the whip beat of the gesture
+    if (this.throwPending && game.time >= this.throwPending.at) {
+      const tp = this.throwPending;
+      this.throwPending = null;
+      if (!player.dead && !player.vehicle) {
+        const dir = new THREE.Vector3();
+        game.camera.getWorldDirection(dir);
+        const sx = player.pos.x + Math.sin(player.heading) * 0.5;
+        const sz = player.pos.z + Math.cos(player.heading) * 0.5;
+        game.projectiles?.throwProjectile(tp.kind,
+          sx, player.pos.y + 1.5, sz,
+          dir.x * 16 + player.vel.x,
+          Math.max(dir.y * 16, -4) + 4.5,   // camera pitch aims the range
+          dir.z * 16 + player.vel.z,
+          'player');
+      }
+      // out of throwables: swap to something useful
+      if ((this.inventory[tp.kind]?.ammo ?? 0) <= 0 && this.current === tp.kind) this.cycle(-1);
+    }
+    // the next one appears in the hand once the throw beat is over
+    if (this._rearmT > 0) {
+      this._rearmT -= dt;
+      if (this._rearmT <= 0 && WEAPONS[this.current]?.thrown &&
+          (this.inventory[this.current]?.ammo ?? 0) > 0) {
+        this.attachWeaponMesh();
+      }
     }
     // shotgun pump cycle lands a beat after the shot
     if (this.pumpAt != null && game.time >= this.pumpAt) {
@@ -220,7 +269,7 @@ export class CombatSystem {
       const scoped = spec2.animSet?.scope && this.adsK > 0.7;
       game.cameraRig.adsZoom = this.adsK * (spec2.animSet?.scope ? 34 : 18);
       game.hud?.setScope?.(!!(scoped && fpFoot));
-      if (this.vmActive) this.vmActive.visible = !scoped;
+      if (this.vmActive) this.vmActive.visible = !scoped && !(this._rearmT > 0);
       // sway: the weapon lags the mouse slightly (camera-space)
       const mdx = game.input?.mouseDX ?? 0, mdy = game.input?.mouseDY ?? 0;
       this._swayX = (this._swayX ?? 0) + ((-mdx * 0.0009) - (this._swayX ?? 0)) * Math.min(1, dt * 10);
@@ -313,6 +362,22 @@ export class CombatSystem {
       return;
     }
 
+    // --- thrown: grenade / molotov ---
+    if (spec.thrown) {
+      if (game.interiors?.playerInside) return;   // not indoors
+      if (inv.ammo <= 0) return;
+      this.cooldown = spec.rate;
+      inv.ammo--;
+      player.rig.throwGesture?.();
+      // it left the hand: hide the held mesh until the follow-through ends
+      for (const k in this.weaponMeshes) this.weaponMeshes[k].visible = false;
+      if (this.vmActive) this.vmActive.visible = false;
+      this.throwPending = { at: game.time + 0.18, kind: this.current };
+      this._rearmT = 0.55;
+      this.updateHud();
+      return;
+    }
+
     // --- melee combo ---
     if (spec.melee) {
       // combo counter: chained hits within the window escalate 1→2→3 (finisher)
@@ -394,7 +459,7 @@ export class CombatSystem {
   startReload() {
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
-    if (spec.melee || this.reloading > 0) return;
+    if (spec.melee || spec.thrown || this.reloading > 0) return;
     if (inv.inMag >= spec.mag || inv.ammo <= 0) return;
     const anims = spec.animSet ?? {};
     const rig = this.game.player?.rig;
