@@ -37,7 +37,7 @@ curl --fail --silent --show-error --max-time 10 \
   --header "Authorization: Bearer ${ADH_PROJECT_TOKEN}" \
   --header "X-ADH-Session-ID: ${session_id}" \
   --header "X-ADH-Repository: ${repository}" \
-  --header 'X-ADH-Connector-Version: 4' \
+  --header 'X-ADH-Connector-Version: 5' \
   --header 'Content-Type: application/json' \
   --data-binary "$payload" \
   "${ADH_API_URL%/}/v1/session-captures"
