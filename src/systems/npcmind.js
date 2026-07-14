@@ -125,15 +125,23 @@ export function reactToMugging(ped) {
 export function reactToThreat(ped, distToThreat, directlyTargeted) {
   const p = ped.personality;
   if (!p) return 'flee';
+  const fm = ARCHETYPES[ped.archetype]?.fightMult ?? 1;
   if (directlyTargeted) {
-    // attacked personally: fight or flight, nothing fancy
-    return p.aggression * p.bravery > 0.42 ? 'fight' : 'flee';
+    // attacked personally: fight or flight, weighted by who they are —
+    // thugs and gangsters swing back, vendors defend their stall (only
+    // when they're actually at it), wimps and the elderly never fight
+    let fight = p.aggression * p.bravery * fm > 0.42;
+    if (fight && ped.archetype === 'vendor' && ped.homeX !== undefined &&
+        Math.hypot(ped.pos.x - ped.homeX, ped.pos.z - ped.homeZ) > 8) fight = false;
+    if (fight) return 'fight';
+    if (ped.archetype === 'elderly') return distToThreat < 6 ? 'cower' : 'flee';
+    return 'flee';
   }
   const scores = {
     flee: (1 - p.bravery) * 0.9 + 0.25,
     cower: distToThreat < 9 ? (1 - p.bravery) * 0.5 + (ped.archetype === 'elderly' ? 0.55 : 0) : 0,
     film: distToThreat > 11 ? p.curiosity * p.bravery * 1.45 : 0,
-    fight: distToThreat < 7 ? p.aggression * p.bravery * (ped.archetype === 'gangster' ? 1.7 : 0.8) : 0,
+    fight: distToThreat < 7 ? p.aggression * p.bravery * fm * 0.8 : 0,
     call: distToThreat > 8 ? p.civic * 1.15 : 0,
   };
   let best = 'flee', bs = -1;
