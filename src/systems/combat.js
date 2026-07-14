@@ -169,9 +169,12 @@ export class CombatSystem {
   }
 
   gateVm() {
-    if (!this.vmGroup) return;
+    if (!this.vmGroup) return false;
     const player = this.game.player;
-    const fpFoot = this.game.cameraRig.firstPerson && !player.vehicle && !player.dead;
+    // !! matters: firstPerson starts undefined, and three.js only skips
+    // objects whose visible is EXACTLY false — an undefined here rendered
+    // the viewmodel in third person until first-person was toggled once
+    const fpFoot = !!(this.game.cameraRig.firstPerson && !player.vehicle && !player.dead);
     this.vmGroup.visible = fpFoot && !!this.vmActive;
     return fpFoot;
   }
