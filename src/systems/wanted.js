@@ -160,7 +160,8 @@ export class WantedSystem {
     for (let i = 6; i >= 1; i--) if (h >= STAR_TH[i]) { stars = i; break; }
     if (stars > this.state.stars && !silent) {
       this.game.audio?.wantedUp();
-      this.game.voice?.say?.('cops', 0.7);
+      // things getting serious at 3★ earns its own line
+      this.game.voice?.say?.(stars >= 3 ? 'star3' : 'cops', 0.7);
       // police scanner call-out on first wanted + escalations
       if (this.state.stars === 0) {
         const p = this.game.player.pos;

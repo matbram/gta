@@ -9,6 +9,22 @@ import { RNG } from '../core/rng.js';
 
 const $ = (id) => document.getElementById(id);
 
+// shared map icon set, keyed by city.pois key — one source of truth for
+// both the big map markers and its legend so "where can I do things" reads
+// at a glance
+const POI_ICONS = {
+  safehouse:     { glyph: '🏠', color: '#5fae52', label: 'Safehouse (save)' },
+  gunShop:       { glyph: '🔫', color: '#b03a2e', label: 'Gun shop' },
+  respray:       { glyph: '🎨', color: '#4a7fb5', label: 'Respray' },
+  foodShop:      { glyph: '🍔', color: '#d87a3a', label: 'Food (heal)' },
+  hospital:      { glyph: '➕', color: '#e05a5a', label: 'Hospital' },
+  taxiDepot:     { glyph: '🚕', color: '#e8c84a', label: 'Taxi depot' },
+  policeHQ:      { glyph: '🛡️', color: '#3a6a9a', label: 'Police HQ' },
+  nightclub:     { glyph: '🎵', color: '#a05ac0', label: 'Nightclub' },
+  docksWarehouse:{ glyph: '📦', color: '#8a7a5a', label: 'Warehouse' },
+  mansion:       { glyph: '🏛️', color: '#c8b070', label: 'Mansion' },
+};
+
 export class WorldLife {
   constructor(game) {
     this.game = game;
@@ -77,10 +93,14 @@ export class WorldLife {
   }
 
   provideBlips(blips) {
-    // POmarkers as coloured squares
-    const colors = { safehouse: '#5fae52', gunshop: '#b03a2e', respray: '#4a7fb5', food: '#d87a3a' };
+    // service markers: distinct colour + icon glyph so each is legible
+    const meta = {
+      safehouse: { color: '#5fae52', glyph: '🏠' }, gunshop: { color: '#b03a2e', glyph: '🔫' },
+      respray: { color: '#4a7fb5', glyph: '🎨' }, food: { color: '#d87a3a', glyph: '🍔' },
+    };
     for (const m of this.markers) {
-      blips.push({ x: m.x, z: m.z, color: colors[m.kind] || '#ccc', shape: 'square' });
+      const mi = meta[m.kind] || { color: '#ccc' };
+      blips.push({ x: m.x, z: m.z, color: mi.color, shape: 'square', letter: mi.glyph });
     }
     // taxi gig target
     if (this.taxiGig) blips.push({ x: this.taxiGig.x, z: this.taxiGig.z, color: '#e8c84a' });
@@ -182,6 +202,7 @@ export class WorldLife {
         if (!game.spendMoney(price)) { game.hud.showToast('Not enough cash.', 2); return; }
         cb();
         game.audio?.cash();
+        game.voice?.say?.('purchase', 0.4);
         this.closeShop();
       };
       panel.appendChild(div);
@@ -350,36 +371,36 @@ export class WorldLife {
       ctx.stroke();
     }
 
-    const drawIcon = (x, z, color, letter) => {
+    const drawIcon = (x, z, color, glyph, r = 9) => {
       ctx.fillStyle = color;
       ctx.strokeStyle = '#111';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(px(x), px(z), 8, 0, Math.PI * 2);
+      ctx.arc(px(x), px(z), r, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
-      if (letter) {
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px Arial';
+      if (glyph) {
+        ctx.font = `${r + 2}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(letter, px(x), px(z) + 0.5);
+        ctx.fillText(glyph, px(x), px(z) + 0.5);
       }
     };
 
-    // POIs
+    // shared POI icon set — every place you can DO something, always shown
     const p = game.city.pois;
-    drawIcon(p.safehouse.x, p.safehouse.z, '#5fae52', 'S');
-    drawIcon(p.gunShop.x, p.gunShop.z, '#b03a2e', 'A');
-    drawIcon(p.respray.x, p.respray.z, '#4a7fb5', 'P');
-    drawIcon(p.hospital.x, p.hospital.z, '#e8e4dc', 'H');
-    drawIcon(p.foodShop.x, p.foodShop.z, '#d87a3a', 'F');
-    // mission contacts
+    for (const [key, meta] of Object.entries(POI_ICONS)) {
+      if (p[key]) drawIcon(p[key].x, p[key].z, meta.color, meta.glyph);
+    }
+    // mission contacts (kept as their lettered blips)
     const blips = [];
     game.missions?.provideBlips?.(blips);
     for (const b of blips) if (b.letter) drawIcon(b.x, b.z, b.color, b.letter);
 
     // waypoint
-    if (game.state.waypoint) drawIcon(game.state.waypoint.x, game.state.waypoint.z, '#8a4a8a', 'W');
+    if (game.state.waypoint) drawIcon(game.state.waypoint.x, game.state.waypoint.z, '#8a4a8a', '📍');
+
+    // legend panel
+    this.drawMapLegend(ctx, S);
 
     // player
     const pp = game.player.pos;
@@ -392,6 +413,42 @@ export class WorldLife {
     ctx.moveTo(0, -10); ctx.lineTo(6, 8); ctx.lineTo(0, 4); ctx.lineTo(-6, 8);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  drawMapLegend(ctx, S) {
+    const p = this.game.city.pois;
+    const rows = Object.entries(POI_ICONS).filter(([k]) => p[k]);
+    const pad = 10, lh = 20, boxW = 168, boxH = pad * 2 + rows.length * lh + 20;
+    const x0 = 12, y0 = S - boxH - 12;
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,12,14,0.82)';
+    ctx.strokeStyle = 'rgba(120,110,90,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(x0, y0, boxW, boxH);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#d8ccb8';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('MAP KEY', x0 + pad, y0 + pad + 6);
+    let yy = y0 + pad + 24;
+    for (const [, meta] of rows) {
+      ctx.font = '15px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = meta.color;
+      ctx.beginPath();
+      ctx.arc(x0 + pad + 7, yy, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillText(meta.glyph, x0 + pad + 7, yy + 0.5);
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#cbbfa8';
+      ctx.fillText(meta.label, x0 + pad + 22, yy + 0.5);
+      yy += lh;
+    }
     ctx.restore();
   }
 

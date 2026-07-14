@@ -273,6 +273,7 @@ class Game {
     this.player._audio = this.audio;
     this.player._gore = this.gore;
     this.player._vehicles = this.vehicles;   // standable roofs (jump on cars)
+    this.player._voice = this.voice;         // hard-landing quips
     this.deathFlow = null;
   }
 
@@ -489,8 +490,10 @@ class Game {
     const zone = this.interiors?.current ? this.state.zone
       : districtName(this.city.districtAt(this.player.pos.x, this.player.pos.z));
     if (zone && zone !== this.state.zone) {
+      const first = this.state.zone != null;   // skip the very first assignment
       this.state.zone = zone;
       this.hud.showZone(zone);
+      if (first && !veh) this.voice?.say?.('district', 0.5);
     }
 
     // lock-on screen marker

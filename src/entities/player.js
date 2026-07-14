@@ -176,6 +176,7 @@ export class Player {
       // landing dip sells the impact (deeper for harder falls)
       if (!this.grounded && this.vel.y < -5 && this.rollT <= 0) {
         this.rig.landGesture?.(clamp(-this.vel.y / 14, 0.4, 1));
+        if (this.vel.y < -10) this._voice?.say?.('hardland', 0.5);
       }
       this.pos.y = g2;
       this.vel.y = 0;

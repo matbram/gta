@@ -325,7 +325,7 @@ export class Cop extends Ped {
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.audio?.scream(this.pos.x, this.pos.z);
     const culprit = this.killedBy ?? 'player';
-    if (culprit === 'player') game.state.stats.kills++;
+    if (culprit === 'player') { game.state.stats.kills++; game.voice?.say?.('copkill', 0.6); game.voice?.notifyKill?.(); }
     game.peds?.panicAt(this.pos.x, this.pos.z, 26, null, culprit);
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 20 + Math.floor(Math.random() * 30));
     // his sidearm skitters loose — anyone can grab it (tough units carry rifles)

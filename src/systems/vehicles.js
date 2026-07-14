@@ -730,6 +730,7 @@ export class VehicleSystem {
     // white screen flash + a beat of hit-stop when it goes off in your face
     game.hud?.boomFlash?.(clamp(1 - pd / 30, 0, 0.85));
     if (pd < 14) game.hitStopT = Math.max(game.hitStopT ?? 0, 0.09);
+    if (pd < 22) game.voice?.say?.('boom', 0.5);
     if (pd < radius + 1 && !player.vehicle) player.damage((radius + 1 - pd) * 12, 'explosion');
     if (player.vehicle && player.vehicle !== skipVehicle &&
         dist2d(x, z, player.vehicle.pos.x, player.vehicle.pos.z) < radius) {

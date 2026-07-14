@@ -343,6 +343,7 @@ export class Ped {
     if ((this.killedBy ?? 'player') === 'player') {
       game.state.stats.kills++;
       if (!this.isGoon && !this.isCop) game.voice?.say?.('kill', 0.2);
+      game.voice?.notifyKill?.();
     }
     // the death scream carries — those who see it panic, others turn to look
     game.peds?.senseEvent?.(this.pos.x, this.pos.z, 'scream', this.killedBy ?? 'player');
