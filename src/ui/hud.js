@@ -104,10 +104,10 @@ export class Hud {
     const veh = p.vehicle;
     if (veh) {
       this.el.speedo.classList.remove('hidden');
-      const kmh = Math.round(Math.abs(veh.speed) * 3.6);
-      if (kmh !== this._kmh) {
-        this._kmh = kmh;
-        this.el.speedoKmh.textContent = kmh;
+      const mph = Math.round(Math.abs(veh.speed) * 2.237);   // m/s → mph
+      if (mph !== this._kmh) {
+        this._kmh = mph;
+        this.el.speedoKmh.textContent = mph;
         this.el.speedoBar.style.width =
           `${clamp(Math.abs(veh.speed) / veh.spec.maxSpeed, 0, 1) * 100}%`;
       }

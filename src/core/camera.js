@@ -161,7 +161,7 @@ export class CameraRig {
     this.camera.lookAt(lookAt);
 
     // FOV kick with vehicle speed
-    const targetKick = driving ? clamp(speed / 40, 0, 1) * 14 : 0;
+    const targetKick = driving ? clamp(speed / 55, 0, 1) * 14 : 0;
     this.fovKick = damp(this.fovKick, targetKick, 3, dt);
     const fov = this.baseFov + this.fovKick + (aimMode ? -12 : 0);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
