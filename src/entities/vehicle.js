@@ -212,6 +212,7 @@ export class Vehicle {
     const cols = this.city.queryColliders(this.pos.x, this.pos.z, this.boundR + 1.5);
     for (const b of cols) {
       if (b.gone) continue;   // knocked-loose prop, collider being retired
+      if (b.baseY != null && b.baseY > this.pos.y + 2) continue;   // upper-floor walls
       const hit = obbVsAabb(this.pos.x, this.pos.z, this.hw, this.hl, this.heading,
         b.minX, b.minZ, b.maxX, b.maxZ);
       if (!hit) continue;

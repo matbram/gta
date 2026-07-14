@@ -4,11 +4,12 @@
 
 import * as THREE from 'three';
 import { Vehicle, VEHICLE_TYPES } from '../entities/vehicle.js';
-import { clamp, dist2d, distSq2d, lerp, obbVsObb } from '../core/mathutil.js';
+import { clamp, dist2d, distSq2d, lerp, obbVsObb, circleVsObb, circleVsAabb } from '../core/mathutil.js';
 
 // scratch OBBs for the pair loop (no per-pair garbage)
 const _oa = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 const _ob = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
+const _solid = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 
 export class VehicleSystem {
   constructor(game) {
@@ -380,26 +381,25 @@ export class VehicleSystem {
       }
     }
 
-    // run-over checks: vehicles vs pedestrians & player
+    // vehicles vs people: fast cars run people over; EVERY car — parked,
+    // idling or rolling — is a solid body nobody can walk through
     for (const v of vs) {
       const sp = Math.hypot(v.vel.x, v.vel.y);
-      if (sp < 2.5) {
-        // slow contact shoulders people aside instead of intersecting
-        if (sp > 0.3) this.game.peds?.nudgeAside(v, dt);
-        continue;
-      }
-      this.game.peds?.checkRunOver(v, sp);
-      if (v.driver !== 'player' && !player.vehicle && !player.dead) {
-        if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
-            game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
-          v._lastPlayerHitT = game.time;
-          player.damage(sp * 3.2, 'runover', v.pos);
-          player.vel.x += v.vel.x * 0.6;
-          player.vel.z += v.vel.y * 0.6;
-          player.vel.y = 3;
-          player.grounded = false;
+      if (sp >= 2.5) {
+        this.game.peds?.checkRunOver(v, sp);
+        if (v.driver !== 'player' && !player.vehicle && !player.dead) {
+          if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
+              game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
+            v._lastPlayerHitT = game.time;
+            player.damage(sp * 3.2, 'runover', v.pos);
+            player.vel.x += v.vel.x * 0.6;
+            player.vel.z += v.vel.y * 0.6;
+            player.vel.y = 3;
+            player.grounded = false;
+          }
         }
       }
+      this.resolvePeopleVsVehicle(v);
     }
 
     // damage visuals + explosions
@@ -491,6 +491,40 @@ export class VehicleSystem {
     player.setVisible(true);
     this.game.audio?.stopEngine();
     this.game.audio?.radio?.stop();
+  }
+
+  // push people (peds + player) out of a vehicle's oriented box, then
+  // re-resolve statics once so a car can't shove someone through a wall
+  resolvePeopleVsVehicle(v) {
+    const game = this.game;
+    const peds = game.peds;
+    _solid.x = v.pos.x; _solid.z = v.pos.z;
+    _solid.hw = v.hw; _solid.hl = v.hl; _solid.heading = v.heading;
+    const restatic = (p, r) => {
+      for (const b of game.city.queryColliders(p.pos.x, p.pos.z, r + 0.5)) {
+        if (b.gone) continue;
+        const h = circleVsAabb(p.pos.x, p.pos.z, r, b.minX, b.minZ, b.maxX, b.maxZ);
+        if (h) { p.pos.x = h.x; p.pos.z = h.z; }
+      }
+    };
+    if (peds) {
+      for (const ped of peds._vehicleTargets(v, v.boundR + 0.8)) {
+        if (ped.dead || ped.inVehicle || ped.interiorY != null) continue;
+        const hit = circleVsObb(ped.pos.x, ped.pos.z, 0.35, _solid);
+        if (!hit) continue;
+        ped.pos.x = hit.x; ped.pos.z = hit.z;
+        restatic(ped, 0.35);
+      }
+    }
+    const pl = game.player;
+    if (!pl.vehicle && !pl.dead &&
+        distSq2d(pl.pos.x, pl.pos.z, v.pos.x, v.pos.z) < (v.boundR + 1) * (v.boundR + 1)) {
+      const hit = circleVsObb(pl.pos.x, pl.pos.z, 0.38, _solid);
+      if (hit) {
+        pl.pos.x = hit.x; pl.pos.z = hit.z;
+        restatic(pl, 0.38);
+      }
+    }
   }
 
   explodeFx(v) {

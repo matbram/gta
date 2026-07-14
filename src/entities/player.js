@@ -227,6 +227,8 @@ export class Player {
   collide() {
     const cols = this.city.queryColliders(this.pos.x, this.pos.z, RADIUS + 1);
     for (const b of cols) {
+      // boxes on other floors (absolute-Y band) don't exist for us
+      if (b.baseY != null && (this.pos.y > b.baseY + b.h - 0.2 || this.pos.y + 1.7 < b.baseY)) continue;
       // ignore boxes we are standing on top of (none currently walkable)
       const hit = circleVsAabb(this.pos.x, this.pos.z, RADIUS, b.minX, b.minZ, b.maxX, b.maxZ);
       if (hit) {

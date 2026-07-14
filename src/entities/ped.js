@@ -3,13 +3,14 @@
 
 import * as THREE from 'three';
 import { Humanoid, randomLook } from './humanoid.js';
-import { clamp, angleDamp, circleVsAabb, dist2d } from '../core/mathutil.js';
+import { clamp, angleDamp, circleVsAabb, circleVsObb, dist2d, distSq2d } from '../core/mathutil.js';
 import { ARCHETYPES, makePersonality, reactToThreat } from '../systems/npcmind.js';
 
 const RADIUS = 0.35;
 let nextPedId = 1;
 const _headQ = new THREE.Quaternion();
 const _headAxis = new THREE.Vector3(0, 1, 0);
+const _probeObb = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 
 export class Ped {
   constructor(city, scene, look, opts = {}) {
@@ -501,11 +502,46 @@ export class Ped {
     this.syncRig();
   }
 
+  // is a probe point ~a body-width blocked by a wall, prop or vehicle?
+  _probeBlocked(ang, dist) {
+    const px = this.pos.x + Math.sin(ang) * dist;
+    const pz = this.pos.z + Math.cos(ang) * dist;
+    for (const b of this.city.queryColliders(px, pz, RADIUS + 0.05)) {
+      if (b.gone) continue;
+      if (circleVsAabb(px, pz, RADIUS + 0.05, b.minX, b.minZ, b.maxX, b.maxZ)) return true;
+    }
+    const vehicles = this.game?.vehicles?.vehicles;
+    if (vehicles) {
+      for (const v of vehicles) {
+        if (distSq2d(px, pz, v.pos.x, v.pos.z) > (v.boundR + 0.6) * (v.boundR + 0.6)) continue;
+        _probeObb.x = v.pos.x; _probeObb.z = v.pos.z;
+        _probeObb.hw = v.hw; _probeObb.hl = v.hl; _probeObb.heading = v.heading;
+        if (circleVsObb(px, pz, RADIUS + 0.05, _probeObb)) return true;
+      }
+    }
+    return false;
+  }
+
   moveToward(tx, tz, speed, dt) {
     const dx = tx - this.pos.x, dz = tz - this.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.2) { this.speed = 0; return; }
-    const want = Math.atan2(dx, dz);
+    let want = Math.atan2(dx, dz);
+    // look-ahead avoidance: probe a step ahead a few times a second and
+    // steer around lamp posts, hydrants, walls and parked cars instead of
+    // walking face-first into them and sliding
+    this._avoidT = (this._avoidT ?? 0) - dt;
+    if (this._avoidT <= 0) {
+      this._avoidT = 0.12 + Math.random() * 0.08;
+      this._avoid = 0;
+      if (this._probeBlocked(want, 1.3)) {
+        const s = Math.random() < 0.5 ? 1 : -1;   // vary preferred side
+        if (!this._probeBlocked(want - 0.75 * s, 1.2)) this._avoid = -0.75 * s;
+        else if (!this._probeBlocked(want + 0.75 * s, 1.2)) this._avoid = 0.75 * s;
+        else this._avoid = 1.5 * s;               // boxed in: turn hard
+      }
+    }
+    want += this._avoid ?? 0;
     this.heading = angleDamp(this.heading, want, 8, dt);
     this.speed = speed;
     const mx = Math.sin(this.heading) * speed * dt;
@@ -515,6 +551,7 @@ export class Ped {
     // static collision: slide along buildings
     const cols = this.city.queryColliders(this.pos.x, this.pos.z, RADIUS + 0.6);
     for (const b of cols) {
+      if (b.baseY != null && (this.pos.y > b.baseY + b.h - 0.2 || this.pos.y + 1.7 < b.baseY)) continue;
       const hit = circleVsAabb(this.pos.x, this.pos.z, RADIUS, b.minX, b.minZ, b.maxX, b.maxZ);
       if (hit) {
         this.pos.x = hit.x;

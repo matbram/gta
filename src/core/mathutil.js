@@ -57,6 +57,37 @@ export function circleVsAabb(x, z, r, minX, minZ, maxX, maxZ) {
   return { x, z: maxZ + r, nx: 0, nz: 1, depth: far + r };
 }
 
+// Push a circle (x, z, r) out of an oriented box {x, z, hw, hl, heading}.
+// Returns null or {x, z, nx, nz, depth} in world space (mirrors circleVsAabb).
+export function circleVsObb(px, pz, r, obb) {
+  const s = Math.sin(obb.heading), c = Math.cos(obb.heading);
+  const dx = px - obb.x, dz = pz - obb.z;
+  // into OBB frame: l along the length axis (sin h, cos h), w along width
+  const l = dx * s + dz * c;
+  const w = dx * c - dz * s;
+  const cl = clamp(l, -obb.hl, obb.hl);
+  const cw = clamp(w, -obb.hw, obb.hw);
+  let nl, nw, depth;
+  if (cl !== l || cw !== w) {
+    // centre outside: closest point on the box perimeter
+    const el = l - cl, ew = w - cw;
+    const d2 = el * el + ew * ew;
+    if (d2 >= r * r) return null;
+    const d = Math.sqrt(d2) || 1e-6;
+    nl = el / d; nw = ew / d;
+    depth = r - d;
+  } else {
+    // centre inside: push out along the smallest local-axis penetration
+    const pl = obb.hl - Math.abs(l), pw = obb.hw - Math.abs(w);
+    if (pw <= pl) { nw = w >= 0 ? 1 : -1; nl = 0; depth = pw + r; }
+    else { nl = l >= 0 ? 1 : -1; nw = 0; depth = pl + r; }
+  }
+  // normal back to world space
+  const nx = nl * s + nw * c;
+  const nz = nl * c - nw * s;
+  return { x: px + nx * depth, z: pz + nz * depth, nx, nz, depth };
+}
+
 // 2D oriented-box helpers. An OBB is (cx, cz, hw, hl, heading) where heading is
 // the yaw of the +length axis (matches vehicle.heading: forward = (sin h, cos h)).
 

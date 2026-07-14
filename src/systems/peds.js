@@ -382,28 +382,6 @@ export class PedSystem {
     }
   }
 
-  // slow rolling cars shoulder people aside instead of passing through them
-  nudgeAside(vehicle, dt) {
-    const r = vehicle.radius + 0.45;
-    for (const ped of this._vehicleTargets(vehicle, r + 0.5)) {
-      if (ped.dead || ped.inVehicle) continue;
-      const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
-      if (d >= r || d < 1e-4) continue;
-      const push = Math.min(r - d, 3.5 * dt);
-      ped.pos.x += (ped.pos.x - vehicle.pos.x) / d * push;
-      ped.pos.z += (ped.pos.z - vehicle.pos.z) / d * push;
-    }
-    const pl = this.game.player;
-    if (!pl.vehicle && !pl.dead) {
-      const d = dist2d(pl.pos.x, pl.pos.z, vehicle.pos.x, vehicle.pos.z);
-      if (d < r && d > 1e-4) {
-        const push = Math.min(r - d, 3.5 * dt);
-        pl.pos.x += (pl.pos.x - vehicle.pos.x) / d * push;
-        pl.pos.z += (pl.pos.z - vehicle.pos.z) / d * push;
-      }
-    }
-  }
-
   // driver pulled out during a carjack becomes a fleeing ped
   ejectDriver(pedLike, vehicle) {
     if (!pedLike || pedLike === 'player') return;

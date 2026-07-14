@@ -200,8 +200,14 @@ export class WantedSystem {
         }
         if (t1 <= t0 || t1 <= 0.02 || t0 >= 0.98) continue;
         const tm = (Math.max(t0, 0) + Math.min(t1, 1)) / 2;
+        const ey = y1 + dy * tm;
+        // upper-floor walls (absolute-Y band) only occlude within their band
+        if (b.baseY != null) {
+          if (ey >= b.baseY && ey < b.baseY + b.h) return false;
+          continue;
+        }
         const ground = city.groundHeight(x1 + dx * tm, z1 + dz * tm);
-        if (y1 + dy * tm < ground + b.h) return false;
+        if (ey < ground + b.h) return false;
       }
     }
     return true;

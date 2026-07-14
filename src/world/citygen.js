@@ -235,8 +235,12 @@ export function generateCity(seed = 1337) {
   let nextBoxId = 1;
   let queryStamp = 0;
   function bucketKey(bx, bz) { return bx + '|' + bz; }
-  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building', owner = null) {
-    const box = { id: nextBoxId++, minX, minZ, maxX, maxZ, h, kind, owner, _stamp: 0 };
+  // baseY: colliders are 2D by default (null = grounded, full height).
+  // Upper-storey interior walls pass an absolute world-Y base so consumers
+  // can skip boxes outside their own height band — a 5th-floor wall must
+  // never block the street below.
+  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building', owner = null, baseY = null) {
+    const box = { id: nextBoxId++, minX, minZ, maxX, maxZ, h, kind, owner, baseY, _stamp: 0 };
     boxes.push(box);
     const b0x = Math.floor((minX + HALF) / BUCKET), b1x = Math.floor((maxX + HALF) / BUCKET);
     const b0z = Math.floor((minZ + HALF) / BUCKET), b1z = Math.floor((maxZ + HALF) / BUCKET);
