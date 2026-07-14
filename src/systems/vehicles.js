@@ -68,6 +68,10 @@ export class VehicleSystem {
     if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
       veh._lastCrashSfxT = this.game.time;
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
+      // wall hits rock the body; truly violent ones get a little air
+      veh.crashKick(-Math.sin(veh.heading), -Math.cos(veh.heading), impact,
+        impact > 14 ? 2 : 0);
+      if (veh.type === 'moto' && impact > 8 && veh.driver) this.ejectRider(veh, impact);
       if (impact > 7) {
         this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash',
           veh.driver === 'player' ? 'player' : 'ai');
@@ -79,6 +83,43 @@ export class VehicleSystem {
       }
     }
     return false;
+  }
+
+  // a hard motorcycle impact throws the rider — no walking away from a
+  // wall at 60. The player takes bail damage and tumbles with the bike's
+  // momentum; AI riders are ejected and hit the pavement (fatal ejections
+  // feed the verlet ragdoll the bike's velocity).
+  ejectRider(v, impact) {
+    const game = this.game;
+    if (game.time - (v._lastEjectT ?? -9) < 1.5) return;
+    v._lastEjectT = game.time;
+    if (v.driver === 'player') {
+      const player = game.player;
+      player.vehicle = null;
+      v.driver = null;
+      player.teleport(v.pos.x, v.pos.z, v.heading);
+      player.setVisible(true);
+      player.vel.x = v.vel.x * 0.85;
+      player.vel.z = v.vel.y * 0.85;
+      player.vel.y = 4;
+      player.grounded = false;
+      player.damage(Math.min(45, (impact - 6) * 2.5), 'bail');
+      game.cameraRig.addShake(0.7);
+      game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 8);
+      game.audio?.stopEngine();
+      game.audio?.radio?.stop();
+      game.voice?.say?.('crash', 0.9);
+    } else if (v.driver && v.driver !== 'player') {
+      const ped = v.driver;
+      v.driver = null;
+      game.peds?.ejectDriver(ped, v);
+      const sp = Math.hypot(v.vel.x, v.vel.y) || 1;
+      ped.damage(impact * 2, game, 'runover',
+        { dx: v.vel.x / sp, dz: v.vel.y / sp, force: impact * 0.5, up: 2,
+          vx: v.vel.x * 0.6, vz: v.vel.y * 0.6 },
+        v._lastHitBy === 'player' ? 'player' : 'ai');
+      game.traffic?.releaseVehicle(v);
+    }
   }
 
   nearestVehicle(x, z, maxDist = 4, filter = null) {
@@ -309,12 +350,26 @@ export class VehicleSystem {
             const rvx = b.vel.x - a.vel.x, rvz = b.vel.y - a.vel.y;
             const rel = rvx * nx + rvz * nz;
             if (rel < 0) {
-              const impulse = -rel * 0.8;
+              // restitution 0.3: rammed cars get properly shoved, not parked
+              const impulse = -rel * 1.3;
               a.vel.x -= nx * impulse * (mb / tot);
               a.vel.y -= nz * impulse * (mb / tot);
               b.vel.x += nx * impulse * (ma / tot);
               b.vel.y += nz * impulse * (ma / tot);
               const impact = -rel;
+              if (impact > 3) {
+                // glancing hits twist the cars; hard hits rock/lift the
+                // lighter one and can throw a rider off a motorcycle
+                const spinSign = (a.pos.x - b.pos.x) * -nz + (a.pos.z - b.pos.z) * nx >= 0 ? 1 : -1;
+                a.angKick += spinSign * impact * 0.03 * (mb / tot);
+                b.angKick -= spinSign * impact * 0.03 * (ma / tot);
+                a.crashKick(nx, nz, impact * (mb / tot),
+                  impact > 10 && ma <= mb ? Math.min(6, impact * 0.22) : 0);
+                b.crashKick(-nx, -nz, impact * (ma / tot),
+                  impact > 10 && mb <= ma ? Math.min(6, impact * 0.22) : 0);
+                if (a.type === 'moto' && impact > 8 && a.driver) this.ejectRider(a, impact);
+                if (b.type === 'moto' && impact > 8 && b.driver) this.ejectRider(b, impact);
+              }
               if (impact > 5) {
                 const culprit = (a.driver === 'player' || b.driver === 'player') ? 'player' : 'ai';
                 a.applyDamage(impact * 1.2, 'crash', culprit);
@@ -544,7 +599,12 @@ export class VehicleSystem {
     for (const o of this.vehicles) {
       if (o === v || o.dead) continue;
       const d = dist2d(x, z, o.pos.x, o.pos.z);
-      if (d < 8) o.applyDamage((8 - d) * 9, 'explosion', culprit);
+      if (d < 8) {
+        o.applyDamage((8 - d) * 9, 'explosion', culprit);
+        // blast wave rocks and lifts nearby cars
+        const nd = d || 1;
+        o.crashKick((o.pos.x - x) / nd, (o.pos.z - z) / nd, 10, clamp(9 - d, 0, 7));
+      }
     }
     this.game.peds?.explosionAt(x, z, 8, culprit);
     this.game.dispatch?.reportFire(x, z, v);

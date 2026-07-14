@@ -70,6 +70,14 @@ export class Vehicle {
     this.radius = this.spec.w * 0.5 + 0.3;
     this.onCrash = null;               // set by VehicleSystem (sfx + knockables)
 
+    // crash dynamics: vertical velocity + visual pitch/roll springs so hard
+    // hits lift and rock the body (arcade — clamped well short of a rollover)
+    this.vy = 0;
+    this.airborne = false;
+    this.pitchOff = 0; this.pitchVel = 0;
+    this.rollOff = 0; this.rollVel = 0;
+    this.angKick = 0;                  // brief yaw impulse from glancing hits
+
     this.buildMesh(colorOverride);
   }
 
@@ -148,16 +156,18 @@ export class Vehicle {
     vf -= vf * 0.012 * dt * 60;
     vf -= Math.sign(vf) * Math.min(Math.abs(vf), 0.6 * dt);
 
-    // handbrake + grip
-    const grip = control.handbrake ? S.grip * 0.16 : S.grip;
+    // handbrake + grip (no tyre grip while airborne — velocity is ballistic)
+    const grip = this.airborne ? 0 : (control.handbrake ? S.grip * 0.16 : S.grip);
     vl -= vl * clamp(grip * dt, 0, 1);
-    if (control.handbrake && Math.abs(vf) > 4) vf -= Math.sign(vf) * 5.5 * dt;
+    if (control.handbrake && Math.abs(vf) > 4 && !this.airborne) vf -= Math.sign(vf) * 5.5 * dt;
 
-    // steering (speed sensitive, reversed in reverse)
-    const speedFactor = clamp(Math.abs(vf) / 6, 0, 1) * (1 / (1 + Math.abs(vf) * 0.028));
+    // steering (speed sensitive, reversed in reverse, useless mid-air)
+    const speedFactor = this.airborne ? 0 : clamp(Math.abs(vf) / 6, 0, 1) * (1 / (1 + Math.abs(vf) * 0.028));
     const steerDir = vf >= 0 ? 1 : -1;
     this.heading += control.steer * S.steer * speedFactor * steerDir * dt *
       (control.handbrake ? 1.5 : 1);
+    this.heading += this.angKick * dt;
+    this.angKick *= Math.max(0, 1 - dt * 3.3);
     this.steerVis = damp(this.steerVis, control.steer, 10, dt);
 
     // recompose velocity
@@ -184,18 +194,42 @@ export class Vehicle {
       this.collideStatic();
     }
 
-    // terrain follow / sinking
+    // terrain follow / airborne arc / sinking
     const ground = this.city.groundHeight(this.pos.x, this.pos.z);
     if (ground < this.city.WATER_Y - 0.25) {
       // in water: sink
       this.sinking += dt;
+      this.vy = 0; this.airborne = false;
       this.pos.y = Math.max(this.pos.y - dt * 0.9, ground - 0.4);
       this.vel.x *= 0.95; this.vel.y *= 0.95;
       if (this.sinking > 0.4 && !this.dead) this.drown();
+    } else if (this.vy > 0 || this.pos.y > ground + 0.02) {
+      // launched by an impact: ballistic until touchdown
+      this.airborne = true;
+      this.sinking = 0;
+      this.vy -= 20 * dt;
+      this.pos.y += this.vy * dt;
+      if (this.pos.y <= ground) {
+        this.pos.y = ground;
+        if (this.vy < -6) {
+          this.applyDamage((-this.vy - 6) * 3, 'crash', this.driver === 'player' ? 'player' : 'ai');
+          this.pitchVel += this.vy * 0.12;   // slam nose-dip on hard landings
+        }
+        this.vy = this.vy < -4 ? -this.vy * 0.18 : 0;
+        if (this.vy < 0.5) { this.vy = 0; this.airborne = false; }
+      }
     } else {
       this.pos.y = ground;
+      this.vy = 0;
+      this.airborne = false;
       this.sinking = 0;
     }
+
+    // pitch/roll rock: damped spring, clamped well short of a rollover
+    this.pitchVel -= (this.pitchOff * 28 + this.pitchVel * 6) * dt;
+    this.rollVel -= (this.rollOff * 28 + this.rollVel * 6) * dt;
+    this.pitchOff = clamp(this.pitchOff + this.pitchVel * dt, -0.55, 0.55);
+    this.rollOff = clamp(this.rollOff + this.rollVel * dt, -0.55, 0.55);
 
     // world bounds
     const lim = this.city.HALF - 4;
@@ -231,6 +265,17 @@ export class Vehicle {
         }
       }
     }
+  }
+
+  // impact torque: decompose a hit normal (pointing INTO this car) onto the
+  // body axes and rock the pitch/roll springs; lift adds vertical launch
+  crashKick(nx, nz, impact, lift = 0) {
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    const fwd = nx * fx + nz * fz;
+    const side = nx * fz - nz * fx;
+    this.pitchVel += -fwd * impact * 0.05;
+    this.rollVel += side * impact * 0.06;
+    if (lift > 0) this.vy = Math.max(this.vy, lift);
   }
 
   // culprit tracks WHO wrecked this car ('player'|'ai') so an eventual
@@ -273,7 +318,8 @@ export class Vehicle {
       this.pos.x - Math.sin(this.heading) * 1.6,
       this.pos.z - Math.cos(this.heading) * 1.6);
     const pitch = Math.atan2(behind - ahead, 3.2);
-    this.group.rotation.set(pitch, this.heading, this.type === 'moto' ? -this.steerVis * clamp(Math.abs(this.speed) / 12, 0, 1) * 0.45 : 0, 'YXZ');
+    const lean = this.type === 'moto' ? -this.steerVis * clamp(Math.abs(this.speed) / 12, 0, 1) * 0.45 : 0;
+    this.group.rotation.set(pitch + this.pitchOff, this.heading, lean + this.rollOff, 'YXZ');
 
     // wheels spin + front steering pivots
     const spin = this.speed * dt / this.wheelR;
