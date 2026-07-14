@@ -4,9 +4,12 @@
 // Blood decals are pooled ground quads that pool and fade under bodies.
 
 import * as THREE from 'three';
-import { clamp } from '../core/mathutil.js';
+import { clamp, distSq2d } from '../core/mathutil.js';
+import { VerletRagdoll } from './ragdoll.js';
 
-// -------- ragdoll: applied to a Humanoid rig on death/knockdown --------
+// -------- cheap ragdoll: rigid topple + limp bone pose ------------------
+// Still used for knockdowns (stagger needs a get-up-friendly pose) and for
+// deaths far from the camera; nearby deaths get the real verlet ragdoll.
 export class Ragdoll {
   constructor(rig, city, opts = {}) {
     this.rig = rig;
@@ -90,8 +93,26 @@ export class Gore {
   constructor(game) {
     this.game = game;
     this.blood = new BloodSystem(game);
+    this.activeRagdolls = [];
   }
-  makeRagdoll(rig, impact) {
+
+  // cheap: true forces the rigid topple (stagger knockdowns need a pose
+  // the get-up can recover from). Deaths near the camera get the verlet
+  // ragdoll, capped at 8 live simulations; everything else topples.
+  makeRagdoll(rig, impact, { cheap = false } = {}) {
+    if (!cheap && rig.animator?.bones?.hips) {
+      const cam = this.game.camera;
+      const near = !cam || distSq2d(rig.group.position.x, rig.group.position.z,
+        cam.position.x, cam.position.z) < 70 * 70;
+      this.activeRagdolls = this.activeRagdolls.filter((r) => !r.disposed && !r.settled);
+      if (near && this.activeRagdolls.length < 8) {
+        const rag = new VerletRagdoll(rig, this.game.city, impact);
+        if (!rag.invalid) {
+          this.activeRagdolls.push(rag);
+          return rag;
+        }
+      }
+    }
     const opts = {};
     if (impact) {
       opts.vx = (impact.dx ?? 0) * (impact.force ?? 1);

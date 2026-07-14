@@ -225,7 +225,10 @@ export class Ped {
     this.rig.interiorY = this.interiorY ?? null;
     const d = dir ?? { dx: this.pos.x - game.player.pos.x, dz: this.pos.z - game.player.pos.z };
     const l = Math.hypot(d.dx, d.dz) || 1;
-    this.knockRag = game.gore?.makeRagdoll(this.rig, { dx: d.dx / l, dz: d.dz / l, force: 3, up: 1.5, spin: (Math.random() - 0.5) * 4 });
+    // cheap topple only: the get-up needs a pose it can spring back from
+    this.knockRag = game.gore?.makeRagdoll(this.rig,
+      { dx: d.dx / l, dz: d.dz / l, force: 3, up: 1.5, spin: (Math.random() - 0.5) * 4 },
+      { cheap: true });
   }
 
   die(game, impact = null) {
@@ -574,6 +577,8 @@ export class Ped {
   }
 
   dispose() {
+    this.ragdoll?.dispose?.();
+    this.knockRag?.dispose?.();
     this.rig.dispose();
   }
 }
