@@ -69,7 +69,9 @@ export class CameraRig {
       }
       this.camera.position.set(px, py, pz);
       this.camera.lookAt(px + dx, py + sp + this.recoilPitch, pz + dz);
-      const fov = this.baseFov + (aimMode ? -14 : 0);
+      // ADS zoom is driven smoothly by the combat system (scoped rifles
+      // zoom hard); bare aiming without a gun keeps a slight tighten
+      const fov = this.baseFov - (this.adsZoom || (aimMode ? 6 : 0));
       if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
       this.recoilPitch = damp(this.recoilPitch || 0, 0, 8, dt);
       return;

@@ -484,7 +484,13 @@ class Game {
 
     // HUD + minimap
     this.hud.update(dt, this);
-    this.hud.setCrosshair(aiming, false, this.combat?.bloom || 0);
+    // FPS-style: with a gun out in first person the crosshair is always up;
+    // hit/kill marks persist their flash window instead of clearing same-frame
+    const fpGun = this.cameraRig.firstPerson && !driving && !this.player.dead && this.combat?.isGun?.();
+    this.hud.setCrosshair(aiming || fpGun, (this.combat?.hitmarkT ?? 0) > 0, this.combat?.bloom || 0, {
+      kill: (this.combat?.hitmarkT ?? 0) > 0 && !!this.combat?.killmark,
+      ads: this.combat?.adsK || 0,
+    });
     const blips = [];
     for (const bp of this.blipProviders) bp(blips);
     this.minimap.draw(
