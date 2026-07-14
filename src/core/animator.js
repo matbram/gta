@@ -62,6 +62,43 @@ const OVERLAY_POSES = {
     armL: [-1.1, 0, 0.45], foreArmL: [-0.5, 0.9, 0],
     spine2: [0, -0.22, 0],
   },
+  // ---- per-weapon stances (I3) ----
+  // boxing guard: both fists up in front of the chin, bladed stance
+  guardFists: {
+    armR: [-0.85, 0, -0.35], foreArmR: [-1.85, 0, 0],
+    armL: [-0.95, 0, 0.4], foreArmL: [-1.75, 0, 0],
+    spine2: [0, 0.22, 0], head: [0.08, -0.1, 0],
+  },
+  // bat cocked over the right shoulder, off hand across the chest
+  stanceBat: {
+    armR: [-1.6, 0, -0.55], foreArmR: [-1.25, 0, 0],
+    armL: [-1.15, -0.45, 0.35], foreArmL: [-1.0, 0.35, 0],
+    spine2: [0, 0.4, 0], head: [0, -0.25, 0],
+  },
+  // SMG: compact grip, elbows tucked into the body
+  aimSmg: {
+    armR: [-1.05, 0, -0.42], foreArmR: [-0.7, 0, 0],
+    armL: [-0.95, 0, 0.5], foreArmL: [-0.9, 0.62, 0],
+    spine2: [0, -0.1, 0],
+  },
+  // shotgun: shouldered like the rifle but a wider, braced base
+  aimShotgun: {
+    armR: [-1.15, 0, -0.35], foreArmR: [-0.35, 0, 0],
+    armL: [-1.0, 0, 0.55], foreArmL: [-0.6, 0.85, 0],
+    spine1: [0.06, 0, 0], spine2: [0, -0.28, 0],
+  },
+  // ---- carry poses: weapon out but not aimed ----
+  carryPistol: {                       // pistol held low at the thigh
+    armR: [-0.38, 0, -0.12], foreArmR: [-0.55, 0, 0],
+  },
+  carryLong: {                         // long gun low-ready across the chest
+    armR: [-0.55, 0, -0.22], foreArmR: [-0.95, 0, 0],
+    armL: [-0.6, 0, 0.38], foreArmL: [-1.1, 0.5, 0],
+    spine2: [0, 0.12, 0],
+  },
+  carryBat: {                          // bat resting on the shoulder
+    armR: [-1.3, 0, -0.38], foreArmR: [-1.55, 0, 0],
+  },
   handsUp: {
     armL: [0, 0, 2.4], armR: [0, 0, -2.4],
     foreArmL: [0, 0, 0.5], foreArmR: [0, 0, -0.5],
@@ -244,6 +281,102 @@ export const GESTURES = {
       e.set(0, 0.45 * ext, 0); q.setFromEuler(e);
       bones.spine2.quaternion.multiply(q);
     }
+  },
+  // horizontal bat swing: coil right, sweep hard across, follow through
+  swingBat(bones, q, e, t) {
+    const wind = Math.min(t / 0.3, 1);
+    const strike = clamp((t - 0.3) / 0.35, 0, 1);
+    const ease = strike * strike * (3 - 2 * strike);
+    const yaw = 0.7 * wind - 1.9 * ease;
+    if (bones.spine2) { e.set(0, yaw * 0.55, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
+    if (bones.spine1) { e.set(0.08 * ease, yaw * 0.25, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.armR) {
+      e.set(-0.5 * wind - 0.55 * ease, yaw * 0.4, -0.5 * wind + 0.35 * ease);
+      q.setFromEuler(e); bones.armR.quaternion.multiply(q);
+    }
+    if (bones.foreArmR) { e.set(-0.7 * (1 - ease) * wind, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.armL) { e.set(-0.3 * ease, yaw * 0.3, 0.2 * wind); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+  },
+  // overhead bat smash — the combo finisher
+  batOverhead(bones, q, e, t) {
+    const up = Math.min(t / 0.4, 1);
+    const down = clamp((t - 0.4) / 0.3, 0, 1);
+    const ease = down * down;
+    const lift = -2.3 * up + 2.9 * ease;
+    for (const key of ['armR', 'armL']) {
+      if (!bones[key]) continue;
+      e.set(lift, 0, key === 'armL' ? 0.25 * up : -0.25 * up);
+      q.setFromEuler(e); bones[key].quaternion.multiply(q);
+    }
+    if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.head) { e.set(-0.15 * up + 0.2 * ease, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+  },
+  // firearm kick: fast muzzle climb through the arms, quick settle.
+  // s scales the kick (pistol 0.7 → shotgun 1.6)
+  gunKick(bones, q, e, t, s = 1) {
+    const k = Math.sin(Math.min(t * 3, 1) * Math.PI / 2) * (1 - t) * s;
+    for (const key of ['armR', 'armL']) {
+      if (!bones[key]) continue;
+      e.set(-0.26 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
+    }
+    for (const key of ['foreArmR', 'foreArmL']) {
+      if (!bones[key]) continue;
+      e.set(-0.18 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q);
+    }
+    if (bones.spine1) { e.set(0.07 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+  },
+  // shotgun pump: off hand racks the fore-end back and forward
+  pumpShotgun(bones, q, e, t) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.armL) { e.set(0.35 * k, 0, 0.1 * k); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+    if (bones.foreArmL) { e.set(0.55 * k, 0, 0); q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q); }
+    if (bones.spine2) { e.set(0, 0.06 * k, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
+  },
+  // pistol reload: mag drops with the left hand, new one in, slide racked
+  reloadPistol(bones, q, e, t) {
+    const drop = Math.sin(clamp(t / 0.35, 0, 1) * Math.PI);         // hand to hip
+    const insert = Math.sin(clamp((t - 0.35) / 0.35, 0, 1) * Math.PI); // mag up + in
+    const rack = Math.sin(clamp((t - 0.72) / 0.28, 0, 1) * Math.PI);   // slide pull
+    if (bones.armL) {
+      e.set(0.9 * drop - 0.5 * insert + 0.15 * rack, 0, 0.25 * drop);
+      q.setFromEuler(e); bones.armL.quaternion.multiply(q);
+    }
+    if (bones.foreArmL) {
+      e.set(-0.5 * drop - 0.9 * insert - 0.7 * rack, 0, 0);
+      q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q);
+    }
+    if (bones.armR) { e.set(0.28 * (drop + insert) * 0.5, 0, -0.12 * insert); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.head) { e.set(0.18 * (insert + rack) * 0.6, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+  },
+  // long-gun mag swap: tilt the gun, strip the mag, seat the new one
+  reloadMag(bones, q, e, t) {
+    const strip = Math.sin(clamp(t / 0.4, 0, 1) * Math.PI);
+    const seat = Math.sin(clamp((t - 0.42) / 0.4, 0, 1) * Math.PI);
+    const slap = Math.sin(clamp((t - 0.78) / 0.22, 0, 1) * Math.PI);
+    if (bones.armR) { e.set(0.15 * strip, 0, -0.3 * (strip + seat) * 0.6); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.armL) {
+      e.set(0.8 * strip - 0.4 * seat, 0, 0.2 * strip);
+      q.setFromEuler(e); bones.armL.quaternion.multiply(q);
+    }
+    if (bones.foreArmL) {
+      e.set(-0.6 * strip - 1.0 * seat - 0.5 * slap, 0, 0);
+      q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q);
+    }
+    if (bones.head) { e.set(0.22 * (strip + seat) * 0.5, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+  },
+  // shotgun shell: left hand feeds one shell under the receiver
+  loadShell(bones, q, e, t) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.armL) { e.set(0.7 * k, 0, 0.3 * k); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+    if (bones.foreArmL) { e.set(-1.1 * k, 0.3 * k, 0); q.setFromEuler(e); bones.foreArmL.quaternion.multiply(q); }
+    if (bones.head) { e.set(0.2 * k, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+  },
+  // draw: right hand sweeps up from the hip as the weapon appears
+  drawWeapon(bones, q, e, t) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.armR) { e.set(-0.9 * k, 0, -0.25 * k); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.foreArmR) { e.set(-0.6 * k, 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.spine2) { e.set(0, -0.1 * k, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
   },
   // reach out with the right hand — door handles, pickups
   reach(bones, q, e, t) {

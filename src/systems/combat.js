@@ -5,13 +5,22 @@
 import * as THREE from 'three';
 import { clamp, dist2d } from '../core/mathutil.js';
 
+// animSet drives every arm animation for a weapon: the aiming stance and
+// carry overlays, the fire gesture (recoil strength / bat swings), the
+// reload class + duration, and the first-person viewmodel rest pose.
 export const WEAPONS = {
-  fists:   { name: 'FISTS',    icon: '✊', melee: true,  dmg: 12, rate: 0.45, range: 1.5 },
-  bat:     { name: 'BAT',      icon: '🏏', melee: true,  dmg: 30, rate: 0.55, range: 1.9, price: 200 },
-  pistol:  { name: 'P9',       icon: '🔫', dmg: 26, rate: 0.34, range: 65, spread: 0.012, mag: 15, auto: false, sfx: 'pistol', price: 400 },
-  smg:     { name: 'HORNET',   icon: '🔫', dmg: 13, rate: 0.085, range: 48, spread: 0.035, mag: 30, auto: true,  sfx: 'smg', price: 1200 },
-  shotgun: { name: 'MULE 12',  icon: '🔫', dmg: 11, rate: 0.85, range: 24, spread: 0.065, mag: 6, pellets: 7, auto: false, sfx: 'shotgun', price: 900 },
-  rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500 },
+  fists:   { name: 'FISTS',    icon: '✊', melee: true,  dmg: 12, rate: 0.45, range: 1.5,
+    animSet: { aim: 'guardFists', carry: 'none' } },
+  bat:     { name: 'BAT',      icon: '🏏', melee: true,  dmg: 30, rate: 0.55, range: 1.9, price: 200,
+    animSet: { aim: 'stanceBat', carry: 'carryBat', swing: true } },
+  pistol:  { name: 'P9',       icon: '🔫', dmg: 26, rate: 0.34, range: 65, spread: 0.012, mag: 15, auto: false, sfx: 'pistol', price: 400,
+    animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 0.7, reload: 'pistol', reloadTime: 1.4, vm: [0.28, -0.26, -0.55] } },
+  smg:     { name: 'HORNET',   icon: '🔫', dmg: 13, rate: 0.085, range: 48, spread: 0.035, mag: 30, auto: true,  sfx: 'smg', price: 1200,
+    animSet: { aim: 'aimSmg', carry: 'carryLong', kick: 0.55, reload: 'mag', reloadTime: 1.6, vm: [0.26, -0.25, -0.5] } },
+  shotgun: { name: 'MULE 12',  icon: '🔫', dmg: 11, rate: 0.85, range: 24, spread: 0.065, mag: 6, pellets: 7, auto: false, sfx: 'shotgun', price: 900,
+    animSet: { aim: 'aimShotgun', carry: 'carryLong', kick: 1.6, reload: 'shell', shellTime: 0.55, pump: true, vm: [0.22, -0.24, -0.52] } },
+  rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500,
+    animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7, vm: [0.24, -0.23, -0.5] } },
 };
 
 const ORDER = ['fists', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'];
@@ -84,9 +93,21 @@ export class CombatSystem {
 
   select(id) {
     if (!this.inventory[id]) return;
+    const switching = this.current !== id;
     this.current = id;
     this.reloading = 0;
-    this.attachWeaponMesh();
+    this.shellLoading = false;
+    // stance + carry overlays for the new weapon
+    const anims = WEAPONS[id].animSet ?? {};
+    this.game.player?.rig?.setWeaponOverlays?.(anims.aim, anims.carry);
+    if (switching && this.game.player?.rig?.drawGesture) {
+      // draw: hand sweeps up, the weapon mesh appears mid-motion
+      this.game.player.rig.drawGesture();
+      for (const k in this.weaponMeshes) this.weaponMeshes[k].visible = false;
+      this.drawT = 0.15;
+    } else {
+      this.attachWeaponMesh();
+    }
     this.updateHud();
   }
 
@@ -123,9 +144,11 @@ export class CombatSystem {
       this.vmGroup.add(m);
     }
     const vm = this.viewmodels[this.current];
-    vm.position.set(0.28, -0.26, -0.55);
+    const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
+    vm.position.set(rest[0], rest[1], rest[2]);
     vm.rotation.set(0, Math.PI, 0);
     this.vmActive = vm;
+    this.vmRest = rest;
   }
 
   updateHud() {
@@ -143,6 +166,20 @@ export class CombatSystem {
     this.hitmarkT -= dt;
     this.bloom = Math.max(0, (this.bloom || 0) - dt * 2.5);
 
+    // draw in progress: the weapon mesh appears mid-sweep
+    if (this.drawT != null) {
+      this.drawT -= dt;
+      if (this.drawT <= 0) { this.drawT = null; this.attachWeaponMesh(); }
+    }
+    // shotgun pump cycle lands a beat after the shot
+    if (this.pumpAt != null && game.time >= this.pumpAt) {
+      this.pumpAt = null;
+      if (WEAPONS[this.current].animSet?.pump && !player.vehicle) {
+        player.rig.pumpGesture?.();
+        this.vmPumpT = 0.32;
+      }
+    }
+
     // viewmodel visibility + sway/bob (first-person, on foot)
     if (this.vmGroup) {
       const fpFoot = game.cameraRig.firstPerson && !player.vehicle && !player.dead;
@@ -151,7 +188,22 @@ export class CombatSystem {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
         const bob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.015 : 0.004);
         const kick = (game.cameraRig.recoilPitch || 0);
-        this.vmActive.position.set(0.28 + Math.cos(this.vmBob) * 0.004, -0.26 + bob - kick * 0.5, -0.55 + kick * 0.8);
+        const rest = this.vmRest ?? [0.28, -0.26, -0.55];
+        // reload: gun dips and rolls; pump: fore-end pushes back toward you
+        let rx = 0, dy = 0, dz = 0;
+        if (this.reloading > 0 && this.reloadTotal) {
+          const k = Math.sin((1 - this.reloading / this.reloadTotal) * Math.PI);
+          rx = 0.55 * k; dy = -0.14 * k;
+        }
+        if (this.vmPumpT > 0) {
+          this.vmPumpT -= dt;
+          dz = 0.1 * Math.sin(clamp(this.vmPumpT / 0.32, 0, 1) * Math.PI);
+        }
+        this.vmActive.position.set(
+          rest[0] + Math.cos(this.vmBob) * 0.004,
+          rest[1] + bob - kick * 0.5 + dy,
+          rest[2] + kick * 0.8 + dz);
+        this.vmActive.rotation.set(rx, Math.PI, 0);
       }
     }
     if (this.reloading > 0) {
@@ -184,6 +236,13 @@ export class CombatSystem {
     // aim pitch for the rig pose
     player.rig.aimPitch = aiming ? clamp(-game.cameraRig.pitch, -0.8, 0.8) : 0;
 
+    // shell-by-shell reload is interruptible: firing what's loaded cancels it
+    if (this.shellLoading && wantFire && inv.inMag > 0 && this.cooldown <= 0) {
+      this.shellLoading = false;
+      this.reloading = 0;
+      this.updateHud();
+    }
+
     if (!wantFire || this.cooldown > 0 || this.reloading > 0) {
       if (this.hitmarkT <= 0) game.hud?.setCrosshair(aiming || (player.vehicle && this.canDriveBy()), false);
       return;
@@ -208,7 +267,9 @@ export class CombatSystem {
       this.lastMeleeT = game.time;
       const finisher = this.comboStep === 3;
       this.cooldown = finisher ? spec.rate * 1.5 : spec.rate;
-      player.rig.startPunch();
+      // bat gets its own swings — horizontal, overhead on the finisher
+      if (spec.animSet?.swing && player.rig.batSwing) player.rig.batSwing(finisher);
+      else player.rig.startPunch();
 
       // small lunge toward the aim/lock direction
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
@@ -258,6 +319,9 @@ export class CombatSystem {
     this.cooldown = spec.rate;
     inv.inMag--;
     this.fireHitscan(spec, false);
+    // arms take the kick (camera recoil is added in fireHitscan)
+    if (spec.animSet?.kick) player.rig.gunKick?.(spec.animSet.kick);
+    if (spec.animSet?.pump) this.pumpAt = game.time + 0.28;
     this.updateHud();
   }
 
@@ -270,13 +334,37 @@ export class CombatSystem {
     const inv = this.inventory[this.current];
     if (spec.melee || this.reloading > 0) return;
     if (inv.inMag >= spec.mag || inv.ammo <= 0) return;
-    this.reloading = 1.4;
+    const anims = spec.animSet ?? {};
+    const rig = this.game.player?.rig;
+    if (anims.reload === 'shell') {
+      // shotgun: shells go in one at a time and firing can interrupt
+      this.shellLoading = true;
+      this.reloading = anims.shellTime;
+      rig?.reloadGesture?.('shell', anims.shellTime);
+    } else {
+      this.reloading = anims.reloadTime ?? 1.4;
+      rig?.reloadGesture?.(anims.reload ?? 'mag', this.reloading);
+    }
+    this.reloadTotal = this.reloading;
     this.game.hud?.setWeapon(spec.icon, spec.name, '· · ·');
   }
 
   finishReload() {
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
+    if (this.shellLoading) {
+      if (inv.ammo > 0 && inv.inMag < spec.mag) { inv.inMag++; inv.ammo--; }
+      this.updateHud();
+      if (inv.ammo > 0 && inv.inMag < spec.mag) {
+        // next shell
+        this.reloading = spec.animSet.shellTime;
+        this.reloadTotal = this.reloading;
+        this.game.player?.rig?.reloadGesture?.('shell', this.reloading);
+      } else {
+        this.shellLoading = false;
+      }
+      return;
+    }
     const need = spec.mag - inv.inMag;
     const take = Math.min(need, inv.ammo);
     inv.inMag += take;

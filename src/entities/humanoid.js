@@ -410,17 +410,20 @@ export class SkinnedHumanoid {
     if (this.anim === name || this.dead) return;
     this.anim = name;
     const A = this.animator;
+    // per-weapon overlays: combat sets these; NPC rigs fall back to defaults
+    const aimO = this.weaponAim ?? 'aimPistol';
+    const carryO = this.weaponCarry ?? 'none';
     switch (name) {
-      case 'idle': A.play('idle'); A.setOverlay('none'); break;
-      case 'walk': A.play('walk'); A.setOverlay('none'); break;
-      case 'run': A.play('run'); A.setOverlay('none'); break;
-      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay('none'); break;
+      case 'idle': A.play('idle'); A.setOverlay(carryO); break;
+      case 'walk': A.play('walk'); A.setOverlay(carryO); break;
+      case 'run': A.play('run'); A.setOverlay(carryO); break;
+      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay(carryO); break;
       case 'jump': A.play('idle', { timeScale: 0.2 }); A.setOverlay('jump'); break;
       case 'swim': A.play('idle', { timeScale: 0.6 }); A.setOverlay('swim'); break;
       case 'drive': A.play('idle', { timeScale: 0.12 }); A.setOverlay('drive'); break;
       case 'ride': A.play('idle', { timeScale: 0.12 }); A.setOverlay('ride'); break;
-      case 'aim': A.play('idle', { timeScale: 0.5 }); A.setOverlay('aimPistol'); break;
-      case 'aimwalk': A.play('walk'); A.setOverlay('aimPistol'); break;
+      case 'aim': A.play('idle', { timeScale: 0.5 }); A.setOverlay(aimO); break;
+      case 'aimwalk': A.play('walk'); A.setOverlay(aimO); break;
       // extended poses used by NPC behaviours
       case 'sit': A.play('idle', { timeScale: 0.1 }); A.setOverlay('sit'); break;
       case 'phone': A.play('idle', { timeScale: 0.5 }); A.setOverlay('phone'); break;
@@ -445,6 +448,42 @@ export class SkinnedHumanoid {
 
   reachGesture(dur = 0.4) {
     this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.reach(bones, q, e, t));
+  }
+
+  // ---- weapon animation API (combat.js drives these) ----
+  setWeaponOverlays(aim, carry) {
+    this.weaponAim = aim;
+    this.weaponCarry = carry;
+    // re-apply for the pose we're already holding
+    const A = this.animator;
+    switch (this.anim) {
+      case 'aim': case 'aimwalk': A.setOverlay(aim ?? 'aimPistol'); break;
+      case 'idle': case 'walk': case 'run': case 'sprint':
+        A.setOverlay(carry ?? 'none'); break;
+    }
+  }
+
+  batSwing(overhead = false) {
+    const g = overhead ? GESTURES.batOverhead : GESTURES.swingBat;
+    this.animator.startGesture(overhead ? 0.72 : 0.55, (t, bones, q, e) => g(bones, q, e, t));
+  }
+
+  gunKick(strength = 1, dur = 0.14) {
+    this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.gunKick(bones, q, e, t, strength));
+  }
+
+  pumpGesture() {
+    this.animator.startGesture(0.32, (t, bones, q, e) => GESTURES.pumpShotgun(bones, q, e, t));
+  }
+
+  reloadGesture(kind, dur) {
+    const g = kind === 'pistol' ? GESTURES.reloadPistol
+      : kind === 'shell' ? GESTURES.loadShell : GESTURES.reloadMag;
+    this.animator.startGesture(dur, (t, bones, q, e) => g(bones, q, e, t));
+  }
+
+  drawGesture() {
+    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.drawWeapon(bones, q, e, t));
   }
 
   die() {
