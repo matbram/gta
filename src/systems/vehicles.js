@@ -104,6 +104,7 @@ export class VehicleSystem {
       player.vel.y = 4;
       player.grounded = false;
       player.damage(Math.min(45, (impact - 6) * 2.5), 'bail');
+      player.startRoll?.(0.7);   // tumble with the bike's momentum
       game.cameraRig.addShake(0.7);
       game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 8);
       game.audio?.stopEngine();
@@ -187,17 +188,22 @@ export class VehicleSystem {
     const v = player.vehicle;
     if (!v) return;
     const bailSpeed = Math.abs(v.speed);
-    if (bailSpeed > 14) {
-      // bail out: hit the pavement rolling, car keeps going
-      player.damage(Math.min(25, (bailSpeed - 14) * 1.2), 'bail');
-      this.game.cameraRig.addShake(0.5);
-      this.game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 6);
-    }
     const door = v.seatWorldPos();
     player.vehicle = null;
     v.driver = null;
     player.teleport(door.x, door.z, v.heading);
     player.setVisible(true);
+    if (bailSpeed > 8) {
+      // dive out: inherit the car's momentum and tuck into a roll —
+      // no damage, the roll absorbs it (that's the point of rolling)
+      player.vel.x = v.vel.x * 0.8;
+      player.vel.z = v.vel.y * 0.8;
+      player.vel.y = 2.5;
+      player.grounded = false;
+      player.startRoll?.();
+      this.game.cameraRig.addShake(0.35);
+      this.game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 6);
+    }
     this.game.audio?.carDoor();
     this.game.audio?.stopEngine();
     this.game.audio?.radio?.stop();

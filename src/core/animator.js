@@ -332,6 +332,25 @@ export const GESTURES = {
     if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
     if (bones.head) { e.set(-0.15 * up + 0.2 * ease, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
   },
+  // combat tuck-and-roll: whole-body curl (the tumble itself is the rig
+  // group rotating — this gesture just folds the body into a ball)
+  roll(bones, q, e, t) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI);   // tuck in, then release
+    if (bones.spine1) { e.set(0.9 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.head) { e.set(0.5 * k, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+    for (const key of ['upLegL', 'upLegR']) {
+      if (bones[key]) { e.set(-1.6 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['legL', 'legR']) {
+      if (bones[key]) { e.set(1.8 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['armL', 'armR']) {
+      if (bones[key]) { e.set(key === 'armL' ? -1.0 * k : 1.0 * k, 0, 0.0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['foreArmL', 'foreArmR']) {
+      if (bones[key]) { e.set(key === 'foreArmL' ? 1.4 * k : -1.4 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+  },
   // firearm kick: fast muzzle climb through the arms, quick settle.
   // s scales the kick (pistol 0.7 → shotgun 1.6)
   gunKick(bones, q, e, t, s = 1) {

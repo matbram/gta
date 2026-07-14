@@ -163,6 +163,7 @@ export class Player {
     }
     if (this.dodgeT > 0) this.dodgeT -= dt;
     if (this.iframeT > 0) this.iframeT -= dt;
+    if (this.rollT > 0) this.rollT -= dt;
     this.vel.y -= 18 * dt;
 
     this.pos.x += this.vel.x * dt;
@@ -250,9 +251,26 @@ export class Player {
     }
   }
 
+  // bail-out tumble: tuck gesture folds the body, this spins the whole rig
+  // through a forward roll around the facing axis with a faked hip pivot
+  startRoll(dur = 0.55) {
+    this.rollT = this.rollDur = dur;
+    this.iframeT = Math.max(this.iframeT ?? 0, dur + 0.1);
+    this.rig.rollGesture?.(dur);
+  }
+
   syncRig() {
     this.rig.group.position.copy(this.pos);
+    this.rig.group.rotation.order = 'YXZ';   // yaw first so the tumble follows facing
     this.rig.group.rotation.y = this.heading;
+    if (this.rollT > 0 && this.rollDur) {
+      const k = 1 - this.rollT / this.rollDur;
+      this.rig.group.rotation.x = k * Math.PI * 2;
+      // group origin is at the feet — lift so the spin pivots near the hips
+      this.rig.group.position.y = this.pos.y + Math.sin(k * Math.PI) * 0.35;
+    } else if (this.rig.group.rotation.x !== 0) {
+      this.rig.group.rotation.x = 0;
+    }
   }
 
   setVisible(v) { this.rig.group.visible = v; }

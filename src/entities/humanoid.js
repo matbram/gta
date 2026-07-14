@@ -535,6 +535,10 @@ export class SkinnedHumanoid {
     this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.reach(bones, q, e, t));
   }
 
+  rollGesture(dur = 0.55) {
+    this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.roll(bones, q, e, t));
+  }
+
   // ---- weapon animation API (combat.js drives these) ----
   setWeaponOverlays(aim, carry) {
     this.weaponAim = aim;
