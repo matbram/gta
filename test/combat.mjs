@@ -41,7 +41,7 @@ const police = await page.evaluate(() => ({
 }));
 console.log('police response:', JSON.stringify(police),
   police.foot > 0 || police.cars > 0 ? 'POLICE OK' : 'POLICE FAIL');
-await page.screenshot({ path: 'screenshots/07-wanted.png' });
+if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/07-wanted.png' });
 
 // shoot: aim (RMB) + fire (LMB) — ammo should drop
 const ammoBefore = await page.evaluate(() => window.__game.game.combat.inventory.pistol.inMag);

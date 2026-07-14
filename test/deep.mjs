@@ -33,7 +33,7 @@ const escalation = await page.evaluate(() => ({
 }));
 console.log('6-star response:', JSON.stringify(escalation),
   escalation.cruisers >= 2 && escalation.foot >= 2 ? 'ESCALATION OK' : 'ESCALATION FAIL');
-await page.screenshot({ path: 'screenshots/11-sixstars.png' });
+if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/11-sixstars.png' });
 
 // ---- respray clears wanted ----
 const respray = await page.evaluate(() => {
