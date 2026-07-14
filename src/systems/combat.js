@@ -339,7 +339,9 @@ export class CombatSystem {
         || game.wanted?.nearestCop(reachX, reachZ, spec.range);
       if (!target) {
         let bd = spec.range * spec.range;
-        for (const goon of [...(game.missions?.activeGoons?.() || []), ...(game.interiors?.keepers?.() || [])]) {
+        for (const goon of [...(game.missions?.activeGoons?.() || []),
+                            ...(game.interiors?.keepers?.() || []),
+                            ...(game.dispatch?.crewPeds?.() || [])]) {
           if (goon.dead) continue;
           const d = (goon.pos.x - reachX) ** 2 + (goon.pos.z - reachZ) ** 2;
           if (d < bd) { bd = d; target = goon; }
@@ -520,6 +522,7 @@ export class CombatSystem {
     for (const p of game.peds?.peds || []) if (!p.dead) out.push(p);
     for (const c of game.wanted?.footCops || []) if (!c.dead) out.push(c);
     for (const g of game.missions?.activeGoons?.() || []) if (!g.dead) out.push(g);
+    for (const c of game.dispatch?.crewPeds?.() || []) if (!c.dead) out.push(c);
     // shopkeepers only when they're actually in play: provoked, or in the
     // room the player is standing in — never through a closed shopfront
     const inside = game.interiors?.playerInside;
@@ -661,6 +664,11 @@ export class CombatSystem {
     }
     for (const keeper of game.interiors?.keepers?.() || []) {
       consider(sphereHit(keeper.pos.x, keeper.pos.y + 1.0, keeper.pos.z, 0.55), 'goon', keeper);
+    }
+    // fire/medic crews working a scene are civilians — shootable, a crime
+    for (const c of game.dispatch?.crewPeds?.() || []) {
+      if (c.dead) continue;
+      consider(sphereHit(c.pos.x, c.pos.y + 1.0, c.pos.z, 0.55), 'ped', c);
     }
     for (const v of game.vehicles?.vehicles || []) {
       if (v === game.player.vehicle) continue;
