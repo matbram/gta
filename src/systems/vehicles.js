@@ -443,7 +443,11 @@ export class VehicleSystem {
       if (sp >= 2.5) {
         this.game.peds?.checkRunOver(v, sp);
         if (v.driver !== 'player' && !player.vehicle && !player.dead) {
-          if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
+          // oriented-box test so the front bumper actually connects
+          const s = Math.sin(v.heading), c = Math.cos(v.heading);
+          const dx = player.pos.x - v.pos.x, dz = player.pos.z - v.pos.z;
+          const along = dx * s + dz * c, side = dx * c - dz * s;
+          if (Math.abs(along) < v.hl + 0.45 && Math.abs(side) < v.hw + 0.4 &&
               game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
             v._lastPlayerHitT = game.time;
             player.damage(sp * 3.2, 'runover', v.pos);
@@ -565,6 +569,9 @@ export class VehicleSystem {
     if (peds) {
       for (const ped of peds._vehicleTargets(v, v.boundR + 0.8)) {
         if (ped.dead || ped.inVehicle || ped.interiorY != null) continue;
+        // a ped the car just struck keeps their knockback instead of being
+        // politely pushed back out of the box (run-overs must connect)
+        if (game.time - (ped._lastRunOverT ?? -9) < 0.5) continue;
         const hit = circleVsObb(ped.pos.x, ped.pos.z, 0.35, _solid);
         if (!hit) continue;
         ped.pos.x = hit.x; ped.pos.z = hit.z;
@@ -573,6 +580,7 @@ export class VehicleSystem {
     }
     const pl = game.player;
     if (!pl.vehicle && !pl.dead &&
+        game.time - (v._lastPlayerHitT ?? -9) > 0.4 &&
         distSq2d(pl.pos.x, pl.pos.z, v.pos.x, v.pos.z) < (v.boundR + 1) * (v.boundR + 1)) {
       const hit = circleVsObb(pl.pos.x, pl.pos.z, 0.38, _solid);
       if (hit) {

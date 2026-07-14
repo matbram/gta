@@ -424,27 +424,39 @@ export class PedSystem {
   }
 
   checkRunOver(vehicle, speed) {
-    for (const ped of this._vehicleTargets(vehicle, vehicle.radius + 3.6)) {
+    // oriented-box hit test: the old circular test used the vehicle WIDTH as
+    // its radius, so the front bumper (half-LENGTH away) never registered and
+    // the solid-body resolve made frontal run-overs impossible
+    const sinH = Math.sin(vehicle.heading), cosH = Math.cos(vehicle.heading);
+    const hitL = vehicle.hl + 0.4, hitW = vehicle.hw + 0.35;
+    for (const ped of this._vehicleTargets(vehicle, vehicle.boundR + 3.6)) {
       if (ped.dead) continue;
-      const d = dist2d(ped.pos.x, ped.pos.z, vehicle.pos.x, vehicle.pos.z);
-      if (d < vehicle.radius + 0.4) {
+      const dx = ped.pos.x - vehicle.pos.x, dz = ped.pos.z - vehicle.pos.z;
+      const along = dx * sinH + dz * cosH;      // + = ahead of the vehicle
+      const side = dx * cosH - dz * sinH;
+      if (Math.abs(along) < hitL && Math.abs(side) < hitW) {
         if (this.game.time - (ped._lastRunOverT ?? -9) < 0.6) continue;
         ped._lastRunOverT = this.game.time;
-        ped.damage(speed * 4.5, this.game, 'runover', null,
+        // impact carries the car's velocity so ragdolls launch with the hit
+        const imp = {
+          dx: vehicle.vel.x / (speed || 1), dz: vehicle.vel.y / (speed || 1),
+          force: Math.min(10, speed * 0.7), up: Math.min(3, 0.6 + speed * 0.18),
+          vx: vehicle.vel.x, vz: vehicle.vel.y,
+        };
+        ped.damage(speed * 4.5, this.game, 'runover', imp,
           vehicle.driver === 'player' ? 'player' : 'ai');
         if (!ped.dead) {
-          // knocked aside
-          const nx = (ped.pos.x - vehicle.pos.x) / (d || 1);
-          const nz = (ped.pos.z - vehicle.pos.z) / (d || 1);
-          ped.pos.x += nx * 1.4;
-          ped.pos.z += nz * 1.4;
+          // knocked aside, out of the box (toward the nearer flank)
+          const push = Math.sign(side || 1);
+          ped.pos.x += (cosH * push) * 1.4;
+          ped.pos.z += (-sinH * push) * 1.4;
         }
         if (vehicle.driver === 'player' && !ped.isGoon) {
           this.game.wanted?.crime(
             ped.dead ? (ped.isCop ? 'copKill' : 'kill') : (ped.isCop ? 'copAttack' : 'assault'),
             ped.pos.x, ped.pos.z);
         }
-      } else if (d < vehicle.radius + 3.2 && speed > 8) {
+      } else if (Math.abs(along) < hitL + 3.2 && Math.abs(side) < hitW + 3.2 && speed > 8) {
         ped.panic(vehicle.pos.x, vehicle.pos.z, false, 'runover',
           vehicle.driver === 'player' ? 'player' : 'ai');
       }

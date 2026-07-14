@@ -591,6 +591,9 @@ export class Ped {
     const vehicles = this.game?.vehicles?.vehicles;
     if (vehicles) {
       for (const v of vehicles) {
+        // only path around stationary/slow traffic — nobody sidesteps a
+        // speeding car; fast movers are the run-over system's business
+        if (Math.hypot(v.vel.x, v.vel.y) > 6) continue;
         if (distSq2d(px, pz, v.pos.x, v.pos.z) > (v.boundR + 0.6) * (v.boundR + 0.6)) continue;
         _probeObb.x = v.pos.x; _probeObb.z = v.pos.z;
         _probeObb.hw = v.hw; _probeObb.hl = v.hl; _probeObb.heading = v.heading;
