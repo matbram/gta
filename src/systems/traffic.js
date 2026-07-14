@@ -48,6 +48,7 @@ export class TrafficSystem {
     this.game = game;
     this.cars = [];              // { vehicle, edge, dir, t, targetSpeed, waitT, honkT, panicT }
     this.spawnTimer = 0;
+    this._crossing = new Map();  // signal node → peds currently in its crosswalks
   }
 
   // shared traffic-light phase (also drives the rendered light colours)
@@ -55,6 +56,24 @@ export class TrafficSystem {
     const t = this.game.time % SIGNAL_CYCLE;
     if (horizontal) return t >= 7 && t < 13;
     return t < 6;
+  }
+
+  // pedestrian walk phase for CROSSING a road of the given orientation —
+  // derived from the car cycle: crossing is safe while that road's traffic
+  // has red and the perpendicular flow has the green
+  pedPhase(roadHorizontal) {
+    const t = this.game.time % SIGNAL_CYCLE;
+    const walk = roadHorizontal ? t < 6 : (t >= 7 && t < 13);
+    const timeLeft = roadHorizontal ? 6 - t : 13 - t;
+    return { walk, timeLeft };
+  }
+
+  // crosswalk occupancy (peds report when they step off the curb)
+  crossingEnter(node) { this._crossing.set(node, (this._crossing.get(node) ?? 0) + 1); }
+  crossingDone(node) {
+    const n = (this._crossing.get(node) ?? 1) - 1;
+    if (n <= 0) this._crossing.delete(node);
+    else this._crossing.set(node, n);
   }
 
   update(dt) {
@@ -282,6 +301,12 @@ export class TrafficSystem {
       else if (distToEnd < 16) want = Math.min(want, 3);
     } else if (distToEnd < 14 && car.panicT <= 0) {
       want = Math.min(want, 5.5);
+    }
+    // yield to pedestrians still inside the crosswalk (late crossers on a
+    // fresh green, turners into an occupied band)
+    if (nextNode.hasSignal && car.panicT <= 0 && distToEnd < 10 &&
+        (this._crossing.get(nextNode) ?? 0) > 0) {
+      want = Math.min(want, 2);
     }
 
     // car-following: check ahead for vehicles / player / peds

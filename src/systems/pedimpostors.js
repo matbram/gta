@@ -141,27 +141,60 @@ export class PedImpostors {
       for (let i = 0; i < 6 && this.recs.length < want; i++) this.trySpawn(p);
     }
 
+    // impostors obey the same walk phases as real peds (cheap version:
+    // one boolean per road orientation per frame, waiters idle at the curb)
+    const phH = game.traffic?.pedPhase?.(true);
+    const phV = game.traffic?.pedPhase?.(false);
+    const walkAcross = {
+      // small margin so sprites don't step off right at the flip
+      h: !phH || (phH.walk && phH.timeLeft > 1.5),
+      v: !phV || (phV.walk && phV.timeLeft > 1.5),
+    };
+
     // walk + lifecycle
     for (let i = this.recs.length - 1; i >= 0; i--) {
       const r = this.recs[i];
       const e = r.edge;
-      r.t += r.dir * (r.speed * dt) / (e.len || 20);
-      if (r.t > 1 || r.t < 0) {
+      if (r.wait) {
+        // parked at a red crosswalk: idle bob, poll the cached phase
+        r.phase += dt * 1.2;
+        if (walkAcross[r.wait.crossH ? 'h' : 'v']) {
+          r.edge = r.wait.next;
+          r.dir = r.wait.dir;
+          r.t = r.dir > 0 ? 0.02 : 0.98;
+          r.wait = null;
+        }
+      } else {
+        r.t += r.dir * (r.speed * dt) / (e.len || 20);
+      }
+      if (!r.wait && (r.t > 1 || r.t < 0)) {
         // corner: continue onto a connecting edge
         const node = r.dir > 0 ? e.b : e.a;
         const options = node.edges.filter((n2) => n2 !== e);
         const next = options.length ? options[Math.floor(Math.random() * options.length)] : e;
-        r.edge = next;
-        r.dir = next.a === node ? 1 : -1;
-        r.t = r.dir > 0 ? 0.02 : 0.98;
-        if (Math.random() < 0.2) r.side = -r.side;
+        const nextDir = next.a === node ? 1 : -1;
+        // the road being stepped across: the one NOT walked along next —
+        // straight-through crosses the cross street, a turn crosses the
+        // street being left behind
+        const crossH = next.horizontal === e.horizontal ? !e.horizontal : e.horizontal;
+        if (node.hasSignal && !walkAcross[crossH ? 'h' : 'v']) {
+          r.t = Math.max(0, Math.min(1, r.t));       // hold the corner
+          r.wait = { next, dir: nextDir, crossH };
+        } else {
+          r.edge = next;
+          r.dir = nextDir;
+          r.t = r.dir > 0 ? 0.02 : 0.98;
+          // no side flips at signal corners — flips model mid-block drift,
+          // not a supervised crossing
+          if (!node.hasSignal && Math.random() < 0.2) r.side = -r.side;
+        }
       }
       const off = r.edge.width / 2 + city.SIDEWALK * 0.55;
       const ex = r.edge.a.x + (r.edge.b.x - r.edge.a.x) * r.t;
       const ez = r.edge.a.z + (r.edge.b.z - r.edge.a.z) * r.t;
       r.x = r.edge.horizontal ? ex : ex + off * r.side;
       r.z = r.edge.horizontal ? ez + off * r.side : ez;
-      r.phase += dt * 5;
+      if (!r.wait) r.phase += dt * 5;   // waiters idle (slow bob set above)
 
       const d2 = distSq2d(r.x, r.z, p.x, p.z);
       if (d2 > DROP * DROP) { this.recs.splice(i, 1); continue; }

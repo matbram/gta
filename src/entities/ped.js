@@ -130,17 +130,46 @@ export class Ped {
       const node = sw.dir > 0 ? e.b : e.a;
       const options = node.edges.filter((n2) => n2 !== e);
       const next = options.length ? options[Math.floor(Math.random() * options.length)] : e;
-      // turning onto a cross street at a signalled corner: wait for green
-      if (node.hasSignal && next.horizontal !== e.horizontal) this.crossWait = next.horizontal;
       sw.edge = next;
       sw.dir = next.a === node ? 1 : -1;
       if (Math.random() < 0.18) sw.side = -sw.side;
       const p = this.sidewalkPoint(next, sw.dir > 0 ? 0.15 : 0.85, sw.side);
       this.target.x = p.x; this.target.z = p.z;
+      // at a signalled corner: if the destination sits in a different
+      // quadrant, that's one or two road crossings — queue at the curb
+      // and cross inside the crosswalk band on the walk phase
+      if (node.hasSignal) this.planCrossing(node, p);
     } else {
       const p = this.sidewalkPoint(e, Math.max(0, Math.min(1, tNext)), sw.side);
       this.target.x = p.x; this.target.z = p.z;
     }
+  }
+
+  // corner-to-corner crossing plan: quadrant signs relative to the node
+  // decide which roads get crossed (x-flip = the vertical road, z-flip =
+  // the horizontal one; both = two legs via the shared corner)
+  planCrossing(node, dest) {
+    const qx0 = this.pos.x >= node.x ? 1 : -1, qz0 = this.pos.z >= node.z ? 1 : -1;
+    const qx1 = dest.x >= node.x ? 1 : -1, qz1 = dest.z >= node.z ? 1 : -1;
+    if (qx0 === qx1 && qz0 === qz1) return;      // same corner, no road crossed
+    let wH = 0, wV = 0;
+    for (const ed of node.edges) {
+      if (ed.horizontal) wH = Math.max(wH, ed.width);
+      else wV = Math.max(wV, ed.width);
+    }
+    const lane = (this.laneOff ?? 0) * 0.5;
+    const cx = (wV || wH) / 2 + this.city.SIDEWALK * 0.55 + lane;
+    const cz = (wH || wV) / 2 + this.city.SIDEWALK * 0.55 + lane;
+    const corner = (qx, qz) => ({ x: node.x + qx * cx, z: node.z + qz * cz });
+    const steps = [];
+    if (qx0 !== qx1) steps.push({ from: corner(qx0, qz0), to: corner(qx1, qz0), roadHorizontal: false });
+    if (qz0 !== qz1) steps.push({ from: corner(qx1, qz0), to: corner(qx1, qz1), roadHorizontal: true });
+    this.crossing = { node, steps, leg: 0, phase: 'queue', counted: false };
+  }
+
+  _clearCrossing() {
+    if (this.crossing?.counted) this.game?.traffic?.crossingDone?.(this.crossing.node);
+    this.crossing = null;
   }
 
   // ---- senses ----------------------------------------------------
@@ -190,7 +219,7 @@ export class Ped {
     this.panicked = true;
     this.stateT = 0;
     this.idleMode = null;
-    this.crossWait = null;
+    this._clearCrossing();   // fleeing peds cross anywhere — that's fine
     const gun = kind === 'gunshot' || kind === 'brandish';
     const fleeBark = gun ? (Math.random() < 0.5 ? 'bark_run' : 'bark_help')
       : (kind === 'runover' || kind === 'crash')
@@ -434,11 +463,44 @@ export class Ped {
 
     switch (this.state) {
       case 'wander': {
-        // wait for the light before crossing at a signalled corner
-        if (this.crossWait != null) {
-          const green = this.game?.traffic?.signalGreenFor?.(this.crossWait);
-          if (!green) { this.speed = 0; this.rig.setAnim('idle'); break; }
-          this.crossWait = null;
+        // active crossing: queue at the curb for the walk phase, then take
+        // the crosswalk band briskly, leg by leg
+        if (this.crossing) {
+          const c = this.crossing;
+          const leg = c.steps[c.leg];
+          if (!leg) { this._clearCrossing(); break; }
+          if (c.phase === 'queue') {
+            const dq = dist2d(this.pos.x, this.pos.z, leg.from.x, leg.from.z);
+            if (dq > 0.6) {
+              this.moveToward(leg.from.x, leg.from.z, this.walkSpeed, dt);
+              this.rig.setAnim(this.speed > 0.2 ? 'walk' : 'idle');
+            } else {
+              this.speed = 0;
+              this.rig.setAnim('idle');
+              this.heading = angleDamp(this.heading,
+                Math.atan2(leg.to.x - this.pos.x, leg.to.z - this.pos.z), 5, dt);
+            }
+            const ph = this.game?.traffic?.pedPhase?.(leg.roadHorizontal);
+            // don't start with the flip imminent (stragglers caught mid-road)
+            if (!ph || (ph.walk && ph.timeLeft > 2.5)) {
+              c.phase = 'walk';
+              c.counted = true;
+              this.game?.traffic?.crossingEnter?.(c.node);
+            }
+          } else {
+            const dw = dist2d(this.pos.x, this.pos.z, leg.to.x, leg.to.z);
+            if (dw < 0.7) {
+              this.game?.traffic?.crossingDone?.(c.node);
+              c.counted = false;
+              c.leg++;
+              c.phase = 'queue';
+              if (c.leg >= c.steps.length) this.crossing = null;
+            } else {
+              this.moveToward(leg.to.x, leg.to.z, this.walkSpeed * 1.4, dt);
+              this.rig.setAnim(this.speed > 2.6 ? 'run' : 'walk');
+            }
+          }
+          break;
         }
         const d = dist2d(this.pos.x, this.pos.z, this.target.x, this.target.z);
         if (d < 1.6 || this.stateT > 40) {
