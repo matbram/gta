@@ -84,6 +84,12 @@ export class Vehicle {
     this.wheels = built.wheels;
     this.frontPivots = built.frontPivots;
     this.wheelR = built.wheelR;
+    // per-wheel local XZ offsets (front wheels sit inside steering pivots,
+    // so read the pivot) — used for per-wheel blood tracking
+    this.wheelOffsets = built.wheels.map((w) => {
+      const n = w.parent && w.parent !== built.group ? w.parent : w;
+      return { x: n.position.x, z: n.position.z };
+    });
     this.headMat = built.headMat;
     this.tailMat = built.tailMat;
     this.reverseMat = built.reverseMat ?? null;

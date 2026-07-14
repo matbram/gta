@@ -133,22 +133,42 @@ export class CombatSystem {
   // first-person weapon viewmodel: a held gun parented to the camera
   syncViewmodel() {
     const game = this.game;
-    if (!this.viewmodels) { this.viewmodels = {}; this.vmGroup = new THREE.Group(); game.camera.add(this.vmGroup); game.scene.add(game.camera); }
+    if (!this.viewmodels) {
+      this.viewmodels = {};
+      this.vmGroup = new THREE.Group();
+      this.vmGroup.visible = false;   // gateVm() decides — never default-on
+      game.camera.add(this.vmGroup);
+      game.scene.add(game.camera);
+    }
     for (const k in this.viewmodels) this.viewmodels[k].visible = false;
     this.vmActive = null;
-    if (this.current === 'fists') return;
-    if (!this.viewmodels[this.current]) {
-      const m = buildWeaponMesh(this.current);
-      m.scale.setScalar(1.8);
-      this.viewmodels[this.current] = m;
-      this.vmGroup.add(m);
+    if (this.current !== 'fists') {
+      if (!this.viewmodels[this.current]) {
+        const m = buildWeaponMesh(this.current);
+        m.scale.setScalar(1.8);
+        this.viewmodels[this.current] = m;
+        this.vmGroup.add(m);
+      }
+      const vm = this.viewmodels[this.current];
+      const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
+      vm.position.set(rest[0], rest[1], rest[2]);
+      vm.rotation.set(0, Math.PI, 0);
+      vm.visible = true;              // re-selects used to stay hidden in FP
+      this.vmActive = vm;
+      this.vmRest = rest;
     }
-    const vm = this.viewmodels[this.current];
-    const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
-    vm.position.set(rest[0], rest[1], rest[2]);
-    vm.rotation.set(0, Math.PI, 0);
-    this.vmActive = vm;
-    this.vmRest = rest;
+    // gate immediately: select() runs AFTER update()'s per-frame gate, so
+    // without this a weapon switch in 3rd person flashed the viewmodel in
+    // the screen corner until the next frame (stretched by wheel slow-mo)
+    this.gateVm();
+  }
+
+  gateVm() {
+    if (!this.vmGroup) return;
+    const player = this.game.player;
+    const fpFoot = this.game.cameraRig.firstPerson && !player.vehicle && !player.dead;
+    this.vmGroup.visible = fpFoot && !!this.vmActive;
+    return fpFoot;
   }
 
   updateHud() {
@@ -182,8 +202,7 @@ export class CombatSystem {
 
     // viewmodel visibility + sway/bob (first-person, on foot)
     if (this.vmGroup) {
-      const fpFoot = game.cameraRig.firstPerson && !player.vehicle && !player.dead;
-      this.vmGroup.visible = fpFoot && !!this.vmActive;
+      const fpFoot = this.gateVm();
       if (fpFoot && this.vmActive) {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
         const bob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.015 : 0.004);

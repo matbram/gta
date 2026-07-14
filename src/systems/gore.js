@@ -193,7 +193,9 @@ export class BloodSystem {
     this._fpIdx++;
   }
 
-  // dark red tire streaks after driving through a pool
+  // one dark red tread strip at an actual wheel's contact point — the
+  // caller tracks each wheel separately, so a moto lays 2 tracks and a
+  // car that only clipped a pool with one tire lays 1
   tireStreak(x, z, heading) {
     if (!this._tsPool) {
       const geo = new THREE.PlaneGeometry(0.26, 1.1);
@@ -211,15 +213,12 @@ export class BloodSystem {
       this.game.scene.add(this._tsPool);
     }
     const g = this.game.city.groundHeight(x, z);
-    const rx = Math.cos(heading) * 0.72, rz = -Math.sin(heading) * 0.72;
-    for (const s of [-1, 1]) {
-      this._tsDummy.position.set(x + rx * s, g + 0.027, z + rz * s);
-      this._tsDummy.rotation.set(0, heading, 0);
-      this._tsDummy.scale.setScalar(1);
-      this._tsDummy.updateMatrix();
-      this._tsPool.setMatrixAt(this._tsIdx % 180, this._tsDummy.matrix);
-      this._tsIdx++;
-    }
+    this._tsDummy.position.set(x, g + 0.027, z);
+    this._tsDummy.rotation.set(0, heading, 0);
+    this._tsDummy.scale.setScalar(1);
+    this._tsDummy.updateMatrix();
+    this._tsPool.setMatrixAt(this._tsIdx % 180, this._tsDummy.matrix);
+    this._tsIdx++;
     this._tsPool.instanceMatrix.needsUpdate = true;
   }
 

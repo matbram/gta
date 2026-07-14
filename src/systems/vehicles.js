@@ -345,19 +345,38 @@ export class VehicleSystem {
       }
     }
 
-    // blood tracking: rolling through a fresh pool leaves dark tire
-    // streaks for the next stretch of road
+    // blood tracking: each WHEEL that rolls through a fresh pool gets its
+    // own charge and lays its own tread line — a moto leaves 2 tracks, a
+    // car that only clips a pool with one tire leaves 1
     this._bloodScanT = (this._bloodScanT ?? 0) - dt;
     const bloodScan = this._bloodScanT <= 0;
     if (bloodScan) this._bloodScanT = 0.12;
     const blood = game.gore?.blood;
     for (const v of vs) {
       if (Math.abs(v.speed) < 2) continue;
-      if (bloodScan && blood?.freshPoolAt?.(v.pos.x, v.pos.z)) v._bloodCharge = 24;
-      if (v._bloodCharge > 0 && game.time - (v._lastStreakT ?? -1) > 0.07) {
-        v._lastStreakT = game.time;
-        v._bloodCharge--;
-        blood?.tireStreak?.(v.pos.x, v.pos.z, v.heading);
+      const offs = v.wheelOffsets;
+      if (!offs?.length || !blood) continue;
+      const sinH = Math.sin(v.heading), cosH = Math.cos(v.heading);
+      if (bloodScan) {
+        for (let i = 0; i < offs.length; i++) {
+          const wx = v.pos.x + offs[i].x * cosH + offs[i].z * sinH;
+          const wz = v.pos.z - offs[i].x * sinH + offs[i].z * cosH;
+          if (blood.freshPoolAt?.(wx, wz)) {
+            (v._wheelBlood ?? (v._wheelBlood = new Array(offs.length).fill(0)))[i] = 24;
+          }
+        }
+      }
+      if (v._wheelBlood && game.time - (v._lastStreakT ?? -1) > 0.07) {
+        let laid = false;
+        for (let i = 0; i < offs.length; i++) {
+          if (v._wheelBlood[i] <= 0) continue;
+          laid = true;
+          v._wheelBlood[i]--;
+          const wx = v.pos.x + offs[i].x * cosH + offs[i].z * sinH;
+          const wz = v.pos.z - offs[i].x * sinH + offs[i].z * cosH;
+          blood.tireStreak?.(wx, wz, v.heading);
+        }
+        if (laid) v._lastStreakT = game.time;
       }
     }
 

@@ -329,8 +329,13 @@ export class TrafficSystem {
 
     if (blocked) {
       car.waitT += dt;
-      if (car.waitT > 2.5 && car.honkT <= 0) {
-        car.honkT = 3 + Math.random() * 4;
+      // don't honk at a queue that's legitimately waiting for a red light —
+      // that was most of the pointless honking. Honk only at genuine
+      // blockers (ped in the road, a car stopped on green), later and
+      // with per-car jitter so intersections don't chorus.
+      const atRed = nextNode.hasSignal && !this.signalGreenFor(e.horizontal) && distToEnd < 22;
+      if (!atRed && car.waitT > 4 + (car.slot ?? 0) * 0.7 && car.honkT <= 0) {
+        car.honkT = 4 + Math.random() * 5;
         game.audio?.horn(v.pos.x, v.pos.z);
       }
     } else car.waitT = 0;
