@@ -12,26 +12,27 @@ export const WEAPONS = {
   fists:   { name: 'FISTS',    icon: '✊', melee: true,  dmg: 12, rate: 0.45, range: 1.5,
     animSet: { aim: 'guardFists', carry: 'none' } },
   bat:     { name: 'BAT',      icon: '🏏', melee: true,  dmg: 30, rate: 0.55, range: 1.9, price: 200,
-    animSet: { aim: 'stanceBat', carry: 'carryBat', swing: true } },
+    animSet: { aim: 'stanceBat', carry: 'carryBat', swing: true,
+      vm: [0.16, -0.26, -0.62], vmScale: 1.3, vmYaw: 0.06 } },
   pistol:  { name: 'P9',       icon: '🔫', dmg: 26, rate: 0.34, range: 65, spread: 0.012, mag: 15, auto: false, sfx: 'pistol', price: 400,
     animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 0.7, reload: 'pistol', reloadTime: 1.4,
-      vm: [0.28, -0.26, -0.55], ads: [0, -0.175, -0.42] } },
+      vm: [0.11, -0.18, -0.55], ads: [0, -0.12, -0.46], vmScale: 1.4, vmYaw: 0.12 } },
   smg:     { name: 'HORNET',   icon: '🔫', dmg: 13, rate: 0.085, range: 48, spread: 0.035, mag: 30, auto: true,  sfx: 'smg', price: 1200,
     animSet: { aim: 'aimSmg', carry: 'carryLong', kick: 0.55, reload: 'mag', reloadTime: 1.6,
-      vm: [0.26, -0.25, -0.5], ads: [0, -0.17, -0.38] } },
+      vm: [0.14, -0.22, -0.6], ads: [0, -0.13, -0.5], vmScale: 1.35, vmYaw: 0.10 } },
   shotgun: { name: 'MULE 12',  icon: '🔫', dmg: 11, rate: 0.85, range: 24, spread: 0.065, mag: 6, pellets: 7, auto: false, sfx: 'shotgun', price: 900,
     animSet: { aim: 'aimShotgun', carry: 'carryLong', kick: 1.6, reload: 'shell', shellTime: 0.55, pump: true,
-      vm: [0.22, -0.24, -0.52], ads: [0, -0.17, -0.4] } },
+      vm: [0.15, -0.24, -0.64], ads: [0, -0.14, -0.52], vmScale: 1.3, vmYaw: 0.10 } },
   rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500,
     animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7,
-      vm: [0.24, -0.23, -0.5], ads: [0, -0.165, -0.38], scope: true } },
+      vm: [0.15, -0.24, -0.66], ads: [0, -0.13, -0.52], vmScale: 1.3, vmYaw: 0.10, scope: true } },
   revolver: { name: 'JUDGE',   icon: '🔫', dmg: 60, rate: 0.75, range: 70, spread: 0.006, mag: 6, auto: false, sfx: 'revolver', price: 1600,
     animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 1.3, reload: 'pistol', reloadTime: 2.0,
-      vm: [0.28, -0.26, -0.55], ads: [0, -0.175, -0.42] } },
+      vm: [0.11, -0.19, -0.55], ads: [0, -0.12, -0.46], vmScale: 1.4, vmYaw: 0.12 } },
   grenade: { name: 'PINEAPPLE', icon: '💣', thrown: true, rate: 0.9, price: 900,
-    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.3, -0.3, -0.5] } },
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.13, -0.2, -0.5], vmScale: 1.4, vmYaw: 0 } },
   molotov: { name: 'BAYSIDE COCKTAIL', icon: '🍾', thrown: true, rate: 0.9, price: 600,
-    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.3, -0.3, -0.5] } },
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.13, -0.2, -0.5], vmScale: 1.4, vmYaw: 0 } },
 };
 
 const ORDER = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov'];
@@ -50,18 +51,28 @@ const FP_GRIPS = {
   molotov:  { r: [0, 0.0, 0.0], l: null },
 };
 
-// one first-person forearm+hand prop. The hand sits at the grip; the forearm
-// runs back toward the camera (weapon-local +z after the π-yaw = toward the
-// screen). Built at unit scale; the caller counter-scales it out of the ×1.8.
+// one first-person forearm+hand prop. The palm sits at the grip and the
+// forearm runs back toward the camera (weapon-local +z = toward the screen).
+// Built at unit scale; the caller counter-scales it out of the weapon's scale
+// and tilts the whole thing down toward the shoulder in _attachHands.
 function buildFpHand(skinMat, sleeveMat) {
   const a = new THREE.Group();
-  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.085), skinMat);
+  // palm: slightly wider than tall, wraps the grip
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.055, 0.09), skinMat);
   a.add(hand);
-  const fore = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.24), skinMat);
-  fore.position.set(0, -0.03, 0.16);
+  // curled fingers over the top-front of the grip (toward the gun, -z)
+  const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.035, 0.045), skinMat);
+  fingers.position.set(0, 0.02, -0.055);
+  a.add(fingers);
+  // a thumb ridge on the near side
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.03, 0.05), skinMat);
+  thumb.position.set(-0.03, 0.0, 0.0);
+  a.add(thumb);
+  const fore = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.22), skinMat);
+  fore.position.set(0, -0.02, 0.15);
   a.add(fore);
-  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), sleeveMat);
-  cuff.position.set(0, -0.05, 0.27);
+  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.066, 0.066, 0.07), sleeveMat);
+  cuff.position.set(0, -0.035, 0.26);
   a.add(cuff);
   return a;
 }
@@ -201,7 +212,7 @@ export class CombatSystem {
       // bare-fists holder: a pair of hands with no weapon
       this._fistsHolder = new THREE.Group();
       this._fistsHolder.position.set(0.05, -0.30, -0.62);
-      this._fistsHolder.rotation.set(0, Math.PI, 0);
+      this._fistsHolder.rotation.set(0, 0, 0);
       this._attachHands(this._fistsHolder, { r: [0.12, 0, 0.02], l: [-0.12, 0, 0.02] });
       this.vmGroup.add(this._fistsHolder);
     }
@@ -213,15 +224,18 @@ export class CombatSystem {
     } else {
       if (!this.viewmodels[this.current]) {
         const m = buildWeaponMesh(this.current);
-        m.scale.setScalar(1.8);
-        this._attachHands(m, FP_GRIPS[this.current], 1 / 1.8);   // hands ride the gun
+        const s = WEAPONS[this.current].animSet?.vmScale ?? 1.4;
+        m.scale.setScalar(s);
+        this._attachHands(m, FP_GRIPS[this.current], 1 / s);   // hands ride the gun life-size
         this.viewmodels[this.current] = m;
         this.vmGroup.add(m);
       }
       const vm = this.viewmodels[this.current];
       const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
+      // slight inward yaw so the right-offset muzzle converges on the crosshair
+      this.vmYaw = WEAPONS[this.current].animSet?.vmYaw ?? 0.12;
       vm.position.set(rest[0], rest[1], rest[2]);
-      vm.rotation.set(0, Math.PI, 0);
+      vm.rotation.set(0, this.vmYaw, 0);
       vm.visible = true;              // re-selects used to stay hidden in FP
       this.vmActive = vm;
       this.vmRest = rest;
@@ -233,17 +247,22 @@ export class CombatSystem {
   }
 
   // attach right/left FP hands to a holder at the given local grips; hands
-  // inherit the holder's transform (so on a weapon mesh they ride the gun)
+  // inherit the holder's transform (so on a weapon mesh they ride the gun).
+  // Each forearm tilts down (and the near/trigger hand outward to the right)
+  // so it descends toward the shoulder instead of floating straight back.
   _attachHands(holder, grips, invScale = 1) {
     if (!grips) return;
-    const mk = (g) => {
+    const mk = (g, rot) => {
       const h = buildFpHand(this._skinMat, this._sleeveMat);
       h.position.set(g[0], g[1], g[2]);
+      h.rotation.set(rot[0], rot[1], rot[2]);
       h.scale.setScalar(invScale);
       return h;
     };
-    if (grips.r) holder.add(mk(grips.r));
-    if (grips.l) holder.add(mk(grips.l));
+    // r = trigger/rear hand → forearm drops down-and-right to the shoulder;
+    // l = support/front hand → forearm drops down, slightly less
+    if (grips.r) holder.add(mk(grips.r, [0.5, 0.32, 0]));
+    if (grips.l) holder.add(mk(grips.l, [0.35, -0.05, 0]));
   }
 
   gateVm() {
@@ -379,7 +398,7 @@ export class CombatSystem {
           bx + Math.cos(this.vmBob) * 0.004 * (1 - k) - mel * 0.05,
           by + bob - kick * 0.5 + dy + drawDip - mel * 0.06,
           bz + kick * (0.8 - k * 0.4) + dz - mel * 0.34);
-        this.vmActive.rotation.set(rx - kick * k * 1.5 - mel * 1.1, Math.PI, mel * 0.5);
+        this.vmActive.rotation.set(rx - kick * k * 1.5 - mel * 1.1, this.vmYaw || 0, mel * 0.5);
       }
     }
     if (this.reloading > 0) {
