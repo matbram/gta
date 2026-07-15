@@ -132,11 +132,18 @@ export const OVERLAY_POSES = {
     armR: [0.9, 0, 0.25], foreArmR: [-2.3, 0, 0],
     armL: [-0.9, 0, -0.25], foreArmL: [2.3, 0, 0],
   },
-  // leg-shot hobble: one stiff dragging leg, slight guard lean
+  // leg-shot hobble: the body favours the good (left) leg — hunched and
+  // leaning off the injured side, the right knee locked stiff and hip hiked
+  // so that leg drags, an arm guarding the wound. A phase-synced vertical
+  // hitch (applied below) adds the characteristic limp lurch.
   limp: {
-    hipDrop: 0.06,
-    upLegR: [0.25, 0, 0], legR: [0.5, 0, 0],
-    spine1: [0.12, 0, -0.08],
+    hipDrop: 0.09,
+    hips: [0, 0, -0.1],                  // hike the injured (right) hip up
+    upLegR: [0.12, 0, 0.05], legR: [0.28, 0, 0],   // right leg forward + knee locked
+    spine1: [0.24, 0, -0.16],            // hunch forward, lean toward the good side
+    spine2: [0, 0, -0.07], head: [0.1, 0, 0.09],
+    armR: [0.22, 0, 0.16], foreArmR: [-0.5, 0, 0], // right arm guards the hip
+    armL: [0.1, 0, 0],
   },
   // belly-crawl for the wounded: body low and pitched forward, arms
   // clawing ahead, legs trailing (walk clip underneath supplies motion)
@@ -250,7 +257,15 @@ export class Animator {
       // native units are normalized away by the rig's height scaling.
       if (pose.hipDrop && this.bones.hips) {
         if (this._hipsRestY === undefined) this._hipsRestY = this.bones.hips.position.y || 1;
-        this.bones.hips.position.y -= pose.hipDrop * this._hipsRestY * this.overlayW;
+        let drop = pose.hipDrop;
+        // a limp lurches: sync a vertical hitch to the walk cycle so the body
+        // drops and re-rises as weight shifts onto the good leg
+        if (this.overlay === 'limp' && this.current) {
+          const dur = this.current.getClip?.().duration || 1;
+          const phase = ((this.current.time % dur) / dur) * Math.PI * 2;
+          drop += 0.07 * (0.5 + 0.5 * Math.sin(phase));
+        }
+        this.bones.hips.position.y -= drop * this._hipsRestY * this.overlayW;
       }
     }
 
