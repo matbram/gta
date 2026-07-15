@@ -36,6 +36,36 @@ export const WEAPONS = {
 
 const ORDER = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov'];
 
+// per-weapon grips in the WEAPON MESH's local space (before its ×1.8 scale):
+// where the right hand (trigger) and left hand (support/foregrip) attach so
+// they always ride with the gun. Forearms trail back toward the screen edge.
+const FP_GRIPS = {
+  bat:      { r: [0, -0.30, 0.02], l: [0, -0.14, 0.02] },
+  pistol:   { r: [0, -0.05, 0.05], l: [0.02, -0.11, 0.02] },
+  revolver: { r: [0, -0.06, 0.06], l: [0.02, -0.12, 0.02] },
+  smg:      { r: [0, -0.07, -0.03], l: [0, -0.02, -0.16] },
+  shotgun:  { r: [0, -0.02, 0.14], l: [0, 0.03, -0.16] },
+  rifle:    { r: [0, -0.05, 0.10], l: [0, 0.02, -0.22] },
+  grenade:  { r: [0, -0.05, 0.0], l: null },
+  molotov:  { r: [0, 0.0, 0.0], l: null },
+};
+
+// one first-person forearm+hand prop. The hand sits at the grip; the forearm
+// runs back toward the camera (weapon-local +z after the π-yaw = toward the
+// screen). Built at unit scale; the caller counter-scales it out of the ×1.8.
+function buildFpHand(skinMat, sleeveMat) {
+  const a = new THREE.Group();
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.085), skinMat);
+  a.add(hand);
+  const fore = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.24), skinMat);
+  fore.position.set(0, -0.03, 0.16);
+  a.add(fore);
+  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), sleeveMat);
+  cuff.position.set(0, -0.05, 0.27);
+  a.add(cuff);
+  return a;
+}
+
 // tiny procedural weapon meshes held in the right hand
 function buildWeaponMesh(id) {
   const g = new THREE.Group();
@@ -165,13 +195,26 @@ export class CombatSystem {
       this.vmGroup.visible = false;   // gateVm() decides — never default-on
       game.camera.add(this.vmGroup);
       game.scene.add(game.camera);
+      const look = game.player?.rig?.look ?? {};
+      this._skinMat = new THREE.MeshLambertMaterial({ color: look.skin ?? 0xb98a62 });
+      this._sleeveMat = new THREE.MeshLambertMaterial({ color: look.shirt ?? 0xe8e4da });
+      // bare-fists holder: a pair of hands with no weapon
+      this._fistsHolder = new THREE.Group();
+      this._fistsHolder.position.set(0.05, -0.30, -0.62);
+      this._fistsHolder.rotation.set(0, Math.PI, 0);
+      this._attachHands(this._fistsHolder, { r: [0.12, 0, 0.02], l: [-0.12, 0, 0.02] });
+      this.vmGroup.add(this._fistsHolder);
     }
     for (const k in this.viewmodels) this.viewmodels[k].visible = false;
+    this._fistsHolder.visible = false;
     this.vmActive = null;
-    if (this.current !== 'fists') {
+    if (this.current === 'fists') {
+      this._fistsHolder.visible = true;
+    } else {
       if (!this.viewmodels[this.current]) {
         const m = buildWeaponMesh(this.current);
         m.scale.setScalar(1.8);
+        this._attachHands(m, FP_GRIPS[this.current], 1 / 1.8);   // hands ride the gun
         this.viewmodels[this.current] = m;
         this.vmGroup.add(m);
       }
@@ -189,6 +232,20 @@ export class CombatSystem {
     this.gateVm();
   }
 
+  // attach right/left FP hands to a holder at the given local grips; hands
+  // inherit the holder's transform (so on a weapon mesh they ride the gun)
+  _attachHands(holder, grips, invScale = 1) {
+    if (!grips) return;
+    const mk = (g) => {
+      const h = buildFpHand(this._skinMat, this._sleeveMat);
+      h.position.set(g[0], g[1], g[2]);
+      h.scale.setScalar(invScale);
+      return h;
+    };
+    if (grips.r) holder.add(mk(grips.r));
+    if (grips.l) holder.add(mk(grips.l));
+  }
+
   gateVm() {
     if (!this.vmGroup) return false;
     const player = this.game.player;
@@ -196,7 +253,9 @@ export class CombatSystem {
     // objects whose visible is EXACTLY false — an undefined here rendered
     // the viewmodel in third person until first-person was toggled once
     const fpFoot = !!(this.game.cameraRig.firstPerson && !player.vehicle && !player.dead);
-    this.vmGroup.visible = fpFoot && !!this.vmActive;
+    // arms are always present in FP (even bare fists), so the group shows
+    // whenever we're in first person on foot
+    this.vmGroup.visible = fpFoot;
     return fpFoot;
   }
 
@@ -275,6 +334,15 @@ export class CombatSystem {
       this._swayX = (this._swayX ?? 0) + ((-mdx * 0.0009) - (this._swayX ?? 0)) * Math.min(1, dt * 10);
       this._swayY = (this._swayY ?? 0) + ((-mdy * 0.0009) - (this._swayY ?? 0)) * Math.min(1, dt * 10);
       this.vmGroup.rotation.set(this._swayY * (1 - this.adsK * 0.8), this._swayX * (1 - this.adsK * 0.8), 0);
+      // bare fists: the holder isn't a weapon so it doesn't get the weapon
+      // block below — bob/melee-sweep it here so the fists still animate
+      if (this.current === 'fists' && fpFoot && this._fistsHolder) {
+        this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
+        if (this.vmMeleeT > 0) this.vmMeleeT -= dt;
+        const fbob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.012 : 0.003);
+        const melee = this.vmMeleeT > 0 ? Math.sin(clamp(1 - this.vmMeleeT / 0.3, 0, 1) * Math.PI) : 0;
+        this._fistsHolder.position.set(0.05 + melee * 0.04, -0.30 + fbob, -0.62 - melee * 0.28);
+      }
       if (fpFoot && this.vmActive) {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
         const bobAmp = (player.speed2d > 0.4 ? 0.015 : 0.004) * (1 - this.adsK * 0.85);
