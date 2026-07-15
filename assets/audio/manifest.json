@@ -129,12 +129,20 @@
     "marco_boom_3": "assets/audio/voice/marco_boom_3.mp3",
     "marco_flip": "assets/audio/voice/marco_flip.mp3",
     "marco_flip_2": "assets/audio/voice/marco_flip_2.mp3",
-    "marco_flip_3": "assets/audio/voice/marco_flip_3.mp3"
+    "marco_flip_3": "assets/audio/voice/marco_flip_3.mp3",
+    "cop_freeze_f": "assets/audio/voice/cop_freeze_f.mp3",
+    "cop_stop_f": "assets/audio/voice/cop_stop_f.mp3",
+    "cop_suspect_f": "assets/audio/voice/cop_suspect_f.mp3",
+    "cop_freeze_f_2": "assets/audio/voice/cop_freeze_f_2.mp3",
+    "cop_backup_f": "assets/audio/voice/cop_backup_f.mp3"
   },
   "music": {
     "radio_neon": "assets/audio/music/radio_neon.mp3",
     "radio_costa": "assets/audio/music/radio_costa.mp3",
     "radio_slow": "assets/audio/music/radio_slow.mp3",
-    "menu_theme": "assets/audio/music/menu_theme.mp3"
+    "menu_theme": "assets/audio/music/menu_theme.mp3",
+    "radio_trap": "assets/audio/music/radio_trap.mp3",
+    "radio_trap_2": "assets/audio/music/radio_trap_2.mp3",
+    "radio_trap_3": "assets/audio/music/radio_trap_3.mp3"
   }
 }
