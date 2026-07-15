@@ -63,6 +63,46 @@ function getPlateMat() {
   return plateMat;
 }
 
+// paint pool: the per-type colour palettes are small and fixed, so paint
+// materials are shared between cars. explode() swaps the body mesh onto the
+// shared charred material instead of tinting (a tint would blacken every
+// car wearing the same paint).
+export const charredMat = new THREE.MeshLambertMaterial({ color: 0x1c1a18 });
+SHARED_MATS.add(charredMat);
+const paintCache = new Map();      // "p|hex" / "l|hex" → material
+function getPaintMat(color, physical) {
+  const hex = new THREE.Color(color).getHex();
+  const key = (physical ? 'p' : 'l') + hex;
+  let m = paintCache.get(key);
+  if (!m) {
+    m = physical
+      ? new THREE.MeshPhysicalMaterial({
+        color: hex, metalness: 0.25, roughness: 0.42,
+        clearcoat: 0.9, clearcoatRoughness: 0.22, envMapIntensity: 1.0,
+      })
+      : new THREE.MeshLambertMaterial({ color: hex });
+    SHARED_MATS.add(m);
+    paintCache.set(key, m);
+  }
+  return m;
+}
+
+// per-type geometry caches — profiles and dimensions are fixed per type, so
+// the expensive beveled extrusions are identical for every car of a type
+// (rebuilding them per spawn was a repeating hitch)
+const bodyGeoCache = new Map();    // type → geo
+const glassGeoCache = new Map();
+const windowGeoCache = new Map();
+function cached(cache, type, build) {
+  let geo = cache.get(type);
+  if (!geo) {
+    geo = build();
+    SHARED_GEOS.add(geo);
+    cache.set(type, geo);
+  }
+  return geo;
+}
+
 const wheelGeoCache = new Map();   // "r|w" → { tire, rim }
 function wheelGeos(r, w) {
   const key = r.toFixed(2) + '|' + w.toFixed(2);
@@ -225,47 +265,45 @@ const windowMat = new THREE.MeshLambertMaterial({
 SHARED_MATS.add(windowMat);
 
 function addWindows(out, g, type, W, L, H) {
-  const P = PROFILES[type] ?? PROFILES.sedan;
-  // windshield: quad along the rake from windshield base to roof front
-  const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
-  const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
-  const rakeLen = Math.hypot(zA - zB, yA - yB);
-  const panes = [];
-  const ws = new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92);
-  ws.rotateX(-Math.atan2(zA - zB, yB - yA));
-  ws.translate(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
-  panes.push(ws);
-  // front side windows
-  for (const sx of [-1, 1]) {
-    const win = new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7);
-    win.rotateY(sx * Math.PI / 2);
-    win.translate(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
-    panes.push(win);
-  }
-  // one merged mesh per car keeps the draw-call budget flat
-  const merged = mergeBG(panes, false);
-  for (const p of panes) p.dispose();
-  const m = new THREE.Mesh(merged, windowMat);
-  (out._ownGeos = out._ownGeos || new Set()).add(merged);
-  g.add(m);
+  const merged = cached(windowGeoCache, type, () => {
+    const P = PROFILES[type] ?? PROFILES.sedan;
+    // windshield: quad along the rake from windshield base to roof front
+    const zA = P.windshield[0] * L, yA = P.windshield[1] * H;
+    const zB = P.roof[1][0] * L, yB = P.roof[1][1] * H;
+    const rakeLen = Math.hypot(zA - zB, yA - yB);
+    const panes = [];
+    const ws = new THREE.PlaneGeometry(W * 0.78, rakeLen * 0.92);
+    ws.rotateX(-Math.atan2(zA - zB, yB - yA));
+    ws.translate(0, (yA + yB) / 2 + 0.015, (zA + zB) / 2 + 0.02);
+    panes.push(ws);
+    // front side windows
+    for (const sx of [-1, 1]) {
+      const win = new THREE.PlaneGeometry(Math.abs(zA - zB) * 0.8, (yB - yA) * 0.7);
+      win.rotateY(sx * Math.PI / 2);
+      win.translate(sx * (W / 2 - 0.02), (yA + yB) / 2 + 0.05, (zA + zB) / 2 - 0.1);
+      panes.push(win);
+    }
+    // one merged mesh per car keeps the draw-call budget flat
+    const geo = mergeBG(panes, false);
+    for (const p of panes) p.dispose();
+    return geo;
+  });
+  const mesh = new THREE.Mesh(merged, windowMat);
+  g.add(mesh);
+  return mesh;
 }
 
 // ---------------------------------------------------------------- factory
 
 export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   const g = new THREE.Group();
-  const out = { group: g, wheels: [], frontPivots: [] };
+  // parts: refs the damage system can knock loose (absent = attached)
+  const out = { group: g, wheels: [], frontPivots: [], parts: {} };
   const W = spec.w, L = spec.l, H = spec.h;
   const wheelR = type === 'moto' ? 0.34 : type === 'bus' || type === 'firetruck' ? 0.46 : 0.37;
   out.wheelR = wheelR;
 
-  const paintColor = new THREE.Color(color);
-  out.bodyMat = physical
-    ? new THREE.MeshPhysicalMaterial({
-      color: paintColor, metalness: 0.25, roughness: 0.42,
-      clearcoat: 0.9, clearcoatRoughness: 0.22, envMapIntensity: 1.0,
-    })
-    : new THREE.MeshLambertMaterial({ color: paintColor });
+  out.bodyMat = getPaintMat(color, physical);
 
   if (type === 'moto') {
     buildMoto(out, g, spec, wheelR);
@@ -274,15 +312,17 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
   }
 
   // body shell (raised so the bottom clears the ground on its wheels)
-  const body = new THREE.Mesh(bodyGeometry(type, W, L, H, wheelR), out.bodyMat);
+  const body = new THREE.Mesh(
+    cached(bodyGeoCache, type, () => bodyGeometry(type, W, L, H, wheelR)), out.bodyMat);
   body.castShadow = true;
   g.add(body);
   out.bodyMesh = body;
 
   // greenhouse + readable windshield/side panes
-  const glass = new THREE.Mesh(glassGeometry(type, W, L, H), glassMat);
+  const glass = new THREE.Mesh(
+    cached(glassGeoCache, type, () => glassGeometry(type, W, L, H)), glassMat);
   g.add(glass);
-  addWindows(out, g, type, W, L, H);
+  out.parts.windows = addWindows(out, g, type, W, L, H);
 
   // wheels (front wheels wrapped in steering pivots)
   const P = PROFILES[type] ?? PROFILES.sedan;
@@ -307,7 +347,7 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
     out.wheels.push(tire);
   }
 
-  // bumpers
+  // bumpers (+ plates riding on them) — detachable
   for (const zs of [1, -1]) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.16, 0.14), trimMat);
     b.position.set(0, H * (PROFILES[type]?.bottom ?? 0.2) + 0.09, zs * (L / 2 - 0.02));
@@ -319,15 +359,18 @@ export function buildVehicleMesh(type, spec, color, { physical = true } = {}) {
     if (zs < 0) pl.rotation.y = Math.PI;
     g.add(pl);
     out._ownGeos.add(pl.geometry);
+    out.parts[zs > 0 ? 'bumperF' : 'bumperR'] = b;
+    out.parts[zs > 0 ? 'plateF' : 'plateR'] = pl;
   }
 
-  // mirrors
+  // mirrors — detachable
   for (const sx of [-1, 1]) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.06), trimMat);
     const wsZ = (PROFILES[type]?.windshield?.[0] ?? 0.27) * L;
     m.position.set(sx * (W / 2 + 0.06), H * 0.62, wsZ * 0.9);
     g.add(m);
     (out._ownGeos = out._ownGeos || new Set()).add(m.geometry);
+    out.parts[sx < 0 ? 'mirrorL' : 'mirrorR'] = m;
   }
 
   // head/tail lights + brake-bright tails + white reverse lamps
@@ -366,6 +409,7 @@ function addExtras(out, g, type, spec, W, L, H, wheelR) {
     sign.position.set(0, roofY + 0.08, -0.1);
     g.add(sign);
     out._extraMats = [sign.material];
+    out.parts.taxiSign = sign;
   }
   if (type === 'police' || type === 'firetruck' || type === 'ambulance') {
     out.lightbarR = new THREE.MeshLambertMaterial({ color: 0x772222, emissive: 0xff2222, emissiveIntensity: 0 });
@@ -378,6 +422,8 @@ function addExtras(out, g, type, spec, W, L, H, wheelR) {
     const lb2 = own(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.3), out.lightbarB));
     lb2.position.set(0.24, y, z);
     g.add(lb2);
+    out.parts.lightbar1 = lb1;
+    out.parts.lightbar2 = lb2;
   }
   if (type === 'police') {
     const doors = own(new THREE.Mesh(new THREE.BoxGeometry(W + 0.02, H * 0.26, L * 0.3),
@@ -435,6 +481,8 @@ function buildMoto(out, g, spec, wheelR) {
   const seat = own(new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.09, 0.6), trimMat));
   seat.position.set(0, wheelR + 0.5, -0.32);
   g.add(seat);
+  out.parts.tank = tank;
+  out.parts.seat = seat;
   // forks + bars
   for (const sx of [-1, 1]) {
     const fork = own(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.62, 6), steelMat));

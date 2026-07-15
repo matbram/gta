@@ -116,14 +116,44 @@ export const OVERLAY_POSES = {
     armL: [0, 0, 1.4], armR: [0, 0, -1.4],
   },
   jump: {
-    upLegL: [-0.6, 0, 0], legL: [1.0, 0, 0],
-    upLegR: [-0.25, 0, 0], legR: [0.55, 0, 0],
-    armL: [0, 0, 0.6], armR: [0, 0, -0.6],
+    upLegL: [-0.75, 0, 0], legL: [1.2, 0, 0],
+    upLegR: [-0.35, 0, 0], legR: [0.7, 0, 0],
+    armL: [-0.35, 0, 0.7], armR: [0.35, 0, -0.7],
+    spine1: [0.14, 0, 0], head: [-0.1, 0, 0],
   },
+  // protective kneel: left foot planted in front, right knee to the ground
+  // (hipDrop actually lowers the body), torso curled, forearms shielding
+  // the head — replaces a lopsided hanging-arms squat that read as broken
   kneel: {
-    upLegL: [-1.5, 0, 0], legL: [1.6, 0, 0],
-    upLegR: [-0.5, 0, 0], legR: [1.9, 0, 0],
-    spine1: [0.25, 0, 0],
+    hipDrop: 0.45,   // fraction of the hips' rest height (skeleton units vary)
+    upLegL: [-1.25, 0, 0.08], legL: [1.25, 0, 0],
+    upLegR: [0.25, 0, -0.08], legR: [1.9, 0, 0],
+    spine1: [0.3, 0, 0], head: [0.22, 0, 0],
+    armR: [0.9, 0, 0.25], foreArmR: [-2.3, 0, 0],
+    armL: [-0.9, 0, -0.25], foreArmL: [2.3, 0, 0],
+  },
+  // leg-shot hobble: the body favours the good (left) leg — hunched and
+  // leaning off the injured side, the right knee locked stiff and hip hiked
+  // so that leg drags, an arm guarding the wound. A phase-synced vertical
+  // hitch (applied below) adds the characteristic limp lurch.
+  limp: {
+    hipDrop: 0.09,
+    hips: [0, 0, -0.1],                  // hike the injured (right) hip up
+    upLegR: [0.12, 0, 0.05], legR: [0.28, 0, 0],   // right leg forward + knee locked
+    spine1: [0.24, 0, -0.16],            // hunch forward, lean toward the good side
+    spine2: [0, 0, -0.07], head: [0.1, 0, 0.09],
+    armR: [0.22, 0, 0.16], foreArmR: [-0.5, 0, 0], // right arm guards the hip
+    armL: [0.1, 0, 0],
+  },
+  // belly-crawl for the wounded: body low and pitched forward, arms
+  // clawing ahead, legs trailing (walk clip underneath supplies motion)
+  crawl: {
+    hipDrop: 0.72,
+    spine1: [1.05, 0, 0], head: [-0.5, 0, 0],
+    armR: [1.35, 0, 0.2], foreArmR: [-0.7, 0, 0],
+    armL: [-1.35, 0, -0.2], foreArmL: [0.7, 0, 0],
+    upLegL: [0.5, 0, 0], legL: [0.6, 0, 0],
+    upLegR: [0.35, 0, 0], legR: [0.75, 0, 0],
   },
   hose: {
     armR: [0.95, 0, 0.15], foreArmR: [-0.4, 0, 0],
@@ -214,13 +244,28 @@ export class Animator {
     const pose = OVERLAY_POSES[this.overlay];
     if (pose && this.overlayW > 0.01) {
       for (const [key, rot] of Object.entries(pose)) {
-        if (key === 'hipsRotX') continue;
+        if (key === 'hipsRotX' || key === 'hipDrop') continue;
         const bone = this.bones[key];
         if (!bone) continue;
         const w = this.overlayW;
         _e.set(rot[0] * w, rot[1] * w, rot[2] * w);
         _q.setFromEuler(_e);
         bone.quaternion.multiply(_q);
+      }
+      // poses like kneeling actually lower the body, not just fold the legs.
+      // hipDrop is a fraction of the hips' rest height because the skeleton's
+      // native units are normalized away by the rig's height scaling.
+      if (pose.hipDrop && this.bones.hips) {
+        if (this._hipsRestY === undefined) this._hipsRestY = this.bones.hips.position.y || 1;
+        let drop = pose.hipDrop;
+        // a limp lurches: sync a vertical hitch to the walk cycle so the body
+        // drops and re-rises as weight shifts onto the good leg
+        if (this.overlay === 'limp' && this.current) {
+          const dur = this.current.getClip?.().duration || 1;
+          const phase = ((this.current.time % dur) / dur) * Math.PI * 2;
+          drop += 0.07 * (0.5 + 0.5 * Math.sin(phase));
+        }
+        this.bones.hips.position.y -= drop * this._hipsRestY * this.overlayW;
       }
     }
 
@@ -319,6 +364,52 @@ export const GESTURES = {
     if (bones.spine1) { e.set(-0.25 * up + 0.55 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
     if (bones.head) { e.set(-0.15 * up + 0.2 * ease, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
   },
+  // overhand throw: wind back, torso counter-twist, whip forward
+  throwItem(bones, q, e, t) {
+    const wind = Math.min(t / 0.35, 1);
+    const whip = clamp((t - 0.35) / 0.3, 0, 1);
+    const ease = whip * whip * (3 - 2 * whip);
+    const arm = -1.6 * wind + 3.1 * ease;         // back over the shoulder, then rip forward
+    if (bones.armR) { e.set(arm, 0, 0.2 * wind); q.setFromEuler(e); bones.armR.quaternion.multiply(q); }
+    if (bones.foreArmR) { e.set(-1.1 * wind * (1 - ease), 0, 0); q.setFromEuler(e); bones.foreArmR.quaternion.multiply(q); }
+    if (bones.spine2) { e.set(0, 0.5 * wind - 0.9 * ease, 0); q.setFromEuler(e); bones.spine2.quaternion.multiply(q); }
+    if (bones.spine1) { e.set(0.12 * ease, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.armL) { e.set(-0.5 * ease, 0, 0.2 * ease); q.setFromEuler(e); bones.armL.quaternion.multiply(q); }
+  },
+  // landing dip: knees give and the torso pitches on touchdown; s scales
+  // the depth with fall speed
+  landDip(bones, q, e, t, s = 1) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI) * s;
+    if (bones.spine1) { e.set(0.35 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    for (const key of ['upLegL', 'upLegR']) {
+      if (bones[key]) { e.set(-0.55 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['legL', 'legR']) {
+      if (bones[key]) { e.set(0.8 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['armL', 'armR']) {
+      if (bones[key]) { e.set(key === 'armL' ? -0.4 * k : 0.4 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+  },
+  // combat tuck-and-roll: whole-body curl (the tumble itself is the rig
+  // group rotating — this gesture just folds the body into a ball)
+  roll(bones, q, e, t) {
+    const k = Math.sin(clamp(t, 0, 1) * Math.PI);   // tuck in, then release
+    if (bones.spine1) { e.set(0.9 * k, 0, 0); q.setFromEuler(e); bones.spine1.quaternion.multiply(q); }
+    if (bones.head) { e.set(0.5 * k, 0, 0); q.setFromEuler(e); bones.head.quaternion.multiply(q); }
+    for (const key of ['upLegL', 'upLegR']) {
+      if (bones[key]) { e.set(-1.6 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['legL', 'legR']) {
+      if (bones[key]) { e.set(1.8 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['armL', 'armR']) {
+      if (bones[key]) { e.set(key === 'armL' ? -1.0 * k : 1.0 * k, 0, 0.0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+    for (const key of ['foreArmL', 'foreArmR']) {
+      if (bones[key]) { e.set(key === 'foreArmL' ? 1.4 * k : -1.4 * k, 0, 0); q.setFromEuler(e); bones[key].quaternion.multiply(q); }
+    }
+  },
   // firearm kick: fast muzzle climb through the arms, quick settle.
   // s scales the kick (pistol 0.7 → shotgun 1.6)
   gunKick(bones, q, e, t, s = 1) {
@@ -402,16 +493,39 @@ export const GESTURES = {
       bones.spine1.quaternion.multiply(q);
     }
   },
-  // flinch away from a hit
-  flinch(bones, q, e, t) {
+  // flinch away from a hit; side (+1/-1) leans the recoil away from the
+  // side the blow came from so reactions read directionally
+  flinch(bones, q, e, t, side = 1) {
     const k = Math.sin(clamp(t, 0, 1) * Math.PI);
     if (bones.spine1) {
-      e.set(-0.3 * k, 0.15 * k, 0); q.setFromEuler(e);
+      e.set(-0.3 * k, 0.15 * k * side, 0.12 * k * -side); q.setFromEuler(e);
       bones.spine1.quaternion.multiply(q);
     }
     if (bones.head) {
-      e.set(-0.25 * k, 0, 0.1 * k); q.setFromEuler(e);
+      e.set(-0.25 * k, 0, 0.14 * k * -side); q.setFromEuler(e);
       bones.head.quaternion.multiply(q);
+    }
+  },
+  // front kick with the right leg: chamber, extend, recover
+  kick(bones, q, e, t) {
+    const ext = Math.sin(clamp(t, 0, 1) * Math.PI);
+    if (bones.upLegR) {
+      e.set(-1.35 * ext, 0, 0.05 * ext); q.setFromEuler(e);
+      bones.upLegR.quaternion.multiply(q);
+    }
+    if (bones.legR) {
+      // knee stays bent through the chamber, snaps straight at full extension
+      const bend = t < 0.45 ? 1.1 * (t / 0.45) : 1.1 * Math.max(0, 1 - (t - 0.45) / 0.25);
+      e.set(bend, 0, 0); q.setFromEuler(e);
+      bones.legR.quaternion.multiply(q);
+    }
+    if (bones.spine1) {
+      e.set(0.22 * ext, 0, 0); q.setFromEuler(e);   // lean back for balance
+      bones.spine1.quaternion.multiply(q);
+    }
+    if (bones.armL) {
+      e.set(0.5 * ext, 0, 0.3 * ext); q.setFromEuler(e);   // guard arm rises
+      bones.armL.quaternion.multiply(q);
     }
   },
 };

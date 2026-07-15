@@ -11,6 +11,7 @@ export class Cop extends Ped {
   constructor(city, scene, tough = false) {
     super(city, scene, tough ? { ...COP_LOOK, body: 'heavy', female: false } : { ...COP_LOOK }, { health: tough ? 110 : 60 });
     this.isCop = true;
+    this.faction = 'cop';
     this.tough = tough;
     this.walkSpeed = 1.25;
     this.state = 'chase';
@@ -42,9 +43,13 @@ export class Cop extends Ped {
       return;
     }
 
-    // no heat: walk the beat / investigate reports instead of chasing
+    // commandeering a vehicle to join the chase takes precedence
+    if (this.commandeer && this.runCommandeer(dt, game)) return;
+
+    // no heat: police NPC criminals, walk the beat, investigate reports
     if (game.wanted.state.stars === 0 && !this.provoked) {
       this.arrestT = 0;
+      if (this.npcTarget && this.pursueNpc(dt, game)) return;
       if (this.investigate) {
         const inv = this.investigate;
         const dd = dist2d(this.pos.x, this.pos.z, inv.x, inv.z);
@@ -131,13 +136,148 @@ export class Cop extends Ped {
     this.syncRig();
   }
 
-  shoot(game, d) {
+  // run to a nearby car, pull the driver if needed, and drive off as a
+  // headless pursuit cruiser. Returns true while the beat is playing so
+  // update() skips the normal chase logic. `boarded` marks this officer
+  // for removal by the wanted loop (his body is now "in the car").
+  runCommandeer(dt, game) {
+    const cm = this.commandeer;
+    const v = cm.vehicle;
+    const abort = () => {
+      if (v) v._commandeerBy = null;
+      const car0 = game.traffic?.cars?.find((c) => c.vehicle === v);
+      if (car0) car0.pulledOver = false;
+      this.commandeer = null;
+      if (game.wanted) game.wanted._commandeers = Math.max(0, (game.wanted._commandeers ?? 1) - 1);
+    };
+    cm.t += dt;
+    if (!v || v.dead || v.driver === 'player' || game.player.vehicle === v ||
+        game.wanted.state.stars === 0 || cm.t > 25) { abort(); return false; }
+    const door = v.seatWorldPos();
+    const d = dist2d(this.pos.x, this.pos.z, door.x, door.z);
+    if (d > 55) { abort(); return false; }
+    const car = game.traffic?.cars?.find((c) => c.vehicle === v);
+
+    if (cm.phase === 'approach') {
+      // wave a moving target over to the curb once we're close
+      if (car && d < 25 && !car.pulledOver) car.pulledOver = true;
+      if (d > 1.6) {
+        this.moveToward(door.x, door.z, this.runSpeed, dt);
+        this.rig.setAnim('run');
+      } else if (car?.driverPed) {
+        cm.phase = 'yank';
+        cm.yankT = 0;
+      } else if (Math.abs(v.speed) < 1.5) {
+        cm.phase = 'enter';
+      }
+    }
+    if (cm.phase === 'yank') {
+      // gun on the window: "out of the car"
+      this.speed = 0;
+      this.heading = angleDamp(this.heading,
+        Math.atan2(v.pos.x - this.pos.x, v.pos.z - this.pos.z), 12, dt);
+      this.rig.setAnim('aim');
+      if (!cm.barked) { cm.barked = true; game.audio?.bark?.('bark_moveit', this.pos.x, this.pos.z); }
+      cm.yankT += dt;
+      if (cm.yankT > 0.9) {
+        const ped = car?.driverPed;
+        if (ped) {
+          game.peds.ejectDriver(ped, v);
+          game.audio?.bark?.('bark_mycar', ped.pos.x, ped.pos.z);
+        }
+        if (car) car.driverPed = null;
+        v.driver = null;
+        game.traffic?.releaseVehicle(v);
+        cm.phase = 'enter';
+      }
+    }
+    if (cm.phase === 'enter') {
+      v._commandeerBy = null;
+      if (game.wanted) {
+        game.wanted._commandeers = Math.max(0, (game.wanted._commandeers ?? 1) - 1);
+        game.wanted.convertToCruiser(v, 1);
+      }
+      this.commandeer = null;
+      this.boarded = true;   // wanted loop disposes + removes us this frame
+      return true;
+    }
+    this.rig.update(dt, this.speed);
+    this.syncRig();
+    return true;
+  }
+
+  // chase / arrest / shoot an NPC criminal (0★ police work). Returns true
+  // while handling one so the caller skips the player logic this frame.
+  pursueNpc(dt, game) {
+    const t = this.npcTarget;
+    if (!t || t.dead || !t.criminal) { this.npcTarget = null; return false; }
+    const d = dist2d(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
+    if (d > 120) { this.npcTarget = null; return false; }
+    this.shootCooldown -= dt;   // the 0★ branch returns before the shared tick
+    // a crowd gathers to watch the arrest / shootout (throttled)
+    if (d < 30 && (this._spectT ?? 0) < game.time) {
+      this._spectT = game.time + 2;
+      game.peds?.spectacleAt?.(t.pos.x, t.pos.z);
+    }
+    const los = game.wanted.lineOfSight(this.pos.x, this.pos.y + 1.5, this.pos.z,
+      t.pos.x, t.pos.y + 1.2, t.pos.z);
+    if (t.criminal.level >= 2) {
+      // killer: lethal response
+      if (los && d < 22 && d > 2) {
+        this.speed = 0;
+        this.heading = angleDamp(this.heading, Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), 10, dt);
+        this.rig.setAnim('aim');
+        if (this.shootCooldown <= 0) {
+          this.shootCooldown = 1.1;
+          this.shoot(game, d, t);
+        }
+      } else {
+        this.moveToward(t.pos.x, t.pos.z, this.runSpeed, dt);
+        this.rig.setAnim('run');
+      }
+    } else {
+      // minor crime: close in and make the arrest
+      if (d > 1.9) {
+        this.moveToward(t.pos.x, t.pos.z, this.runSpeed * 0.9, dt);
+        this.rig.setAnim('run');
+      } else {
+        this.speed = 0;
+        this.heading = angleDamp(this.heading, Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), 12, dt);
+        this.rig.setAnim('aim');
+        this._npcArrestT = (this._npcArrestT ?? 0) + dt;
+        if (this._npcArrestT > 1.15) {
+          this._npcArrestT = 0;
+          t.criminal = null;
+          t.threat = null;
+          t.state = t.isGoon ? 'guard' : 'cower';   // hands up / stand down
+          t.panicked = !t.isGoon;
+          t.stateT = 0;
+          this.npcTarget = null;
+          this.investigate = { x: t.pos.x, z: t.pos.z, t: 0 };
+        }
+      }
+    }
+    this.rig.update(dt, this.speed);
+    this.syncRig();
+    return true;
+  }
+
+  shoot(game, d, tgt = null) {
     const player = game.player;
     game.audio?.gunshot('pistol', this.pos.x, this.pos.z);
     game.particles?.muzzleFlash(
       this.pos.x + Math.sin(this.heading) * 0.5, this.pos.y + 1.35,
       this.pos.z + Math.cos(this.heading) * 0.5,
       Math.sin(this.heading), Math.cos(this.heading));
+    if (tgt && tgt !== player) {
+      // firing on an NPC criminal
+      if (Math.random() < this.accuracy * clamp(1 - d / 34, 0.15, 1)) {
+        tgt.damage?.(this.tough ? 12 : 8, game, 'gun', null, 'ai', this);
+      } else {
+        game.particles?.sparks(tgt.pos.x, tgt.pos.y + 0.5, tgt.pos.z, 2);
+      }
+      return;
+    }
     // hit chance falls with distance and player speed
     const speedDodge = clamp((player.vehicle ? Math.abs(player.vehicle.speed) : player.speed2d) / 14, 0, 0.55);
     const chance = this.accuracy * clamp(1 - d / 34, 0.15, 1) * (1 - speedDodge);
@@ -156,8 +296,16 @@ export class Cop extends Ped {
     }
   }
 
-  damage(amount, game, source) {
-    this.provoked = true;
+  damage(amount, game, source, impact = null, culprit = 'player', attacker = null) {
+    // a stray AI car clipping a beat cop must not put him in execution
+    // mode — only a direct player attack provokes lethal response at 0★
+    if (culprit === 'player') this.provoked = true;
+    else if (attacker && !attacker.dead && !attacker.isCop && attacker !== game.player) {
+      // attacked by an NPC: they're now a lethal-response criminal
+      attacker.criminal = { level: 2, t: 60 };
+      this.npcTarget = attacker;
+    }
+    this.killedBy = culprit;
     if (this.dead) return;
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
@@ -176,8 +324,31 @@ export class Cop extends Ped {
     this.ragdoll = game.gore?.makeRagdoll(this.rig, { dx: dx / l, dz: dz / l, force: 2.5, up: 1, spin: (Math.random() - 0.5) * 3 });
     game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
     game.audio?.scream(this.pos.x, this.pos.z);
-    game.state.stats.kills++;
-    game.peds?.panicAt(this.pos.x, this.pos.z, 26);
+    const culprit = this.killedBy ?? 'player';
+    if (culprit === 'player') { game.state.stats.kills++; game.voice?.say?.('copkill', 0.6); game.voice?.notifyKill?.(); }
+    game.peds?.panicAt(this.pos.x, this.pos.z, 26, null, culprit);
     game.worldlife?.dropCash?.(this.pos.x, this.pos.z, 20 + Math.floor(Math.random() * 30));
+    // his sidearm skitters loose — anyone can grab it (tough units carry rifles)
+    game.worldlife?.dropWeapon?.(this.pos.x + 0.7, this.pos.z + 0.4,
+      this.tough ? 'rifle' : 'pistol', this.tough ? 24 : 12);
+    this._clearCommandeer();
+  }
+
+  // any removal path (death, cull, stand-down) must release a car we were
+  // in the middle of grabbing, or it stays flagged/stopped forever
+  _clearCommandeer() {
+    if (!this.commandeer) return;
+    const v = this.commandeer.vehicle;
+    if (v) v._commandeerBy = null;
+    const car = this.game?.traffic?.cars?.find((c) => c.vehicle === v);
+    if (car) car.pulledOver = false;
+    this.commandeer = null;
+    const w = this.game?.wanted;
+    if (w) w._commandeers = Math.max(0, (w._commandeers ?? 1) - 1);
+  }
+
+  dispose() {
+    this._clearCommandeer();
+    super.dispose();
   }
 }

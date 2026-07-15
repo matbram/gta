@@ -33,7 +33,7 @@ const dist = Math.hypot(p1.x - p0.x, p1.z - p0.z);
 console.log(`drove ${dist.toFixed(1)}m in 6s sim (${(dist / 6).toFixed(1)} m/s)`,
   dist / 6 > 8 ? 'DRIVE OK' : 'DRIVE FAIL');
 await page.waitForTimeout(400);
-await page.screenshot({ path: 'screenshots/05-driving.png' });
+if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/05-driving.png' });
 
 // let the world simulate 25s so traffic/peds populate
 await page.evaluate(() => window.__game.tick(25));
@@ -52,7 +52,7 @@ await page.evaluate(() => window.__game.tick(0.3));
 await page.keyboard.up('f');
 const out = await page.evaluate(() => !window.__game.game.player.vehicle);
 console.log('exited vehicle:', out ? 'OK' : 'FAIL');
-await page.screenshot({ path: 'screenshots/06-street.png' });
+if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/06-street.png' });
 
 console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 10).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();

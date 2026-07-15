@@ -12,18 +12,70 @@ export const WEAPONS = {
   fists:   { name: 'FISTS',    icon: '✊', melee: true,  dmg: 12, rate: 0.45, range: 1.5,
     animSet: { aim: 'guardFists', carry: 'none' } },
   bat:     { name: 'BAT',      icon: '🏏', melee: true,  dmg: 30, rate: 0.55, range: 1.9, price: 200,
-    animSet: { aim: 'stanceBat', carry: 'carryBat', swing: true } },
+    animSet: { aim: 'stanceBat', carry: 'carryBat', swing: true,
+      vm: [0.16, -0.26, -0.62], vmScale: 1.3, vmYaw: 0.06 } },
   pistol:  { name: 'P9',       icon: '🔫', dmg: 26, rate: 0.34, range: 65, spread: 0.012, mag: 15, auto: false, sfx: 'pistol', price: 400,
-    animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 0.7, reload: 'pistol', reloadTime: 1.4, vm: [0.28, -0.26, -0.55] } },
+    animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 0.7, reload: 'pistol', reloadTime: 1.4,
+      vm: [0.11, -0.18, -0.55], ads: [0, -0.12, -0.46], vmScale: 1.4, vmYaw: 0.12 } },
   smg:     { name: 'HORNET',   icon: '🔫', dmg: 13, rate: 0.085, range: 48, spread: 0.035, mag: 30, auto: true,  sfx: 'smg', price: 1200,
-    animSet: { aim: 'aimSmg', carry: 'carryLong', kick: 0.55, reload: 'mag', reloadTime: 1.6, vm: [0.26, -0.25, -0.5] } },
+    animSet: { aim: 'aimSmg', carry: 'carryLong', kick: 0.55, reload: 'mag', reloadTime: 1.6,
+      vm: [0.14, -0.22, -0.6], ads: [0, -0.13, -0.5], vmScale: 1.35, vmYaw: 0.10 } },
   shotgun: { name: 'MULE 12',  icon: '🔫', dmg: 11, rate: 0.85, range: 24, spread: 0.065, mag: 6, pellets: 7, auto: false, sfx: 'shotgun', price: 900,
-    animSet: { aim: 'aimShotgun', carry: 'carryLong', kick: 1.6, reload: 'shell', shellTime: 0.55, pump: true, vm: [0.22, -0.24, -0.52] } },
+    animSet: { aim: 'aimShotgun', carry: 'carryLong', kick: 1.6, reload: 'shell', shellTime: 0.55, pump: true,
+      vm: [0.15, -0.24, -0.64], ads: [0, -0.14, -0.52], vmScale: 1.3, vmYaw: 0.10 } },
   rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500,
-    animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7, vm: [0.24, -0.23, -0.5] } },
+    animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7,
+      vm: [0.15, -0.24, -0.66], ads: [0, -0.13, -0.52], vmScale: 1.3, vmYaw: 0.10, scope: true } },
+  revolver: { name: 'JUDGE',   icon: '🔫', dmg: 60, rate: 0.75, range: 70, spread: 0.006, mag: 6, auto: false, sfx: 'revolver', price: 1600,
+    animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 1.3, reload: 'pistol', reloadTime: 2.0,
+      vm: [0.11, -0.19, -0.55], ads: [0, -0.12, -0.46], vmScale: 1.4, vmYaw: 0.12 } },
+  grenade: { name: 'PINEAPPLE', icon: '💣', thrown: true, rate: 0.9, price: 900,
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.13, -0.2, -0.5], vmScale: 1.4, vmYaw: 0 } },
+  molotov: { name: 'BAYSIDE COCKTAIL', icon: '🍾', thrown: true, rate: 0.9, price: 600,
+    animSet: { aim: 'stanceBat', carry: 'none', vm: [0.13, -0.2, -0.5], vmScale: 1.4, vmYaw: 0 } },
 };
 
-const ORDER = ['fists', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'];
+const ORDER = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov'];
+
+// per-weapon grips in the WEAPON MESH's local space (before its ×1.8 scale):
+// where the right hand (trigger) and left hand (support/foregrip) attach so
+// they always ride with the gun. Forearms trail back toward the screen edge.
+const FP_GRIPS = {
+  bat:      { r: [0, -0.30, 0.02], l: [0, -0.14, 0.02] },
+  pistol:   { r: [0, -0.05, 0.05], l: [0.02, -0.11, 0.02] },
+  revolver: { r: [0, -0.06, 0.06], l: [0.02, -0.12, 0.02] },
+  smg:      { r: [0, -0.07, -0.03], l: [0, -0.02, -0.16] },
+  shotgun:  { r: [0, -0.02, 0.14], l: [0, 0.03, -0.16] },
+  rifle:    { r: [0, -0.05, 0.10], l: [0, 0.02, -0.22] },
+  grenade:  { r: [0, -0.05, 0.0], l: null },
+  molotov:  { r: [0, 0.0, 0.0], l: null },
+};
+
+// one first-person forearm+hand prop. The palm sits at the grip and the
+// forearm runs back toward the camera (weapon-local +z = toward the screen).
+// Built at unit scale; the caller counter-scales it out of the weapon's scale
+// and tilts the whole thing down toward the shoulder in _attachHands.
+function buildFpHand(skinMat, sleeveMat) {
+  const a = new THREE.Group();
+  // palm: slightly wider than tall, wraps the grip
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.055, 0.09), skinMat);
+  a.add(hand);
+  // curled fingers over the top-front of the grip (toward the gun, -z)
+  const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.035, 0.045), skinMat);
+  fingers.position.set(0, 0.02, -0.055);
+  a.add(fingers);
+  // a thumb ridge on the near side
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.03, 0.05), skinMat);
+  thumb.position.set(-0.03, 0.0, 0.0);
+  a.add(thumb);
+  const fore = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.22), skinMat);
+  fore.position.set(0, -0.02, 0.15);
+  a.add(fore);
+  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.066, 0.066, 0.07), sleeveMat);
+  cuff.position.set(0, -0.035, 0.26);
+  a.add(cuff);
+  return a;
+}
 
 // tiny procedural weapon meshes held in the right hand
 function buildWeaponMesh(id) {
@@ -59,6 +111,18 @@ function buildWeaponMesh(id) {
       add(new THREE.BoxGeometry(0.04, 0.14, 0.05), dark, 0, -0.05, 0.05);
       add(new THREE.BoxGeometry(0.04, 0.1, 0.16), wood, 0, 0.02, 0.26);
       break;
+    case 'revolver':
+      add(new THREE.BoxGeometry(0.05, 0.1, 0.07), dark, 0, -0.025, 0.02);
+      add(new THREE.CylinderGeometry(0.028, 0.028, 0.09, 6), dark, 0, 0.04, -0.02).rotation.x = Math.PI / 2;
+      add(new THREE.CylinderGeometry(0.016, 0.016, 0.24, 6), dark, 0, 0.045, -0.14).rotation.x = Math.PI / 2;
+      break;
+    case 'grenade':
+      add(new THREE.SphereGeometry(0.075, 8, 6), new THREE.MeshLambertMaterial({ color: 0x27301f }), 0, -0.02, 0);
+      break;
+    case 'molotov':
+      add(new THREE.CylinderGeometry(0.045, 0.06, 0.26, 7),
+        new THREE.MeshLambertMaterial({ color: 0x3a5a2a }), 0, 0.04, 0);
+      break;
   }
   return g;
 }
@@ -82,7 +146,9 @@ export class CombatSystem {
     if (!this.inventory[id]) {
       this.inventory[id] = spec.melee
         ? { ammo: Infinity, inMag: Infinity }
-        : { ammo: Math.max(0, ammo - spec.mag), inMag: Math.min(ammo, spec.mag) };
+        : spec.thrown
+          ? { ammo, inMag: 0 }                    // thrown: a simple count
+          : { ammo: Math.max(0, ammo - spec.mag), inMag: Math.min(ammo, spec.mag) };
       this.select(id);
     } else if (!spec.melee) {
       this.inventory[id].ammo += ammo;
@@ -105,6 +171,7 @@ export class CombatSystem {
       this.game.player.rig.drawGesture();
       for (const k in this.weaponMeshes) this.weaponMeshes[k].visible = false;
       this.drawT = 0.15;
+      this.vmDrawT = 0.22;   // FP viewmodel rises from below on the draw
     } else {
       this.attachWeaponMesh();
     }
@@ -133,28 +200,88 @@ export class CombatSystem {
   // first-person weapon viewmodel: a held gun parented to the camera
   syncViewmodel() {
     const game = this.game;
-    if (!this.viewmodels) { this.viewmodels = {}; this.vmGroup = new THREE.Group(); game.camera.add(this.vmGroup); game.scene.add(game.camera); }
-    for (const k in this.viewmodels) this.viewmodels[k].visible = false;
-    this.vmActive = null;
-    if (this.current === 'fists') return;
-    if (!this.viewmodels[this.current]) {
-      const m = buildWeaponMesh(this.current);
-      m.scale.setScalar(1.8);
-      this.viewmodels[this.current] = m;
-      this.vmGroup.add(m);
+    if (!this.viewmodels) {
+      this.viewmodels = {};
+      this.vmGroup = new THREE.Group();
+      this.vmGroup.visible = false;   // gateVm() decides — never default-on
+      game.camera.add(this.vmGroup);
+      game.scene.add(game.camera);
+      const look = game.player?.rig?.look ?? {};
+      this._skinMat = new THREE.MeshLambertMaterial({ color: look.skin ?? 0xb98a62 });
+      this._sleeveMat = new THREE.MeshLambertMaterial({ color: look.shirt ?? 0xe8e4da });
+      // bare-fists holder: a pair of hands with no weapon
+      this._fistsHolder = new THREE.Group();
+      this._fistsHolder.position.set(0.05, -0.30, -0.62);
+      this._fistsHolder.rotation.set(0, 0, 0);
+      this._attachHands(this._fistsHolder, { r: [0.12, 0, 0.02], l: [-0.12, 0, 0.02] });
+      this.vmGroup.add(this._fistsHolder);
     }
-    const vm = this.viewmodels[this.current];
-    const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
-    vm.position.set(rest[0], rest[1], rest[2]);
-    vm.rotation.set(0, Math.PI, 0);
-    this.vmActive = vm;
-    this.vmRest = rest;
+    for (const k in this.viewmodels) this.viewmodels[k].visible = false;
+    this._fistsHolder.visible = false;
+    this.vmActive = null;
+    if (this.current === 'fists') {
+      this._fistsHolder.visible = true;
+    } else {
+      if (!this.viewmodels[this.current]) {
+        const m = buildWeaponMesh(this.current);
+        const s = WEAPONS[this.current].animSet?.vmScale ?? 1.4;
+        m.scale.setScalar(s);
+        this._attachHands(m, FP_GRIPS[this.current], 1 / s);   // hands ride the gun life-size
+        this.viewmodels[this.current] = m;
+        this.vmGroup.add(m);
+      }
+      const vm = this.viewmodels[this.current];
+      const rest = WEAPONS[this.current].animSet?.vm ?? [0.28, -0.26, -0.55];
+      // slight inward yaw so the right-offset muzzle converges on the crosshair
+      this.vmYaw = WEAPONS[this.current].animSet?.vmYaw ?? 0.12;
+      vm.position.set(rest[0], rest[1], rest[2]);
+      vm.rotation.set(0, this.vmYaw, 0);
+      vm.visible = true;              // re-selects used to stay hidden in FP
+      this.vmActive = vm;
+      this.vmRest = rest;
+    }
+    // gate immediately: select() runs AFTER update()'s per-frame gate, so
+    // without this a weapon switch in 3rd person flashed the viewmodel in
+    // the screen corner until the next frame (stretched by wheel slow-mo)
+    this.gateVm();
+  }
+
+  // attach right/left FP hands to a holder at the given local grips; hands
+  // inherit the holder's transform (so on a weapon mesh they ride the gun).
+  // Each forearm tilts down (and the near/trigger hand outward to the right)
+  // so it descends toward the shoulder instead of floating straight back.
+  _attachHands(holder, grips, invScale = 1) {
+    if (!grips) return;
+    const mk = (g, rot) => {
+      const h = buildFpHand(this._skinMat, this._sleeveMat);
+      h.position.set(g[0], g[1], g[2]);
+      h.rotation.set(rot[0], rot[1], rot[2]);
+      h.scale.setScalar(invScale);
+      return h;
+    };
+    // r = trigger/rear hand → forearm drops down-and-right to the shoulder;
+    // l = support/front hand → forearm drops down, slightly less
+    if (grips.r) holder.add(mk(grips.r, [0.5, 0.32, 0]));
+    if (grips.l) holder.add(mk(grips.l, [0.35, -0.05, 0]));
+  }
+
+  gateVm() {
+    if (!this.vmGroup) return false;
+    const player = this.game.player;
+    // !! matters: firstPerson starts undefined, and three.js only skips
+    // objects whose visible is EXACTLY false — an undefined here rendered
+    // the viewmodel in third person until first-person was toggled once
+    const fpFoot = !!(this.game.cameraRig.firstPerson && !player.vehicle && !player.dead);
+    // arms are always present in FP (even bare fists), so the group shows
+    // whenever we're in first person on foot
+    this.vmGroup.visible = fpFoot;
+    return fpFoot;
   }
 
   updateHud() {
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
-    const ammoText = spec.melee ? '' : `${inv.inMag} · ${inv.ammo}`;
+    const ammoText = spec.melee ? '' : spec.thrown ? `×${inv.ammo}` : `${inv.inMag} · ${inv.ammo}`;
     this.game.hud?.setWeapon(spec.icon, spec.name, ammoText);
   }
 
@@ -171,6 +298,34 @@ export class CombatSystem {
       this.drawT -= dt;
       if (this.drawT <= 0) { this.drawT = null; this.attachWeaponMesh(); }
     }
+
+    // a wound-up throw releases on the whip beat of the gesture
+    if (this.throwPending && game.time >= this.throwPending.at) {
+      const tp = this.throwPending;
+      this.throwPending = null;
+      if (!player.dead && !player.vehicle) {
+        const dir = new THREE.Vector3();
+        game.camera.getWorldDirection(dir);
+        const sx = player.pos.x + Math.sin(player.heading) * 0.5;
+        const sz = player.pos.z + Math.cos(player.heading) * 0.5;
+        game.projectiles?.throwProjectile(tp.kind,
+          sx, player.pos.y + 1.5, sz,
+          dir.x * 16 + player.vel.x,
+          Math.max(dir.y * 16, -4) + 4.5,   // camera pitch aims the range
+          dir.z * 16 + player.vel.z,
+          'player');
+      }
+      // out of throwables: swap to something useful
+      if ((this.inventory[tp.kind]?.ammo ?? 0) <= 0 && this.current === tp.kind) this.cycle(-1);
+    }
+    // the next one appears in the hand once the throw beat is over
+    if (this._rearmT > 0) {
+      this._rearmT -= dt;
+      if (this._rearmT <= 0 && WEAPONS[this.current]?.thrown &&
+          (this.inventory[this.current]?.ammo ?? 0) > 0) {
+        this.attachWeaponMesh();
+      }
+    }
     // shotgun pump cycle lands a beat after the shot
     if (this.pumpAt != null && game.time >= this.pumpAt) {
       this.pumpAt = null;
@@ -180,30 +335,70 @@ export class CombatSystem {
       }
     }
 
-    // viewmodel visibility + sway/bob (first-person, on foot)
+    // viewmodel: visibility, ADS lerp, mouse sway, bob (first-person, on foot)
     if (this.vmGroup) {
-      const fpFoot = game.cameraRig.firstPerson && !player.vehicle && !player.dead;
-      this.vmGroup.visible = fpFoot && !!this.vmActive;
+      const fpFoot = this.gateVm();
+      const spec2 = WEAPONS[this.current];
+      // aim-down-sights: RMB in first person centres the weapon on the eye
+      const wantAds = fpFoot && aiming && !!this.vmActive && !spec2.melee &&
+        this.reloading <= 0 ? 1 : 0;
+      this.adsK = this.adsK == null ? 0 : this.adsK + (wantAds - this.adsK) * Math.min(1, dt * 10);
+      // scoped rifle: strong zoom, scope overlay, weapon model hidden
+      const scoped = spec2.animSet?.scope && this.adsK > 0.7;
+      game.cameraRig.adsZoom = this.adsK * (spec2.animSet?.scope ? 34 : 18);
+      game.hud?.setScope?.(!!(scoped && fpFoot));
+      if (this.vmActive) this.vmActive.visible = !scoped && !(this._rearmT > 0);
+      // sway: the weapon lags the mouse slightly (camera-space)
+      const mdx = game.input?.mouseDX ?? 0, mdy = game.input?.mouseDY ?? 0;
+      this._swayX = (this._swayX ?? 0) + ((-mdx * 0.0009) - (this._swayX ?? 0)) * Math.min(1, dt * 10);
+      this._swayY = (this._swayY ?? 0) + ((-mdy * 0.0009) - (this._swayY ?? 0)) * Math.min(1, dt * 10);
+      this.vmGroup.rotation.set(this._swayY * (1 - this.adsK * 0.8), this._swayX * (1 - this.adsK * 0.8), 0);
+      // melee swing timer ticks in FP regardless of weapon; the forward
+      // sweep is `melee` below (0→1→0 over the swing)
+      if (fpFoot && this.vmMeleeT > 0) this.vmMeleeT -= dt;
+      const melee = this.vmMeleeT > 0 ? Math.sin(clamp(1 - this.vmMeleeT / 0.3, 0, 1) * Math.PI) : 0;
+      this._vmMelee = melee;
+      // bare fists: the holder isn't a weapon so it doesn't get the weapon
+      // block below — bob/melee-sweep it here so the fists still animate
+      if (this.current === 'fists' && fpFoot && this._fistsHolder) {
+        this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
+        const fbob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.012 : 0.003);
+        this._fistsHolder.position.set(0.05 + melee * 0.05, -0.30 + fbob - melee * 0.05, -0.62 - melee * 0.30);
+      }
       if (fpFoot && this.vmActive) {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
-        const bob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.015 : 0.004);
+        const bobAmp = (player.speed2d > 0.4 ? 0.015 : 0.004) * (1 - this.adsK * 0.85);
+        const bob = Math.sin(this.vmBob) * bobAmp;
         const kick = (game.cameraRig.recoilPitch || 0);
         const rest = this.vmRest ?? [0.28, -0.26, -0.55];
+        const ads = spec2.animSet?.ads ?? rest;
+        const k = this.adsK;
+        const bx = rest[0] + (ads[0] - rest[0]) * k;
+        const by = rest[1] + (ads[1] - rest[1]) * k;
+        const bz = rest[2] + (ads[2] - rest[2]) * k;
+        // draw-in: fresh weapons rise from below over the draw beat
+        let drawDip = 0;
+        if (this.vmDrawT > 0) {
+          this.vmDrawT -= dt;
+          drawDip = -0.22 * Math.sin(clamp(this.vmDrawT / 0.22, 0, 1) * Math.PI * 0.5);
+        }
         // reload: gun dips and rolls; pump: fore-end pushes back toward you
         let rx = 0, dy = 0, dz = 0;
         if (this.reloading > 0 && this.reloadTotal) {
-          const k = Math.sin((1 - this.reloading / this.reloadTotal) * Math.PI);
-          rx = 0.55 * k; dy = -0.14 * k;
+          const kk = Math.sin((1 - this.reloading / this.reloadTotal) * Math.PI);
+          rx = 0.55 * kk; dy = -0.14 * kk;
         }
         if (this.vmPumpT > 0) {
           this.vmPumpT -= dt;
           dz = 0.1 * Math.sin(clamp(this.vmPumpT / 0.32, 0, 1) * Math.PI);
         }
+        // bat/weapon melee: lunge the viewmodel forward and swing it down
+        const mel = this._vmMelee || 0;
         this.vmActive.position.set(
-          rest[0] + Math.cos(this.vmBob) * 0.004,
-          rest[1] + bob - kick * 0.5 + dy,
-          rest[2] + kick * 0.8 + dz);
-        this.vmActive.rotation.set(rx, Math.PI, 0);
+          bx + Math.cos(this.vmBob) * 0.004 * (1 - k) - mel * 0.05,
+          by + bob - kick * 0.5 + dy + drawDip - mel * 0.06,
+          bz + kick * (0.8 - k * 0.4) + dz - mel * 0.34);
+        this.vmActive.rotation.set(rx - kick * k * 1.5 - mel * 1.1, this.vmYaw || 0, mel * 0.5);
       }
     }
     if (this.reloading > 0) {
@@ -254,7 +449,27 @@ export class CombatSystem {
       if (inv.inMag <= 0) { this.startReload(); return; }
       this.cooldown = spec.rate * 1.3;
       inv.inMag--;
+      // snap to first person for the drive-by; it restores after the last
+      // shot (the timer refreshes on every round)
+      game.cameraRig.driveByFP = true;
+      game.cameraRig._driveByFPT = 1.4;
       this.fireHitscan(spec, true);
+      this.updateHud();
+      return;
+    }
+
+    // --- thrown: grenade / molotov ---
+    if (spec.thrown) {
+      if (game.interiors?.playerInside) return;   // not indoors
+      if (inv.ammo <= 0) return;
+      this.cooldown = spec.rate;
+      inv.ammo--;
+      player.rig.throwGesture?.();
+      // it left the hand: hide the held mesh until the follow-through ends
+      for (const k in this.weaponMeshes) this.weaponMeshes[k].visible = false;
+      if (this.vmActive) this.vmActive.visible = false;
+      this.throwPending = { at: game.time + 0.18, kind: this.current };
+      this._rearmT = 0.55;
       this.updateHud();
       return;
     }
@@ -267,9 +482,14 @@ export class CombatSystem {
       this.lastMeleeT = game.time;
       const finisher = this.comboStep === 3;
       this.cooldown = finisher ? spec.rate * 1.5 : spec.rate;
-      // bat gets its own swings — horizontal, overhead on the finisher
+      // bat gets its own swings — horizontal, overhead on the finisher;
+      // bare fists mix a snap kick into the second combo beat
       if (spec.animSet?.swing && player.rig.batSwing) player.rig.batSwing(finisher);
+      else if (this.comboStep === 2 && this.current === 'fists' &&
+               Math.random() < 0.5 && player.rig.kickGesture) player.rig.kickGesture();
       else player.rig.startPunch();
+      // first-person swing: the arms/weapon lunge forward on screen
+      this.vmMeleeT = 0.3;
 
       // small lunge toward the aim/lock direction
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
@@ -282,7 +502,9 @@ export class CombatSystem {
         || game.wanted?.nearestCop(reachX, reachZ, spec.range);
       if (!target) {
         let bd = spec.range * spec.range;
-        for (const goon of [...(game.missions?.activeGoons?.() || []), ...(game.interiors?.keepers?.() || [])]) {
+        for (const goon of [...(game.missions?.activeGoons?.() || []),
+                            ...(game.interiors?.keepers?.() || []),
+                            ...(game.dispatch?.crewPeds?.() || [])]) {
           if (goon.dead) continue;
           const d = (goon.pos.x - reachX) ** 2 + (goon.pos.z - reachZ) ** 2;
           if (d < bd) { bd = d; target = goon; }
@@ -294,17 +516,17 @@ export class CombatSystem {
         const knock = finisher ? { dx: fx, dz: fz, force: 5, up: 2.5, spin: 4 } : null;
         game.combat?.hitStop?.();
         this.hitStop();
-        target.damage(dmg, game, 'melee', target.health - dmg <= 0 ? knock : null);
+        target.damage(dmg, game, 'melee', target.health - dmg <= 0 ? knock : null, 'player', player);
         game.particles?.blood(target.pos.x, target.pos.y + 1.2, target.pos.z, finisher ? 6 : 3);
         // non-fatal finisher still knocks them down
         if (!target.dead && finisher) target.stagger?.(game, { dx: fx, dz: fz });
         if (!target.isGoon && !target.isKeeper) game.wanted?.crime(target.isCop ? 'copAttack' : 'assault', player.pos.x, player.pos.z);
-        this.hitmark();
+        this.hitmark(target.dead);
         game.cameraRig.addShake(finisher ? 0.3 : 0.12);
       } else {
         const v = game.vehicles?.nearestVehicle(reachX, reachZ, spec.range + 0.6, (v) => !v.dead && v.driver !== 'player');
         if (v) {
-          v.applyDamage(spec.dmg * 0.7, 'melee');
+          v.applyDamage(spec.dmg * 0.7, 'melee', 'player');
           game.particles?.sparks(reachX, player.pos.y + 1, reachZ, 4);
           game.wanted?.crime('crash', player.pos.x, player.pos.z);
           this.hitmark();
@@ -314,11 +536,14 @@ export class CombatSystem {
     }
 
     // --- guns (on foot) ---
-    if (!aiming) return;              // must aim to shoot
+    // third person still requires aiming (the soft-lock/shoulder cam depends
+    // on it); first person can hip-fire like an FPS, paying in spread
+    const fpHip = !aiming && game.cameraRig.firstPerson;
+    if (!aiming && !fpHip) return;
     if (inv.inMag <= 0) { this.startReload(); return; }
     this.cooldown = spec.rate;
     inv.inMag--;
-    this.fireHitscan(spec, false);
+    this.fireHitscan(spec, false, fpHip ? 2.2 : 1);
     // arms take the kick (camera recoil is added in fireHitscan)
     if (spec.animSet?.kick) player.rig.gunKick?.(spec.animSet.kick);
     if (spec.animSet?.pump) this.pumpAt = game.time + 0.28;
@@ -332,7 +557,7 @@ export class CombatSystem {
   startReload() {
     const spec = WEAPONS[this.current];
     const inv = this.inventory[this.current];
-    if (spec.melee || this.reloading > 0) return;
+    if (spec.melee || spec.thrown || this.reloading > 0) return;
     if (inv.inMag >= spec.mag || inv.ammo <= 0) return;
     const anims = spec.animSet ?? {};
     const rig = this.game.player?.rig;
@@ -372,7 +597,7 @@ export class CombatSystem {
     this.updateHud();
   }
 
-  fireHitscan(spec, driveBy) {
+  fireHitscan(spec, driveBy, spreadMult = 1) {
     const game = this.game;
     const player = game.player;
     const cam = game.camera;
@@ -391,9 +616,9 @@ export class CombatSystem {
     game.audio?.gunshot(spec.sfx);
     game.wanted?.crime('gunfire', player.pos.x, player.pos.z);
     game.peds?.senseEvent?.(player.pos.x, player.pos.z, 'gunshot');
-    game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : 0.12);
+    game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : spec.sfx === 'revolver' ? 0.2 : 0.12);
     // recoil kick (stronger for big guns) + crosshair bloom
-    const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'rifle' ? 0.05 : 0.035;
+    const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'revolver' ? 0.07 : spec.sfx === 'rifle' ? 0.05 : 0.035;
     game.cameraRig.addRecoil(kick);
     this.bloom = Math.min(1, (this.bloom || 0) + (spec.spread * 8 + 0.2));
     // ejected shell casing
@@ -401,9 +626,10 @@ export class CombatSystem {
 
     const pellets = spec.pellets || 1;
     let anyHit = false;
+    let anyKill = false;
     for (let p = 0; p < pellets; p++) {
       const d = dir.clone();
-      const spr = spec.spread * (1 + (this.bloom || 0) * 0.6);
+      const spr = spec.spread * spreadMult * (1 + (this.bloom || 0) * 0.6);
       d.x += (Math.random() - 0.5) * spr * 2;
       d.y += (Math.random() - 0.5) * spr * 2;
       d.z += (Math.random() - 0.5) * spr * 2;
@@ -411,14 +637,37 @@ export class CombatSystem {
       const hit = this.raycastWorld(origin, d, spec.range);
       // tracer line from muzzle to impact (or max range)
       const end = hit ? hit.point : new THREE.Vector3(origin.x + d.x * spec.range, origin.y + d.y * spec.range, origin.z + d.z * spec.range);
-      game.particles?.tracer?.(mx, my, mz, end.x, end.y, end.z);
+      // a visible round travels muzzle→impact (hit already registered above)
+      game.particles?.bullet?.(mx, my, mz, end.x, end.y, end.z);
       if (!hit) continue;
       if (hit.type === 'static') {
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 3);
         game.audio?.ricochet(hit.point.x, hit.point.z);
       } else if (hit.type === 'ped' || hit.type === 'cop' || hit.type === 'goon') {
-        const imp = { dx: d.x, dz: d.z, force: 2 + spec.dmg * 0.06, up: 0.8, spin: (Math.random() - 0.5) * 3 };
-        hit.target.damage(spec.dmg, game, 'gun', imp);
+        const t = hit.target;
+        // locational damage: classify the hit by height above the feet
+        // (rig is ~1.78m: head above 1.45, legs below 0.8)
+        const rel = hit.point.y - t.pos.y;
+        const zone = rel > 1.45 ? 'head' : rel < 0.8 ? 'legs' : 'torso';
+        let dmg = spec.dmg;
+        if (zone === 'head') dmg *= 10;        // headshots end it, any caliber
+        else if (zone === 'legs') dmg *= 0.7;
+        const imp = {
+          dx: d.x, dz: d.z,
+          force: 2 + Math.min(dmg, 40) * 0.06,
+          up: zone === 'head' ? 1.4 : 0.8,
+          spin: (Math.random() - 0.5) * 3,
+        };
+        t.damage(dmg, game, 'gun', imp, 'player', game.player);
+        if (!t.dead && zone === 'legs') t.legWound?.();
+        // arm graze: torso height but wide of the centerline — armed
+        // targets shoot worse with a bullet through the shoulder
+        if (!t.dead && zone === 'torso' && t.accuracy && !t.armWounded &&
+            Math.hypot(hit.point.x - t.pos.x, hit.point.z - t.pos.z) > 0.3) {
+          t.armWounded = true;
+          t.accuracy *= 0.5;
+        }
+        if (t.dead) anyKill = true;
         game.gore?.blood.pool(hit.target.pos.x + d.x, hit.target.pos.z + d.z, hit.target.interiorY ?? undefined);
         // shooting mission goons is gang business — no extra police heat beyond the gunfire itself
         if (hit.type !== 'goon') {
@@ -426,18 +675,28 @@ export class CombatSystem {
         }
         anyHit = true;
       } else if (hit.type === 'vehicle') {
-        hit.target.applyDamage(spec.dmg * 0.55, 'gun');
+        hit.target.applyDamage(spec.dmg * 0.55, 'gun', 'player');
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 4);
+        // a round through the greenhouse shatters it
+        if (Math.random() < 0.3 && hit.target.shatterGlass?.()) {
+          game.particles?.glassBurst(hit.point.x, hit.point.y, hit.point.z);
+        }
         if (hit.target.aiControlled) game.traffic?.panic(hit.target);
         anyHit = true;
       }
     }
-    if (anyHit) this.hitmark();
+    if (anyHit) this.hitmark(anyKill);
   }
 
-  hitmark() {
+  hitmark(kill = false) {
     this.hitmarkT = 0.18;
-    this.game.hud?.setCrosshair(true, true);
+    this.killmark = kill;   // red cross flash on a lethal hit
+    this.game.hud?.setCrosshair(true, true, this.bloom || 0, { kill });
+  }
+
+  // a gun is equipped (FPS crosshair shows in first person without aiming)
+  isGun() {
+    return !WEAPONS[this.current]?.melee;
   }
 
   // brief global slow-mo on a solid melee connect (hit-stop)
@@ -452,6 +711,7 @@ export class CombatSystem {
     for (const p of game.peds?.peds || []) if (!p.dead) out.push(p);
     for (const c of game.wanted?.footCops || []) if (!c.dead) out.push(c);
     for (const g of game.missions?.activeGoons?.() || []) if (!g.dead) out.push(g);
+    for (const c of game.dispatch?.crewPeds?.() || []) if (!c.dead) out.push(c);
     // shopkeepers only when they're actually in play: provoked, or in the
     // room the player is standing in — never through a closed shopfront
     const inside = game.interiors?.playerInside;
@@ -594,6 +854,11 @@ export class CombatSystem {
     for (const keeper of game.interiors?.keepers?.() || []) {
       consider(sphereHit(keeper.pos.x, keeper.pos.y + 1.0, keeper.pos.z, 0.55), 'goon', keeper);
     }
+    // fire/medic crews working a scene are civilians — shootable, a crime
+    for (const c of game.dispatch?.crewPeds?.() || []) {
+      if (c.dead) continue;
+      consider(sphereHit(c.pos.x, c.pos.y + 1.0, c.pos.z, 0.55), 'ped', c);
+    }
     for (const v of game.vehicles?.vehicles || []) {
       if (v === game.player.vehicle) continue;
       consider(sphereHit(v.pos.x, v.pos.y + 0.8, v.pos.z, v.boundR * 0.8 + 0.35), 'vehicle', v);
@@ -614,7 +879,11 @@ export class CombatSystem {
       const cols = game.city.queryColliders(x, z, 0.4);
       let inside = false;
       for (const b of cols) {
-        if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < ground + b.h) { inside = true; break; }
+        if (x <= b.minX || x >= b.maxX || z <= b.minZ || z >= b.maxZ) continue;
+        // upper-floor walls only block bullets within their own Y band
+        const top = b.baseY != null ? b.baseY + b.h : ground + b.h;
+        const bottom = b.baseY ?? -Infinity;
+        if (y < top && y > bottom) { inside = true; break; }
       }
       if (inside) {
         best = { t, type: 'static', target: null };

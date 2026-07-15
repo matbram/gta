@@ -147,13 +147,21 @@ await page.evaluate(() => { window.__game.setWeather('clear'); window.__game.set
     ped.pos.set(v.pos.x + 0.5, ped.pos.y, v.pos.z);
     ped.loiter = true; ped.state = 'idle';       // hold still
     v.vel.set(0.8, 0);                            // slow roll
-    for (let i = 0; i < 45; i++) g.vehicles.update(1 / 30);
-    const d = Math.hypot(ped.pos.x - v.pos.x, ped.pos.z - v.pos.z);
+    for (let i = 0; i < 45; i++) {
+      g.peds.buildGrid();                         // teleported ped: refresh the query grid
+      g.vehicles.update(1 / 30);
+    }
     v.vel.set(0, 0);
-    return { d: +d.toFixed(2), need: +(v.radius + 0.4).toFixed(2), alive: !ped.dead };
+    // vehicles are solid oriented boxes now: assert the ped is OUTSIDE the
+    // car's footprint (the old check assumed a radial circular push)
+    const s = Math.sin(v.heading), c = Math.cos(v.heading);
+    const dx = ped.pos.x - v.pos.x, dz = ped.pos.z - v.pos.z;
+    const l = Math.abs(dx * s + dz * c), w = Math.abs(dx * c - dz * s);
+    const outside = l > v.hl + 0.1 || w > v.hw + 0.1;
+    return { d: +Math.hypot(dx, dz).toFixed(2), l: +l.toFixed(2), w: +w.toFixed(2), outside, alive: !ped.dead };
   });
   console.log('nudge:', JSON.stringify(r),
-    !r.noPed && r.alive && r.d >= r.need - 0.15 ? 'NUDGE OK' : 'NUDGE FAIL');
+    !r.noPed && r.alive && r.outside ? 'NUDGE OK' : 'NUDGE FAIL');
 }
 
 // 7) money tick appears on a pickup
@@ -176,6 +184,14 @@ await page.evaluate(() => { window.__game.setWeather('clear'); window.__game.set
     if (!locked) return { lockedCount };
     locked.alarmed = true;                        // force the alarm branch
     g.player.teleport(locked.pos.x + 2.0, locked.pos.z, 0);
+    // break-in is a QUIET crime: heat needs an actual witness — plant one
+    // watching from across the street
+    const witness = g.peds.peds.find((p) => !p.dead);
+    if (witness) {
+      witness.place(locked.pos.x + 8, locked.pos.z);
+      witness.heading = Math.atan2(locked.pos.x - witness.pos.x, locked.pos.z - witness.pos.z);
+      witness.state = 'idle'; witness.loiter = true; witness.panicked = false;
+    }
     const heat0 = g.wanted.state.heat;
     g.vehicles.tryEnterExit();
     const started = !!g.vehicles._breakIn;

@@ -34,11 +34,21 @@ function pickType(r, district, artery) {
 
 const SIGNAL_CYCLE = 14;   // seconds: 6 green NS, 1 all-red, 6 green EW, 1 all-red
 
+// drivers wear looks from a fixed palette: fully random looks missed the
+// character-texture cache on nearly every spawn, repainting + re-uploading
+// a canvas texture each time a car entered the stream
+let DRIVER_LOOKS = null;
+function driverLook() {
+  if (!DRIVER_LOOKS) DRIVER_LOOKS = Array.from({ length: 12 }, () => randomLook(Math.random));
+  return { ...DRIVER_LOOKS[Math.floor(Math.random() * DRIVER_LOOKS.length)] };
+}
+
 export class TrafficSystem {
   constructor(game) {
     this.game = game;
     this.cars = [];              // { vehicle, edge, dir, t, targetSpeed, waitT, honkT, panicT }
     this.spawnTimer = 0;
+    this._crossing = new Map();  // signal node → peds currently in its crosswalks
   }
 
   // shared traffic-light phase (also drives the rendered light colours)
@@ -48,12 +58,32 @@ export class TrafficSystem {
     return t < 6;
   }
 
+  // pedestrian walk phase for CROSSING a road of the given orientation —
+  // derived from the car cycle: crossing is safe while that road's traffic
+  // has red and the perpendicular flow has the green
+  pedPhase(roadHorizontal) {
+    const t = this.game.time % SIGNAL_CYCLE;
+    const walk = roadHorizontal ? t < 6 : (t >= 7 && t < 13);
+    const timeLeft = roadHorizontal ? 6 - t : 13 - t;
+    return { walk, timeLeft };
+  }
+
+  // crosswalk occupancy (peds report when they step off the curb)
+  crossingEnter(node) { this._crossing.set(node, (this._crossing.get(node) ?? 0) + 1); }
+  crossingDone(node) {
+    const n = (this._crossing.get(node) ?? 1) - 1;
+    if (n <= 0) this._crossing.delete(node);
+    else this._crossing.set(node, n);
+  }
+
   update(dt) {
     const p = this.game.player.pos;
+    this._frame = (this._frame ?? 0) + 1;   // scan-stagger clock (see drive)
 
     this.spawnTimer -= dt;
-    if (this.cars.length < TARGET_CARS && this.spawnTimer <= 0) {
-      this.spawnTimer = this.cars.length < TARGET_CARS * 0.5 ? 0.15 : 0.35;
+    const target = Math.round(TARGET_CARS * (this.game.gfx?.density ?? 1));
+    if (this.cars.length < target && this.spawnTimer <= 0) {
+      this.spawnTimer = this.cars.length < target * 0.5 ? 0.15 : 0.35;
       this.trySpawn(p);
     }
 
@@ -128,6 +158,7 @@ export class TrafficSystem {
       vehicle: v, edge, dir, t,
       targetSpeed: (edge.artery ? 12 : 8.5) * (forceType ? 1.4 : 1),
       waitT: 0, honkT: 0, panicT: 0, stuckT: 0,
+      slot: (this._slotSeq = ((this._slotSeq ?? 0) + 1)) % 3,   // scan stagger
     };
     v.aiControlled = true;
     if (forceType && ['police', 'ambulance', 'firetruck'].includes(forceType)) {
@@ -137,7 +168,7 @@ export class TrafficSystem {
     }
 
     // put a visible AI driver figure at the wheel (pulled out on carjack)
-    const ped = new Ped(city, this.game.scene, randomLook(Math.random));
+    const ped = new Ped(city, this.game.scene, driverLook());
     ped.state = 'driver';
     ped.inVehicle = v;
     ped.rig.setAnim(v.spec.seat?.pose ?? 'drive');
@@ -238,18 +269,29 @@ export class TrafficSystem {
     // desired speed with obstacle checks
     let want = car.targetSpeed * (car.panicT > 0 ? 1.5 : 1);
 
+    // obstacle scans (sirens, cars ahead, crossing peds) are the expensive
+    // part of driving — each car re-scans every 3rd frame and drives on its
+    // cached results in between. A ~50ms reaction delay is invisible.
+    const scanNow = car._scanned === undefined || (car.slot + this._frame) % 3 === 0;
+
     // an active siren nearby (police, fire, ambulance — or YOU driving one):
     // pull toward the curb and slow until it passes
-    let sirenNear = false;
-    if (car.panicT <= 0) {
-      for (const o of game.vehicles.vehicles) {
-        if (!o.sirenOn || o.dead || o === v) continue;
-        if (distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z) < 32 * 32) { sirenNear = true; break; }
+    if (scanNow) {
+      car._sirenNear = false;
+      if (car.panicT <= 0) {
+        for (const o of game.vehicles.vehicles) {
+          if (!o.sirenOn || o.dead || o === v) continue;
+          if (distSq2d(o.pos.x, o.pos.z, v.pos.x, v.pos.z) < 32 * 32) { car._sirenNear = true; break; }
+        }
       }
     }
+    // pulledOver: an officer is waving THIS car over (commandeering it) —
+    // curb like a siren yield, but come to a complete stop
+    const sirenNear = car._sirenNear || car.pulledOver;
     const bias = sirenNear ? 0.16 : 0;
     car.curbBias = (car.curbBias || 0) + (bias - (car.curbBias || 0)) * Math.min(1, dt * 2.5);
-    if (sirenNear) want = Math.min(want, 3);
+    if (car.pulledOver) want = 0;
+    else if (sirenNear) want = Math.min(want, 3);
 
     // slow near intersections; stop for red lights at signalled crossings
     const distToEnd = (car.dir > 0 ? (1 - car.t) : car.t) * e.len;
@@ -260,23 +302,49 @@ export class TrafficSystem {
     } else if (distToEnd < 14 && car.panicT <= 0) {
       want = Math.min(want, 5.5);
     }
+    // yield to pedestrians still inside the crosswalk (late crossers on a
+    // fresh green, turners into an occupied band)
+    if (nextNode.hasSignal && car.panicT <= 0 && distToEnd < 10 &&
+        (this._crossing.get(nextNode) ?? 0) > 0) {
+      want = Math.min(want, 2);
+    }
 
     // car-following: check ahead for vehicles / player / peds
     const fx = Math.sin(v.heading), fz = Math.cos(v.heading);
     let blocked = false;
     const aheadDist = 4 + Math.abs(v.speed) * 0.8;
-    for (const o of game.vehicles.vehicles) {
-      if (o === v) continue;
-      const ox = o.pos.x - v.pos.x, oz = o.pos.z - v.pos.z;
-      const along = ox * fx + oz * fz;
-      const side = Math.abs(ox * -fz + oz * fx);
-      if (along > 0 && along < aheadDist && side < 2.2) {
-        const oSpeed = Math.hypot(o.vel.x, o.vel.y);
-        if (along < 6) { want = 0; blocked = true; }
-        else want = Math.min(want, oSpeed * 0.9);
+    if (scanNow) {
+      car._scanned = true;
+      car._followCap = Infinity;
+      car._followBlock = false;
+      for (const o of game.vehicles.vehicles) {
+        if (o === v) continue;
+        const ox = o.pos.x - v.pos.x, oz = o.pos.z - v.pos.z;
+        const along = ox * fx + oz * fz;
+        const side = Math.abs(ox * -fz + oz * fx);
+        if (along > 0 && along < aheadDist && side < 2.2) {
+          const oSpeed = Math.hypot(o.vel.x, o.vel.y);
+          if (along < 6) { car._followCap = 0; car._followBlock = true; }
+          else car._followCap = Math.min(car._followCap, oSpeed * 0.9);
+        }
+      }
+      // pedestrians crossing
+      car._pedBlock = false;
+      if (car.panicT <= 0) {
+        for (const ped of game.peds.peds) {
+          if (ped.dead) continue;
+          const ox = ped.pos.x - v.pos.x, oz = ped.pos.z - v.pos.z;
+          if (ox * ox + oz * oz > 200) continue;
+          const along = ox * fx + oz * fz;
+          const side = Math.abs(ox * -fz + oz * fx);
+          if (along > 0 && along < 9 && side < 1.8) { car._pedBlock = true; break; }
+        }
       }
     }
-    // player on foot in the road
+    if (car._followCap < want) { want = car._followCap; }
+    if (car._followBlock) blocked = true;
+    if (car._pedBlock && car.panicT <= 0) { want = Math.min(want, 1); blocked = true; }
+    // player on foot in the road — one dot product, checked every frame
     const pp = game.player.pos;
     if (!game.player.vehicle && !game.player.dead) {
       const ox = pp.x - v.pos.x, oz = pp.z - v.pos.z;
@@ -286,22 +354,16 @@ export class TrafficSystem {
         want = 0; blocked = true;
       }
     }
-    // pedestrians crossing
-    if (car.panicT <= 0) {
-      for (const ped of game.peds.peds) {
-        if (ped.dead) continue;
-        const ox = ped.pos.x - v.pos.x, oz = ped.pos.z - v.pos.z;
-        if (ox * ox + oz * oz > 200) continue;
-        const along = ox * fx + oz * fz;
-        const side = Math.abs(ox * -fz + oz * fx);
-        if (along > 0 && along < 9 && side < 1.8) { want = Math.min(want, 1); blocked = true; }
-      }
-    }
 
     if (blocked) {
       car.waitT += dt;
-      if (car.waitT > 2.5 && car.honkT <= 0) {
-        car.honkT = 3 + Math.random() * 4;
+      // don't honk at a queue that's legitimately waiting for a red light —
+      // that was most of the pointless honking. Honk only at genuine
+      // blockers (ped in the road, a car stopped on green), later and
+      // with per-car jitter so intersections don't chorus.
+      const atRed = nextNode.hasSignal && !this.signalGreenFor(e.horizontal) && distToEnd < 22;
+      if (!atRed && car.waitT > 4 + (car.slot ?? 0) * 0.7 && car.honkT <= 0) {
+        car.honkT = 4 + Math.random() * 5;
         game.audio?.horn(v.pos.x, v.pos.z);
       }
     } else car.waitT = 0;

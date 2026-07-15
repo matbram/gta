@@ -235,8 +235,12 @@ export function generateCity(seed = 1337) {
   let nextBoxId = 1;
   let queryStamp = 0;
   function bucketKey(bx, bz) { return bx + '|' + bz; }
-  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building', owner = null) {
-    const box = { id: nextBoxId++, minX, minZ, maxX, maxZ, h, kind, owner, _stamp: 0 };
+  // baseY: colliders are 2D by default (null = grounded, full height).
+  // Upper-storey interior walls pass an absolute world-Y base so consumers
+  // can skip boxes outside their own height band — a 5th-floor wall must
+  // never block the street below.
+  function addBox(minX, minZ, maxX, maxZ, h, kind = 'building', owner = null, baseY = null) {
+    const box = { id: nextBoxId++, minX, minZ, maxX, maxZ, h, kind, owner, baseY, _stamp: 0 };
     boxes.push(box);
     const b0x = Math.floor((minX + HALF) / BUCKET), b1x = Math.floor((maxX + HALF) / BUCKET);
     const b0z = Math.floor((minZ + HALF) / BUCKET), b1z = Math.floor((maxZ + HALF) / BUCKET);
@@ -275,7 +279,7 @@ export function generateCity(seed = 1337) {
 
   // ---------------------------------------------------------------- buildings & props
   const buildings = []; // {kind, style, x, z, w, d, h, district}   axis-aligned
-  const props = [];     // {kind, x, z, rot, s}
+  let props = [];       // {kind, x, z, rot, s}
   const doors = [];     // enterable shopfronts: {id, x, z, face} (face = outward z sign)
 
   function addBuilding(kind, style, x, z, w, d, h, district, collide = true) {
@@ -425,6 +429,35 @@ export function generateCity(seed = 1337) {
     }
   }
 
+  // -------- universal doors: every building gets a walk-in entrance --------
+  // Same convention the shop blocks use (door on the ±z face, flat ground);
+  // the interiors system turns each door'd building into real floors. A
+  // building whose faces are all blocked or sloped stays sealed — fine.
+  for (let bi = 0; bi < buildings.length; bi++) {
+    const b = buildings[bi];
+    if (b.hasDoor) continue;
+    for (const face of [-1, 1]) {
+      const dx = b.x, dz = b.z + face * (b.d / 2 + 0.6);
+      const g00 = groundHeight(b.x - b.w / 2, b.z - b.d / 2);
+      const g11 = groundHeight(b.x + b.w / 2, b.z + b.d / 2);
+      const gd = groundHeight(dx, dz);
+      if (Math.abs(g00 - gd) > 0.5 || Math.abs(g11 - gd) > 0.5) continue;
+      if (!landAt(dx, dz)) continue;
+      // the doorstep must not sit inside a neighbouring building
+      let blocked = false;
+      for (const box of queryColliders(dx, dz, 1.2)) {
+        if (box.kind === 'building' && box.owner !== b &&
+            dx > box.minX - 0.5 && dx < box.maxX + 0.5 &&
+            dz > box.minZ - 0.5 && dz < box.maxZ + 0.5) { blocked = true; break; }
+      }
+      if (blocked) continue;
+      b.doorId = doors.length;
+      b.hasDoor = true;
+      doors.push({ id: doors.length, x: dx, z: dz, face, b: bi });
+      break;
+    }
+  }
+
   // street furniture + greenery along every road (reference look: green streets)
   const TREE_DISTRICTS = { crown: 0.5, oldtown: 0.6, midtown: 0.55, suburbs: 0.85, heights: 0.5, park: 0.9, docks: 0.15, farm: 0.3, beach: 0 };
   for (const e of edges) {
@@ -565,6 +598,32 @@ export function generateCity(seed = 1337) {
         }
       }
     }
+  }
+
+  // doorstep clearance: with every building enterable, a tree or pole
+  // planted right on a doorstep would block the entrance — drop props
+  // within a short radius of any door
+  {
+    const doorCells = new Map();
+    const dKey = (cx, cz) => cx + '|' + cz;
+    for (const d of doors) {
+      const cx = Math.floor(d.x / 8), cz = Math.floor(d.z / 8);
+      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+        const k = dKey(cx + ox, cz + oz);
+        let arr = doorCells.get(k);
+        if (!arr) { arr = []; doorCells.set(k, arr); }
+        arr.push(d);
+      }
+    }
+    props = props.filter((p) => {
+      const near = doorCells.get(dKey(Math.floor(p.x / 8), Math.floor(p.z / 8)));
+      if (!near) return true;
+      for (const d of near) {
+        const dx = p.x - d.x, dz = p.z - d.z;
+        if (dx * dx + dz * dz < 2.4 * 2.4) return false;
+      }
+      return true;
+    });
   }
 
   // ---------------------------------------------------------------- prop colliders

@@ -149,6 +149,7 @@
 
   #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;
     background:radial-gradient(ellipse at center,transparent 46%,rgba(160,10,10,.55) 100%)}
+  #boomflash{position:absolute;inset:0;pointer-events:none;opacity:0;background:#fff8ec}
   #fader{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .7s;z-index:60}
 
   /* ---------- big map ---------- */
@@ -190,7 +191,7 @@
       <div id="hud-weapon"><div class="wicon">👊</div><div class="wname">FISTS</div><div class="wammo"></div></div>
     </div>
     <div id="minimap-wrap"><canvas id="minimap" width="448" height="448"></canvas></div>
-    <div id="speedo" class="hidden"><span class="kmh">0</span><span class="unit">KM/H</span><div class="sbar"><i></i></div></div>
+    <div id="speedo" class="hidden"><span class="kmh">0</span><span class="unit">MPH</span><div class="sbar"><i></i></div></div>
     <div id="zonename"></div>
     <div id="vehname"></div>
     <div id="centermsg"></div>
@@ -204,6 +205,7 @@
     <div id="lockon" class="hidden"></div>
     <div id="weaponwheel" class="hidden"></div>
     <div id="vignette"></div>
+    <div id="boomflash"></div>
     <div id="dmgdir"></div>
   </div>
 

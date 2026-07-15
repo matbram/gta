@@ -4,11 +4,12 @@
 
 import * as THREE from 'three';
 import { Vehicle, VEHICLE_TYPES } from '../entities/vehicle.js';
-import { clamp, dist2d, distSq2d, lerp, obbVsObb } from '../core/mathutil.js';
+import { clamp, dist2d, distSq2d, lerp, obbVsObb, circleVsObb, circleVsAabb } from '../core/mathutil.js';
 
 // scratch OBBs for the pair loop (no per-pair garbage)
 const _oa = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 const _ob = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
+const _solid = { x: 0, z: 0, hw: 0, hl: 0, heading: 0 };
 
 export class VehicleSystem {
   constructor(game) {
@@ -17,6 +18,84 @@ export class VehicleSystem {
     this.night = 0;
     this.playerControl = { throttle: 0, steer: 0, handbrake: false };
     this.exitRequested = false;
+    this.partDebris = [];   // knocked-off bumpers/mirrors tumbling on the ground
+  }
+
+  // classify an impact side (normal points INTO v) and knock the matching
+  // panel loose, then off. Reuses crashKick's fwd/side decomposition.
+  partDamage(v, nx, nz, impact) {
+    if (!v.parts) return;
+    const s = Math.sin(v.heading), c = Math.cos(v.heading);
+    const fwd = nx * s + nz * c;
+    const side = nx * c - nz * s;
+    const bump = (key) => {
+      const st = v.partState[key] ?? 0;
+      if (st >= 2 || !v.parts[key]) return;
+      if (st === 0 && impact > 10) {
+        v.partState[key] = 1;                       // loose: drop + tilt
+        v.parts[key].position.y -= 0.06;
+        v.parts[key].rotation.z += (Math.random() - 0.5) * 0.3;
+      }
+      if ((st === 1 && impact > 8) || impact > 16) this.detachPart(v, key, nx, nz);
+    };
+    if (fwd > 0.6) { bump('bumperF'); }
+    else if (fwd < -0.6) { bump('bumperR'); }
+    else if (impact > 12) { this.detachPart(v, side > 0 ? 'mirrorR' : 'mirrorL', nx, nz); }
+    if (impact > 12 && v.shatterGlass()) this.game.particles?.glassBurst(v.pos.x, v.pos.y + 1.1, v.pos.z);
+  }
+
+  // reparent a part to the world and let it tumble to the ground, then fade
+  detachPart(v, key, nx = 0, nz = 0) {
+    const mesh = v.parts?.[key];
+    if (!mesh || (v.partState[key] ?? 0) >= 2) return;
+    v.partState[key] = 2;
+    // a plate rides off with its bumper
+    if (key === 'bumperF' && v.parts.plateF) this.detachPart(v, 'plateF', nx, nz);
+    if (key === 'bumperR' && v.parts.plateR) this.detachPart(v, 'plateR', nx, nz);
+    const wp = new THREE.Vector3(), wq = new THREE.Quaternion();
+    mesh.getWorldPosition(wp);
+    mesh.getWorldQuaternion(wq);
+    v.group.remove(mesh);
+    this.game.scene.add(mesh);
+    mesh.position.copy(wp);
+    mesh.quaternion.copy(wq);
+    if (this.partDebris.length >= 12) {
+      const old = this.partDebris.shift();
+      old.mesh.removeFromParent();
+    }
+    this.partDebris.push({
+      mesh, t: 0,
+      vx: v.vel.x * 0.8 + nx * 3 + (Math.random() - 0.5) * 2,
+      vy: 2.5 + Math.random() * 2,
+      vz: v.vel.y * 0.8 + nz * 3 + (Math.random() - 0.5) * 2,
+      spinX: (Math.random() - 0.5) * 10, spinY: (Math.random() - 0.5) * 10,
+    });
+    this.game.particles?.sparks(wp.x, wp.y, wp.z, 4);
+    this.game.audio?.crash?.(5, wp.x, wp.z);
+  }
+
+  updatePartDebris(dt) {
+    for (let i = this.partDebris.length - 1; i >= 0; i--) {
+      const d = this.partDebris[i];
+      d.t += dt;
+      d.vy -= 18 * dt;
+      d.mesh.position.x += d.vx * dt;
+      d.mesh.position.y += d.vy * dt;
+      d.mesh.position.z += d.vz * dt;
+      const gy = this.game.city.groundHeight(d.mesh.position.x, d.mesh.position.z) + 0.05;
+      if (d.mesh.position.y <= gy) {
+        d.mesh.position.y = gy;
+        d.vy *= -0.3; d.vx *= 0.6; d.vz *= 0.6;
+        d.spinX *= 0.5; d.spinY *= 0.5;
+      }
+      d.mesh.rotation.x += d.spinX * dt;
+      d.mesh.rotation.y += d.spinY * dt;
+      if (d.t > 4) {
+        const k = Math.max(0, 1 - (d.t - 4) / 0.3);
+        d.mesh.scale.setScalar(k);
+        if (k <= 0) { d.mesh.removeFromParent(); this.partDebris.splice(i, 1); }
+      }
+    }
   }
 
   spawn(type, x, z, heading = 0, colorOverride = null) {
@@ -24,6 +103,7 @@ export class VehicleSystem {
     v.pos.set(x, this.game.city.groundHeight(x, z), z);
     v.heading = heading;
     v.onCrash = (veh, box, impact) => this.handleStaticCrash(veh, box, impact);
+    v.onFlipped = (veh) => this.handleFlipped(veh);
     v.syncMesh(0);
     v.setNightLights(this._lightsOn ?? false);
     this.vehicles.push(v);
@@ -67,7 +147,15 @@ export class VehicleSystem {
     if (impact > 3 && this.game.time - (veh._lastCrashSfxT ?? -9) > 0.25) {
       veh._lastCrashSfxT = this.game.time;
       this.game.audio?.crash?.(impact, veh.pos.x, veh.pos.z);
-      if (impact > 7) this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash');
+      // wall hits rock the body; truly violent ones get a little air
+      veh.crashKick(-Math.sin(veh.heading), -Math.cos(veh.heading), impact,
+        impact > 14 ? 2 : 0);
+      this.partDamage(veh, -Math.sin(veh.heading), -Math.cos(veh.heading), impact);
+      if (veh.type === 'moto' && impact > 8 && veh.driver) this.ejectRider(veh, impact);
+      if (impact > 7) {
+        this.game.peds?.senseEvent?.(veh.pos.x, veh.pos.z, 'crash',
+          veh.driver === 'player' ? 'player' : 'ai');
+      }
       if (impact > 12) this.game.particles?.glassBurst(veh.pos.x, veh.pos.y + 1.0, veh.pos.z);
       if (veh.driver === 'player') {
         this.game.cameraRig?.addShake(clamp(impact / 18, 0, 0.8));
@@ -75,6 +163,72 @@ export class VehicleSystem {
       }
     }
     return false;
+  }
+
+  // a car came to rest on its roof: kill the engine story, throw the AI
+  // driver clear, draw a gawking crowd, and give the player a beat to
+  // scramble out before it lurches back over (or bleeds out and burns)
+  handleFlipped(v) {
+    const game = this.game;
+    game.audio?.crash?.(10, v.pos.x, v.pos.z);
+    game.particles?.dust(v.pos.x, v.pos.y + 0.4, v.pos.z, 8);
+    const culprit = v._lastHitBy === 'player' ? 'player' : 'ai';
+    game.peds?.senseEvent?.(v.pos.x, v.pos.z, 'crash', culprit);
+    game.peds?.spectacleAt?.(v.pos.x, v.pos.z, 22);
+    game.traffic?.releaseVehicle(v);
+    v.aiControlled = false;
+    // roof parts scrape off on the way over
+    for (const k of ['taxiSign', 'lightbar1', 'lightbar2']) this.detachPart(v, k, 0, 0);
+    if (v.shatterGlass()) game.particles?.glassBurst(v.pos.x, v.pos.y + 1.1, v.pos.z);
+    if (v.driver === 'player') {
+      v.rightT = 4;                       // auto-right after a beat
+      game.cameraRig?.addShake(0.6);
+      game.hud?.showToast?.('Flipped! Bail out or hold on…', 2.4);
+      game.voice?.say?.('flip', 0.7);
+    } else if (v.driver && v.driver !== 'player') {
+      const ped = v.driver;
+      v.driver = null;
+      game.peds?.ejectDriver?.(ped, v);
+      ped.damage?.(15, game, 'crash', null, culprit);
+    }
+  }
+
+  // a hard motorcycle impact throws the rider — no walking away from a
+  // wall at 60. The player takes bail damage and tumbles with the bike's
+  // momentum; AI riders are ejected and hit the pavement (fatal ejections
+  // feed the verlet ragdoll the bike's velocity).
+  ejectRider(v, impact) {
+    const game = this.game;
+    if (game.time - (v._lastEjectT ?? -9) < 1.5) return;
+    v._lastEjectT = game.time;
+    if (v.driver === 'player') {
+      const player = game.player;
+      player.vehicle = null;
+      v.driver = null;
+      player.teleport(v.pos.x, v.pos.z, v.heading);
+      player.setVisible(true);
+      player.vel.x = v.vel.x * 0.85;
+      player.vel.z = v.vel.y * 0.85;
+      player.vel.y = 4;
+      player.grounded = false;
+      player.damage(Math.min(45, (impact - 6) * 2.5), 'bail');
+      player.startRoll?.(0.7);   // tumble with the bike's momentum
+      game.cameraRig.addShake(0.7);
+      game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 8);
+      game.audio?.stopEngine();
+      game.audio?.radio?.stop();
+      game.voice?.say?.('crash', 0.9);
+    } else if (v.driver && v.driver !== 'player') {
+      const ped = v.driver;
+      v.driver = null;
+      game.peds?.ejectDriver(ped, v);
+      const sp = Math.hypot(v.vel.x, v.vel.y) || 1;
+      ped.damage(impact * 2, game, 'runover',
+        { dx: v.vel.x / sp, dz: v.vel.y / sp, force: impact * 0.5, up: 2,
+          vx: v.vel.x * 0.6, vz: v.vel.y * 0.6 },
+        v._lastHitBy === 'player' ? 'player' : 'ai');
+      game.traffic?.releaseVehicle(v);
+    }
   }
 
   nearestVehicle(x, z, maxDist = 4, filter = null) {
@@ -93,7 +247,7 @@ export class VehicleSystem {
     if (player.dead) return;
     if (player.vehicle) { this.exitVehicle(); return; }
 
-    const v = this.nearestVehicle(player.pos.x, player.pos.z, 4.2, (v) => !v.dead);
+    const v = this.nearestVehicle(player.pos.x, player.pos.z, 4.2, (v) => !v.dead && !v.flipped && !v.flipping);
     if (!v) return;
 
     // locked parked cars take a moment to break into
@@ -142,17 +296,22 @@ export class VehicleSystem {
     const v = player.vehicle;
     if (!v) return;
     const bailSpeed = Math.abs(v.speed);
-    if (bailSpeed > 14) {
-      // bail out: hit the pavement rolling, car keeps going
-      player.damage(Math.min(25, (bailSpeed - 14) * 1.2), 'bail');
-      this.game.cameraRig.addShake(0.5);
-      this.game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 6);
-    }
     const door = v.seatWorldPos();
     player.vehicle = null;
     v.driver = null;
     player.teleport(door.x, door.z, v.heading);
     player.setVisible(true);
+    if (bailSpeed > 8) {
+      // dive out: inherit the car's momentum and tuck into a roll —
+      // no damage, the roll absorbs it (that's the point of rolling)
+      player.vel.x = v.vel.x * 0.8;
+      player.vel.z = v.vel.y * 0.8;
+      player.vel.y = 2.5;
+      player.grounded = false;
+      player.startRoll?.();
+      this.game.cameraRig.addShake(0.35);
+      this.game.particles?.dust(v.pos.x, v.pos.y + 0.3, v.pos.z, 6);
+    }
     this.game.audio?.carDoor();
     this.game.audio?.stopEngine();
     this.game.audio?.radio?.stop();
@@ -197,8 +356,9 @@ export class VehicleSystem {
         v.updatePhysics(dt, this.playerControl);
         player.pos.set(v.pos.x, v.pos.y, v.pos.z);
         // visible seated driver at the per-type seat (driver's side, straddle
-        // on bikes), lerping in from the door during the mount beat
-        player.rig.group.visible = true;
+        // on bikes), lerping in from the door during the mount beat — but a
+        // rolled body has no upright seat, so hide the rig while it tumbles
+        player.rig.group.visible = Math.abs(v.flipRoll) < 0.6;
         const seat = v.seatRigWorld();
         if (this._mountT > 0) {
           this._mountT -= dt;
@@ -305,15 +465,33 @@ export class VehicleSystem {
             const rvx = b.vel.x - a.vel.x, rvz = b.vel.y - a.vel.y;
             const rel = rvx * nx + rvz * nz;
             if (rel < 0) {
-              const impulse = -rel * 0.8;
+              // restitution 0.3: rammed cars get properly shoved, not parked
+              const impulse = -rel * 1.3;
               a.vel.x -= nx * impulse * (mb / tot);
               a.vel.y -= nz * impulse * (mb / tot);
               b.vel.x += nx * impulse * (ma / tot);
               b.vel.y += nz * impulse * (ma / tot);
               const impact = -rel;
+              if (impact > 3) {
+                // glancing hits twist the cars; hard hits rock/lift the
+                // lighter one and can throw a rider off a motorcycle
+                const spinSign = (a.pos.x - b.pos.x) * -nz + (a.pos.z - b.pos.z) * nx >= 0 ? 1 : -1;
+                a.angKick += spinSign * impact * 0.03 * (mb / tot);
+                b.angKick -= spinSign * impact * 0.03 * (ma / tot);
+                a.crashKick(nx, nz, impact * (mb / tot),
+                  impact > 10 && ma <= mb ? Math.min(6, impact * 0.22) : 0);
+                b.crashKick(-nx, -nz, impact * (ma / tot),
+                  impact > 10 && mb <= ma ? Math.min(6, impact * 0.22) : 0);
+                // the panels take it: the hit normal points a→b
+                this.partDamage(a, nx, nz, impact * (mb / tot));
+                this.partDamage(b, -nx, -nz, impact * (ma / tot));
+                if (a.type === 'moto' && impact > 8 && a.driver) this.ejectRider(a, impact);
+                if (b.type === 'moto' && impact > 8 && b.driver) this.ejectRider(b, impact);
+              }
               if (impact > 5) {
-                a.applyDamage(impact * 1.2, 'crash');
-                b.applyDamage(impact * 1.2, 'crash');
+                const culprit = (a.driver === 'player' || b.driver === 'player') ? 'player' : 'ai';
+                a.applyDamage(impact * 1.2, 'crash', culprit);
+                b.applyDamage(impact * 1.2, 'crash', culprit);
                 // bumping an alarmed parked car sets the alarm off
                 for (const c of [a, b]) {
                   if (c.alarmed && c.parked) { c.alarmT = 12; c.alarmed = false; }
@@ -341,43 +519,67 @@ export class VehicleSystem {
       }
     }
 
-    // blood tracking: rolling through a fresh pool leaves dark tire
-    // streaks for the next stretch of road
+    // blood tracking: each WHEEL that rolls through a fresh pool gets its
+    // own charge and lays its own tread line — a moto leaves 2 tracks, a
+    // car that only clips a pool with one tire leaves 1
     this._bloodScanT = (this._bloodScanT ?? 0) - dt;
     const bloodScan = this._bloodScanT <= 0;
     if (bloodScan) this._bloodScanT = 0.12;
     const blood = game.gore?.blood;
     for (const v of vs) {
-      if (Math.abs(v.speed) < 2) continue;
-      if (bloodScan && blood?.freshPoolAt?.(v.pos.x, v.pos.z)) v._bloodCharge = 24;
-      if (v._bloodCharge > 0 && game.time - (v._lastStreakT ?? -1) > 0.07) {
-        v._lastStreakT = game.time;
-        v._bloodCharge--;
-        blood?.tireStreak?.(v.pos.x, v.pos.z, v.heading);
+      if (Math.abs(v.speed) < 2 || v.flipping || v.flipped) continue;
+      const offs = v.wheelOffsets;
+      if (!offs?.length || !blood) continue;
+      const sinH = Math.sin(v.heading), cosH = Math.cos(v.heading);
+      if (bloodScan) {
+        for (let i = 0; i < offs.length; i++) {
+          const wx = v.pos.x + offs[i].x * cosH + offs[i].z * sinH;
+          const wz = v.pos.z - offs[i].x * sinH + offs[i].z * cosH;
+          if (blood.freshPoolAt?.(wx, wz)) {
+            (v._wheelBlood ?? (v._wheelBlood = new Array(offs.length).fill(0)))[i] = 24;
+          }
+        }
+      }
+      if (v._wheelBlood && game.time - (v._lastStreakT ?? -1) > 0.07) {
+        let laid = false;
+        for (let i = 0; i < offs.length; i++) {
+          if (v._wheelBlood[i] <= 0) continue;
+          laid = true;
+          v._wheelBlood[i]--;
+          const wx = v.pos.x + offs[i].x * cosH + offs[i].z * sinH;
+          const wz = v.pos.z - offs[i].x * sinH + offs[i].z * cosH;
+          blood.tireStreak?.(wx, wz, v.heading);
+        }
+        if (laid) v._lastStreakT = game.time;
       }
     }
 
-    // run-over checks: vehicles vs pedestrians & player
+    // vehicles vs people: fast cars run people over; EVERY car — parked,
+    // idling or rolling — is a solid body nobody can walk through
     for (const v of vs) {
       const sp = Math.hypot(v.vel.x, v.vel.y);
-      if (sp < 2.5) {
-        // slow contact shoulders people aside instead of intersecting
-        if (sp > 0.3) this.game.peds?.nudgeAside(v, dt);
-        continue;
-      }
-      this.game.peds?.checkRunOver(v, sp);
-      if (v.driver !== 'player' && !player.vehicle && !player.dead) {
-        if (dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z) < v.radius + 0.45 &&
-            game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
-          v._lastPlayerHitT = game.time;
-          player.damage(sp * 3.2, 'runover', v.pos);
-          player.vel.x += v.vel.x * 0.6;
-          player.vel.z += v.vel.y * 0.6;
-          player.vel.y = 3;
-          player.grounded = false;
+      if (sp >= 2.5) {
+        this.game.peds?.checkRunOver(v, sp);
+        if (v.driver !== 'player' && !player.vehicle && !player.dead) {
+          // oriented-box test so the front bumper actually connects
+          const s = Math.sin(v.heading), c = Math.cos(v.heading);
+          const dx = player.pos.x - v.pos.x, dz = player.pos.z - v.pos.z;
+          const along = dx * s + dz * c, side = dx * c - dz * s;
+          if (Math.abs(along) < v.hl + 0.45 && Math.abs(side) < v.hw + 0.4 &&
+              game.time - (v._lastPlayerHitT ?? -9) > 0.8) {
+            v._lastPlayerHitT = game.time;
+            player.damage(sp * 3.2, 'runover', v.pos);
+            player.vel.x += v.vel.x * 0.6;
+            player.vel.z += v.vel.y * 0.6;
+            player.vel.y = 3;
+            player.grounded = false;
+          }
         }
       }
+      this.resolvePeopleVsVehicle(v);
     }
+
+    if (this.partDebris.length) this.updatePartDebris(dt);
 
     // damage visuals + explosions
     for (const v of [...vs]) {
@@ -385,6 +587,13 @@ export class VehicleSystem {
         v.exploded = false;
         this.explodeFx(v);
       }
+      // an abandoned car left on its roof slowly wrecks itself → the
+      // existing burn/explode lifecycle takes it from there
+      if (v.flipped && v.driver == null && !v.dead) {
+        v.applyDamage(2 * dt, 'crash', v._lastHitBy ?? 'ai');
+      }
+      // a wrecked chassis develops a permanent pull to one side
+      if (v.health < 15 && !v.wheelPull && !v.dead) v.wheelPull = (Math.random() < 0.5 ? -1 : 1) * 0.14;
       if (v.health < 55 && !v.dead) {
         v.smokeTimer -= dt;
         if (v.smokeTimer <= 0) {
@@ -470,26 +679,92 @@ export class VehicleSystem {
     this.game.audio?.radio?.stop();
   }
 
+  // push people (peds + player) out of a vehicle's oriented box, then
+  // re-resolve statics once so a car can't shove someone through a wall
+  resolvePeopleVsVehicle(v) {
+    const game = this.game;
+    const peds = game.peds;
+    _solid.x = v.pos.x; _solid.z = v.pos.z;
+    _solid.hw = v.hw; _solid.hl = v.hl; _solid.heading = v.heading;
+    const restatic = (p, r) => {
+      for (const b of game.city.queryColliders(p.pos.x, p.pos.z, r + 0.5)) {
+        if (b.gone) continue;
+        const h = circleVsAabb(p.pos.x, p.pos.z, r, b.minX, b.minZ, b.maxX, b.maxZ);
+        if (h) { p.pos.x = h.x; p.pos.z = h.z; }
+      }
+    };
+    if (peds) {
+      for (const ped of peds._vehicleTargets(v, v.boundR + 0.8)) {
+        if (ped.dead || ped.inVehicle || ped.interiorY != null) continue;
+        // a ped the car just struck keeps their knockback instead of being
+        // politely pushed back out of the box (run-overs must connect)
+        if (game.time - (ped._lastRunOverT ?? -9) < 0.5) continue;
+        const hit = circleVsObb(ped.pos.x, ped.pos.z, 0.35, _solid);
+        if (!hit) continue;
+        ped.pos.x = hit.x; ped.pos.z = hit.z;
+        restatic(ped, 0.35);
+      }
+    }
+    const pl = game.player;
+    if (!pl.vehicle && !pl.dead &&
+        game.time - (v._lastPlayerHitT ?? -9) > 0.4 &&
+        pl.pos.y < v.pos.y + v.spec.h - 0.3 &&   // standing ON the roof is fine
+        distSq2d(pl.pos.x, pl.pos.z, v.pos.x, v.pos.z) < (v.boundR + 1) * (v.boundR + 1)) {
+      const hit = circleVsObb(pl.pos.x, pl.pos.z, 0.38, _solid);
+      if (hit) {
+        pl.pos.x = hit.x; pl.pos.z = hit.z;
+        restatic(pl, 0.38);
+      }
+    }
+  }
+
+  // one blast, any source: vehicle cook-offs, grenades, chain explosions.
+  // skipVehicle excludes the exploding wreck itself from its own splash.
+  explodeAt(x, y, z, radius = 8, culprit = 'ai', skipVehicle = null) {
+    const game = this.game;
+    game.particles?.explosion(x, y + 0.5, z);
+    game.audio?.explosion(x, z);
+    const player = game.player;
+    const pd = dist2d(x, z, player.pos.x, player.pos.z);
+    game.cameraRig.addShake(clamp(1.4 - pd / 34, 0, 1.2));
+    // white screen flash + a beat of hit-stop when it goes off in your face
+    game.hud?.boomFlash?.(clamp(1 - pd / 30, 0, 0.85));
+    if (pd < 14) game.hitStopT = Math.max(game.hitStopT ?? 0, 0.09);
+    if (pd < 22) game.voice?.say?.('boom', 0.5);
+    if (pd < radius + 1 && !player.vehicle) player.damage((radius + 1 - pd) * 12, 'explosion');
+    if (player.vehicle && player.vehicle !== skipVehicle &&
+        dist2d(x, z, player.vehicle.pos.x, player.vehicle.pos.z) < radius) {
+      player.vehicle.applyDamage(40, 'explosion', culprit);
+    }
+    for (const o of this.vehicles) {
+      if (o === skipVehicle || o.dead) continue;
+      const d = dist2d(x, z, o.pos.x, o.pos.z);
+      if (d < radius) {
+        o.applyDamage((radius - d) * 9, 'explosion', culprit);
+        // blast wave rocks and lifts nearby cars
+        const nd = d || 1;
+        o.crashKick((o.pos.x - x) / nd, (o.pos.z - z) / nd, 10, clamp(radius + 1 - d, 0, 7));
+      }
+    }
+    game.peds?.explosionAt(x, z, radius, culprit);
+    game.dispatch?.reportFire(x, z, skipVehicle);
+    // only player-caused explosions are the player's crime — an AI pileup
+    // burning out on its own sends a cop to look, not stars (this was the
+    // "wanted level rises while standing still" bug)
+    game.wanted?.crime('explosion', x, z, culprit);
+  }
+
   explodeFx(v) {
     const { x, z } = v.pos;
     const y = v.pos.y;
-    this.game.particles?.explosion(x, y + 0.5, z);
-    this.game.audio?.explosion(x, z);
-    this.game.cameraRig.addShake(clamp(1.2 - dist2d(x, z, this.game.player.pos.x, this.game.player.pos.z) / 40, 0, 1));
-    // splash damage
+    // splash damage — chain explosions inherit the culprit of the first blast
+    const culprit = v._lastHitBy === 'player' ? 'player' : 'ai';
+    // the blast blows every loose panel off the charred hulk
+    if (v.parts) for (const k of Object.keys(v.parts)) {
+      if (k !== 'windows') this.detachPart(v, k, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+    }
+    this.explodeAt(x, y, z, 8, culprit, v);
     const player = this.game.player;
-    const pd = dist2d(x, z, player.pos.x, player.pos.z);
-    if (pd < 9 && !player.vehicle) player.damage((9 - pd) * 12, 'explosion');
-    if (player.vehicle && dist2d(x, z, player.vehicle.pos.x, player.vehicle.pos.z) < 8 && player.vehicle !== v) {
-      player.vehicle.applyDamage(40, 'explosion');
-    }
-    for (const o of this.vehicles) {
-      if (o === v || o.dead) continue;
-      const d = dist2d(x, z, o.pos.x, o.pos.z);
-      if (d < 8) o.applyDamage((8 - d) * 9, 'explosion');
-    }
-    this.game.peds?.explosionAt(x, z, 8);
-    this.game.dispatch?.reportFire(x, z, v);
     if (v.driver === 'player') {
       player.vehicle = null;
       v.driver = null;
@@ -502,7 +777,6 @@ export class VehicleSystem {
       this.game.peds?.killInVehicle(v.driver, v);
       v.driver = null;
     }
-    this.game.wanted?.crime('explosion', x, z);
   }
 
   setNight(night) {

@@ -15,6 +15,7 @@ export class Goon extends Ped {
       age: 0.25 + Math.random() * 0.3,
     }, { health: opts.health ?? 65 });
     this.isGoon = true;
+    this.faction = opts.faction ?? 'gang';
     this.aggroRange = opts.aggroRange ?? 60;
     this.shootRange = opts.shootRange ?? 24;
     this.damagePerShot = opts.damage ?? 9;
@@ -39,30 +40,43 @@ export class Goon extends Ped {
       return;
     }
     const player = game.player;
-    const d = dist2d(this.pos.x, this.pos.z, player.pos.x, player.pos.z);
+    // threat memory decay (goons fight whoever hit them or their faction)
+    if (this.threatT > 0) {
+      this.threatT -= dt;
+      if (this.threatT <= 0 || this.threat?.dead) this.threat = null;
+    }
+    if (this.criminal) {
+      this.criminal.t -= dt;
+      if (this.criminal.t <= 0) this.criminal = null;
+    }
+    const tgt = (this.threat && !this.threat.dead) ? this.threat : player;
+    const tgtDead = tgt === player ? player.dead : tgt.dead;
+    const d = dist2d(this.pos.x, this.pos.z, tgt.pos.x, tgt.pos.z);
     this.shootCooldown -= dt;
 
     if (this.state === 'guard') {
       this.speed = 0;
       this.rig.setAnim('idle');
-      if (d < this.aggroRange || this.provoked) this.state = 'attack';
-    } else if (player.dead) {
+      // keepers/bouncers (aggroRange 0) only ever engage a live threat
+      if ((this.aggroRange > 0 && d < this.aggroRange) || this.provoked || this.threat) this.state = 'attack';
+    } else if (tgtDead) {
       this.speed = 0;
       this.rig.setAnim('idle');
+      if (this.threat?.dead) { this.threat = null; this.state = 'guard'; }
     } else {
       const los = game.wanted.lineOfSight(
         this.pos.x, this.pos.y + 1.5, this.pos.z,
-        player.pos.x, player.pos.y + 1.2, player.pos.z);
+        tgt.pos.x, tgt.pos.y + 1.2, tgt.pos.z);
       if (los && d < this.shootRange) {
         this.speed = 0;
-        this.heading = angleDamp(this.heading, Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z), 10, dt);
+        this.heading = angleDamp(this.heading, Math.atan2(tgt.pos.x - this.pos.x, tgt.pos.z - this.pos.z), 10, dt);
         this.rig.setAnim('aim');
         if (this.shootCooldown <= 0) {
           this.shootCooldown = 0.9 + Math.random() * 0.5;
-          this.shoot(game, d);
+          this.shoot(game, d, tgt);
         }
       } else {
-        this.moveToward(player.pos.x, player.pos.z, this.runSpeed * 0.9, dt);
+        this.moveToward(tgt.pos.x, tgt.pos.z, this.runSpeed * 0.9, dt);
         this.rig.setAnim('run');
       }
     }
@@ -71,13 +85,23 @@ export class Goon extends Ped {
     this.syncRig();
   }
 
-  shoot(game, d) {
+  shoot(game, d, tgt = null) {
     const player = game.player;
     game.audio?.gunshot('pistol', this.pos.x, this.pos.z);
     game.particles?.muzzleFlash(
       this.pos.x + Math.sin(this.heading) * 0.5, this.pos.y + 1.35,
       this.pos.z + Math.cos(this.heading) * 0.5,
       Math.sin(this.heading), Math.cos(this.heading));
+    if (tgt && tgt !== player) {
+      // firing on another NPC — gunfire on the street is still a crime
+      if (Math.random() < this.accuracy * clamp(1 - d / (this.shootRange + 14), 0.15, 1)) {
+        tgt.damage?.(this.damagePerShot, game, 'gun', null, 'ai', this);
+      } else {
+        game.particles?.sparks(tgt.pos.x, tgt.pos.y + 0.5, tgt.pos.z, 2);
+      }
+      if (!this.criminal) game.peds?.reportNpcCrime?.(this, 'gunfire', this.pos.x, this.pos.z);
+      return;
+    }
     const speedDodge = clamp((player.vehicle ? Math.abs(player.vehicle.speed) : player.speed2d) / 12, 0, 0.6);
     if (Math.random() < this.accuracy * clamp(1 - d / (this.shootRange + 14), 0.15, 1) * (1 - speedDodge)) {
       if (player.vehicle) player.vehicle.applyDamage(5, 'goonfire');
@@ -92,9 +116,16 @@ export class Goon extends Ped {
     }
   }
 
-  damage(amount, game, source) {
+  damage(amount, game, source, impact = null, culprit = 'player', attacker = null) {
     this.provoked = true;
     this.state = 'attack';
+    if (attacker && !attacker.dead && attacker !== this) {
+      this.lastAttacker = attacker;
+      this.threat = attacker;
+      this.threatT = 12;
+      this.alertAllies?.(game, attacker);
+    }
+    this.killedBy = culprit;
     if (this.dead) return;
     this.health -= amount;
     game.particles?.blood(this.pos.x, this.pos.y + 1.1, this.pos.z, 4);
@@ -102,12 +133,13 @@ export class Goon extends Ped {
       this.dead = true;
       this.rig.die();
       this.rig.interiorY = this.interiorY ?? null;
-      const dx = this.pos.x - game.player.pos.x, dz = this.pos.z - game.player.pos.z;
+      const atk = attacker?.pos ?? game.player.pos;
+      const dx = this.pos.x - atk.x, dz = this.pos.z - atk.z;
       const l = Math.hypot(dx, dz) || 1;
       this.ragdoll = game.gore?.makeRagdoll(this.rig, { dx: dx / l, dz: dz / l, force: 2.5, up: 1, spin: (Math.random() - 0.5) * 3 });
       game.gore?.blood.pool(this.pos.x, this.pos.z, this.interiorY ?? undefined);
       game.audio?.scream(this.pos.x, this.pos.z);
-      game.state.stats.kills++;
+      if (culprit === 'player') game.state.stats.kills++;
       this.onDeath?.();
     }
   }

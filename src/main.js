@@ -72,6 +72,7 @@ class Game {
     vehMod.setPaintQuality(this.gfx.quality !== 'low');
     const humMod = await import('./entities/humanoid.js');
     humMod.setHumanoidAssets(this.assets);
+    this._updateAnimLod = humMod.updateAnimLod;
 
     await prog(24, 'surveying the bay…');
     this.city = generateCity(SEED);
@@ -118,6 +119,12 @@ class Game {
     // lazy-loaded gameplay systems land here in later phases
     await this.loadSystems(prog);
 
+    await prog(99, 'warming up the shaders…');
+    // every light the game will ever use is in the scene by now (pooled —
+    // adding one later would recompile every material). Pay the full shader
+    // compile cost here on the loading screen instead of as in-game freezes.
+    try { this.renderer.compile(this.scene, this.camera); } catch {}
+
     await prog(100, 'done');
     this.showMenu();
 
@@ -138,9 +145,13 @@ class Game {
       this.traffic = new traffic.TrafficSystem(this);
       const peds = await import('./systems/peds.js');
       this.peds = new peds.PedSystem(this);
+      const imp = await import('./systems/pedimpostors.js');
+      this.impostors = new imp.PedImpostors(this);
       await prog(92, 'arming the citizens…');
       const combat = await import('./systems/combat.js');
       this.combat = new combat.CombatSystem(this);
+      const proj = await import('./systems/projectiles.js');
+      this.projectiles = new proj.ProjectileSystem(this);
       const wanted = await import('./systems/wanted.js');
       this.wanted = new wanted.WantedSystem(this);
       this.state.wanted = this.wanted.state;
@@ -163,6 +174,8 @@ class Game {
       this.parkedCars = new parked.ParkedCars(this);
       const dispatch = await import('./systems/dispatch.js');
       this.dispatch = new dispatch.Dispatch(this);
+      const chaos = await import('./systems/chaos.js');
+      this.chaos = new chaos.ChaosDirector(this);
       const interiors = await import('./systems/interiors.js');
       this.interiors = new interiors.Interiors(this);
       // interiors moved some POIs onto their claimed doors — re-sync the
@@ -175,6 +188,10 @@ class Game {
       this.weather = new weather.Weather(this);
       const voice = await import('./core/voice.js');
       this.voice = new voice.Voice(this);
+      // must construct before the shader warm-up: its pooled lights have to
+      // be in the scene when renderer.compile() runs
+      const nl = await import('./world/nightlights.js');
+      this.nightLights = new nl.NightLights(this);
     } catch (e) {
       // during phase A some modules don't exist yet — keep booting
       console.warn('[boot] optional system missing:', e.message);
@@ -221,6 +238,9 @@ class Game {
     this.player.health = 100;
     this.state.money = 250;
     this.dayNight.minutes = 9 * 60 + 30;
+    // a fresh start owes the law nothing — without this, heat, stars and
+    // live cops from the previous session walk right into the new game
+    this.wanted?.clear?.();
     this.missions?.reset?.();
     // starter loadout: the weapon system should be visible from minute one
     this.combat?.give?.('bat');
@@ -252,6 +272,8 @@ class Game {
       from ? Math.atan2(from.x - this.player.pos.x, from.z - this.player.pos.z) : null);
     this.player._audio = this.audio;
     this.player._gore = this.gore;
+    this.player._vehicles = this.vehicles;   // standable roofs (jump on cars)
+    this.player._voice = this.voice;         // hard-landing quips
     this.deathFlow = null;
   }
 
@@ -377,6 +399,14 @@ class Game {
       this.terrain.setStarAlpha(night * 0.9 * (1 - (this.weather?.cloud ?? 0)));
       this.terrain.update(dt, this.time);
       this.vehicles?.setNight?.(night);
+      this.nightLights?.update(dt, night);
+      // chunk-distance LOD: cull city geometry beyond the fog (4Hz)
+      this._lodT = (this._lodT ?? 0) - dt;
+      if (this._lodT <= 0) {
+        this._lodT = 0.25;
+        const far = this.scene.fog?.far ?? 900;
+        this.cityMeshes.lod?.(this.camera.position.x, this.camera.position.z, far);
+      }
       this.refreshEnv();
     }
 
@@ -385,12 +415,17 @@ class Game {
   }
 
   // re-bake the procedural sky into scene.environment when the light or
-  // weather moves enough (every 30 game-minutes bucket / cloud step)
+  // weather moves enough. Each bake is a synchronous GPU stall, so it's
+  // gated hard: coarse buckets (2 game-hours / half-cloud steps) plus a
+  // real-time floor of one bake per minute. Direct sun/hemi light still
+  // updates every frame — only the ambient env map steps coarsely.
   refreshEnv() {
     if (!this.sky) return;
-    const key = Math.floor(this.dayNight.minutes / 30) + '|' +
-      Math.round((this.weather?.cloud ?? 0) * 4);
-    this.sky.refreshEnv(this.gfx, key);
+    const now = performance.now() / 1000;
+    if (this._envBakedAt && now - this._envBakedAt < 60) return;
+    const key = Math.floor(this.dayNight.minutes / 120) + '|' +
+      Math.round((this.weather?.cloud ?? 0) * 2);
+    if (this.sky.refreshEnv(this.gfx, key)) this._envBakedAt = now;
   }
 
   updateMenu(dt) {
@@ -406,6 +441,10 @@ class Game {
     const driving = !!this.player.vehicle;
     const aiming = !driving && this.input.mouseDown[2] && !this.player.dead;
 
+    // camera snapshot for character animation LOD (uses last frame's
+    // matrices — one frame of lag is invisible at these thresholds)
+    this._updateAnimLod?.(this.camera);
+
     // camera control
     this.cameraRig.applyMouse(this.input.mouseDX, this.input.mouseDY);
     if (this.input.wasPressed('KeyV')) this.cameraRig.cycleDistance();
@@ -417,12 +456,15 @@ class Game {
     this.traffic?.update(dt);
     this.parkedCars?.update(dt);
     this.peds?.update(dt);
+    this.impostors?.update(dt);
     this.combat?.update(dt, aiming);
+    this.projectiles?.update(dt);
     this.wanted?.update(dt);
     this.dispatch?.update(dt);
     this.interiors?.update(dt);
     this.missions?.update(dt);
     this.worldlife?.update(dt);
+    this.chaos?.update(dt);
     this.particles?.update(dt);
     this.gore?.update(dt);
     this.knockables?.update(dt);
@@ -436,7 +478,8 @@ class Game {
     const insideRec = this.interiors?.playerInside;
     this.cameraRig.update(dt, camTarget, veh ? 2.1 : 1.55, {
       driving: !!veh, speed, aimMode: aiming,
-      ceilY: insideRec ? insideRec.built.gy + 2.95 : null,   // stay under the room ceiling
+      // stay under whatever ceiling the player's current floor has
+      ceilY: insideRec ? this.interiors.currentCeilY() : null,
     });
     // hide the player body in on-foot first-person so it doesn't clip the camera
     if (!veh && !this.player.dead) {
@@ -447,8 +490,10 @@ class Game {
     const zone = this.interiors?.current ? this.state.zone
       : districtName(this.city.districtAt(this.player.pos.x, this.player.pos.z));
     if (zone && zone !== this.state.zone) {
+      const first = this.state.zone != null;   // skip the very first assignment
       this.state.zone = zone;
       this.hud.showZone(zone);
+      if (first && !veh) this.voice?.say?.('district', 0.5);
     }
 
     // lock-on screen marker
@@ -465,7 +510,13 @@ class Game {
 
     // HUD + minimap
     this.hud.update(dt, this);
-    this.hud.setCrosshair(aiming, false, this.combat?.bloom || 0);
+    // FPS-style: with a gun out in first person the crosshair is always up;
+    // hit/kill marks persist their flash window instead of clearing same-frame
+    const fpGun = this.cameraRig.firstPerson && !driving && !this.player.dead && this.combat?.isGun?.();
+    this.hud.setCrosshair(aiming || fpGun, (this.combat?.hitmarkT ?? 0) > 0, this.combat?.bloom || 0, {
+      kill: (this.combat?.hitmarkT ?? 0) > 0 && !!this.combat?.killmark,
+      ads: this.combat?.adsK || 0,
+    });
     const blips = [];
     for (const bp of this.blipProviders) bp(blips);
     this.minimap.draw(
@@ -531,6 +582,7 @@ class Game {
           game.vehicles?.setNight?.(night);
           game.input.endFrame();
         }
+        game._envBakedAt = 0;   // tests fast-forward hours; skip the real-time floor
         game.refreshEnv();
       },
       setWeather: (s) => {

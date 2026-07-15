@@ -49,7 +49,7 @@ const guns = await page.evaluate(() => {
   for (let i = 0; i < 3; i++) { g.input.mousePressed[0] = true; window.__game.tick(0.2); }
   g.input.mouseDown[2] = false;
   return {
-    tracers: !!g.particles._tracerPool,
+    tracers: !!(g.particles._bulletPool || g.particles._tracerPool),
     shells: !!g.particles._shellMesh,
     recoiled: (g.cameraRig.recoilPitch || 0) !== 0 || g.combat.bloom > 0,
     muzzleLight: !!g.particles._mLight,

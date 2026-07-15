@@ -1,7 +1,7 @@
 // Quick boot check: loads the game, reports console errors, takes screenshots.
 import { chromium } from 'playwright';
 
-const shots = process.env.SHOTS !== '0';
+const shots = process.env.SHOTS === '1';   // opt-in: software-GL screenshots cost 10-30s each
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--no-sandbox'],

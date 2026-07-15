@@ -40,10 +40,30 @@ export class WantedSystem {
     this.incognito = false;
     this.playerSeen = false;
     this._proxT = 0;
+    this._commandeers = 0;    // active grab-a-car attempts (hard cap 2)
+    this.commandeerT = 0;
+    // chopper searchlight lives in the scene permanently (intensity 0 when
+    // grounded) — adding a light mid-game forces every material in the scene
+    // to recompile its shader, which reads as a multi-second freeze at 5★
+    if (game.THREE && game.scene) {
+      const spot = new game.THREE.SpotLight(0xffffff, 0, 120, 0.35, 0.4, 1.5);
+      game.scene.add(spot);
+      game.scene.add(spot.target);
+      this.chopperSpot = spot;
+    }
   }
 
   // ---------------- heat ----------------
-  crime(kind, x, z) {
+  // culprit: 'player' (default) or 'ai'. Wanted heat is the PLAYER's rap
+  // sheet — AI-caused mayhem must never raise it. AI crimes still get a
+  // police response (a unit investigates) but add zero heat.
+  crime(kind, x, z, culprit = 'player') {
+    if (culprit !== 'player') {
+      let cop = this.nearestCop(x, z, 240);
+      if (!cop) cop = this.spawnFootCop(false, true);
+      if (cop && !cop.investigate) cop.investigate = { x, z, t: 0 };
+      return;
+    }
     const heat = CRIME_HEAT[kind] ?? 4;
     // quiet crimes need a witness; a lonely street keeps your secrets
     const quiet = ['carjack', 'assault', 'kill', 'breakin'].includes(kind);
@@ -108,10 +128,14 @@ export class WantedSystem {
     this.recalcStars(true);
   }
 
-  // a civilian phoned it in: heat bump + a unit sent to look at the spot
-  reportCrime(x, z) {
-    this.state.heat = clamp(this.state.heat + 16, 0, 900);
-    this.recalcStars();
+  // a civilian phoned it in: a unit is sent to look at the spot. Only
+  // reports about the PLAYER bump the player's heat — someone calling in
+  // an AI driver's hit-and-run sends a cop, not stars.
+  reportCrime(x, z, culprit = 'player') {
+    if (culprit === 'player') {
+      this.state.heat = clamp(this.state.heat + 16, 0, 900);
+      this.recalcStars();
+    }
     // point an existing patrol/foot cop at the scene, or spawn one nearby
     let cop = this.nearestCop(x, z, 240);
     if (!cop) cop = this.spawnFootCop(false, true);
@@ -121,6 +145,12 @@ export class WantedSystem {
   clear() {
     this.state.heat = 0;
     this.state.stars = 0;
+    this.lastKnown = null;
+    this.knownVehicle = null;
+    this.incognito = false;
+    this.playerSeen = false;
+    this.unseenT = 0;
+    this._commandeers = 0;
     this.despawnAll(true);
   }
 
@@ -130,7 +160,8 @@ export class WantedSystem {
     for (let i = 6; i >= 1; i--) if (h >= STAR_TH[i]) { stars = i; break; }
     if (stars > this.state.stars && !silent) {
       this.game.audio?.wantedUp();
-      this.game.voice?.say?.('cops', 0.7);
+      // things getting serious at 3★ earns its own line
+      this.game.voice?.say?.(stars >= 3 ? 'star3' : 'cops', 0.7);
       // police scanner call-out on first wanted + escalations
       if (this.state.stars === 0) {
         const p = this.game.player.pos;
@@ -173,8 +204,14 @@ export class WantedSystem {
         }
         if (t1 <= t0 || t1 <= 0.02 || t0 >= 0.98) continue;
         const tm = (Math.max(t0, 0) + Math.min(t1, 1)) / 2;
+        const ey = y1 + dy * tm;
+        // upper-floor walls (absolute-Y band) only occlude within their band
+        if (b.baseY != null) {
+          if (ey >= b.baseY && ey < b.baseY + b.h) return false;
+          continue;
+        }
         const ground = city.groundHeight(x1 + dx * tm, z1 + dz * tm);
-        if (y1 + dy * tm < ground + b.h) return false;
+        if (ey < ground + b.h) return false;
       }
     }
     return true;
@@ -296,6 +333,9 @@ export class WantedSystem {
       if (aliveCars < resp.cars) this.spawnCruiser();
     }
 
+    // outgunned on wheels: a stranded foot cop grabs whatever car is near
+    if (stars >= 1) this.considerCommandeer(dt);
+
     // ---- beat patrol: the city always has a couple of cops walking around ----
     if (stars === 0 && this.spawnT <= 0) {
       this.spawnT = 4;
@@ -328,6 +368,13 @@ export class WantedSystem {
     // ---- run cops ----
     for (const cop of [...this.footCops]) {
       cop.update(dt, game);
+      // commandeered a car: the officer is in the driver's seat now
+      if (cop.boarded) {
+        cop.dispose();
+        const bi = this.footCops.indexOf(cop);
+        if (bi >= 0) this.footCops.splice(bi, 1);
+        continue;
+      }
       const d = dist2d(cop.pos.x, cop.pos.z, player.pos.x, player.pos.z);
       const cullDist = cop.patrol ? 230 : (stars === 0 ? 60 : 260);
       if ((cop.dead && cop.removeTimer > 20) || d > cullDist) {
@@ -341,9 +388,15 @@ export class WantedSystem {
       this.driveCruiser(cr, dt);
       const v = cr.vehicle;
       const d = dist2d(v.pos.x, v.pos.z, player.pos.x, player.pos.z);
-      if (v.dead || d > 320 || (stars === 0 && d > 80)) {
+      // NPC-chase cruisers (chaos director) live until the chase resolves or
+      // wanders far from the player; player cruisers cull on stars/distance.
+      // A flipped cruiser is out of the chase — drop the record like a wreck.
+      const cull = cr.npc
+        ? (cr.resolved || d > 220)
+        : (d > 320 || (stars === 0 && d > 80));
+      if (v.dead || v.flipped || cull) {
         game.audio?.stopSiren(v.id);
-        if (!v.dead) game.vehicles.remove(v);
+        if (!v.dead && !v.flipped) game.vehicles.remove(v);
         this.cruisers.splice(this.cruisers.indexOf(cr), 1);
       }
     }
@@ -381,6 +434,25 @@ export class WantedSystem {
       cop.patrol = patrol;
       this.footCops.push(cop);
       return cop;
+    }
+    return null;
+  }
+
+  // chaos director: a cruiser that chases a fleeing NPC's vehicle (never
+  // touches the player's wanted level). Spawns near the fugitive.
+  spawnNpcCruiser(target) {
+    const game = this.game;
+    for (let tries = 0; tries < 6; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 45 + Math.random() * 40;
+      const v = game.vehicles.spawnOnRoadNear(target.pos.x + Math.cos(a) * d, target.pos.z + Math.sin(a) * d, 'police');
+      if (!v) continue;
+      v.sirenOn = true;
+      v.aiControlled = true;
+      game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+      const cr = { vehicle: v, state: 'pursue', target, npc: true, unloaded: false, stuckT: 0, resolved: false };
+      this.cruisers.push(cr);
+      return cr;
     }
     return null;
   }
@@ -440,10 +512,57 @@ export class WantedSystem {
     const game = this.game;
     const v = cr.vehicle;
     if (v.dead) return;
+    v.flashSiren(game.time);
+
+    // chaos-director NPC pursuit: this cruiser is chasing a fleeing NPC's
+    // CAR, not the player. Runs the same intercept/PIT as a player chase,
+    // then arrests the driver when the car is stopped.
+    if (cr.target) {
+      const t = cr.target;
+      if (t.dead || t.driver == null || t.driver === 'player') { cr.resolved = true; return; }
+      const td = dist2d(v.pos.x, v.pos.z, t.pos.x, t.pos.z);
+      const lead = clamp(td / 30, 0, 1.4);
+      const wantH = Math.atan2(
+        (t.pos.x + t.vel.x * lead) - v.pos.x, (t.pos.z + t.vel.y * lead) - v.pos.z);
+      let e2 = wantH - v.heading;
+      while (e2 > Math.PI) e2 -= Math.PI * 2;
+      while (e2 < -Math.PI) e2 += Math.PI * 2;
+      let steer = clamp(e2 * 2, -1, 1);
+      v.chaseBoost = clamp(1 + (td - 20) / 120, 0.9, 1.25);
+      let throttle = 1;
+      const relX = t.pos.x - v.pos.x, relZ = t.pos.z - v.pos.z;
+      const side = Math.cos(v.heading) * relX - Math.sin(v.heading) * relZ;
+      if (td < 6.5 && Math.abs(v.speed) > 8) steer = clamp(side * 0.9, -1, 1);   // PIT
+      // driver's car stopped: pull the driver and make the collar
+      if (Math.abs(t.speed) < 1.5 && td < 14) {
+        throttle = v.speed > 1 ? -1 : 0;
+        const drv = t.driver;
+        if (drv && drv !== 'player') {
+          game.traffic?.releaseVehicle(t);
+          game.peds?.ejectDriver?.(drv, t);
+          t.driver = null;
+          // collared: hands up, stand down
+          drv.criminal = null;
+          drv.threat = null;
+          drv.state = 'cower';
+          drv.panicked = true;
+          drv.stateT = 0;
+          game.peds?.spectacleAt?.(drv.pos.x, drv.pos.z, 20);
+        }
+        cr.resolved = true;
+      }
+      if (Math.abs(v.speed) < 0.5 && throttle > 0.5) {
+        cr.stuckT = (cr.stuckT || 0) + dt;
+        if (cr.stuckT > 1.6) { cr.reverseT = 0.9; cr.stuckT = 0; }
+      } else cr.stuckT = 0;
+      if (cr.reverseT > 0) { cr.reverseT -= dt; throttle = -1; }
+      v.updatePhysics(dt, { throttle, steer: cr.reverseT > 0 ? -steer : steer, handbrake: false });
+      return;
+    }
+
     const player = game.player;
     const px = player.pos.x, pz = player.pos.z;
     const d = dist2d(v.pos.x, v.pos.z, px, pz);
-    v.flashSiren(game.time);
 
     if (cr.state === 'block') {
       // parked across the road; unload cops if the player is close
@@ -522,13 +641,85 @@ export class WantedSystem {
     cr.unloaded = true;
     const v = cr.vehicle;
     const tough = this.state.stars >= 5;
-    for (const side of [-1, 1]) {
+    // a commandeered car carries the one officer who took it, not a pair
+    const n = cr.crew ?? 2;
+    const sides = [-1, 1];
+    for (let i = 0; i < n; i++) {
+      const side = sides[i % 2];
       const lx = -Math.cos(v.heading) * side, lz = Math.sin(v.heading) * side;
       const cop = new Cop(this.game.city, this.game.scene, tough);
       cop.place(v.pos.x + lx * 1.6, v.pos.z + lz * 1.6);
       cop.provoked = this.state.stars >= 2;
       this.footCops.push(cop);
     }
+  }
+
+  // ---------------- commandeering ----------------
+  // a civilian car becomes a pursuit cruiser: same headless record the
+  // real cruisers use — driveCruiser handles any vehicle (flashSiren
+  // no-ops without a lightbar)
+  convertToCruiser(v, crew = 1) {
+    const game = this.game;
+    game.traffic?.releaseVehicle(v);
+    v.parked = false;
+    v.locked = false;
+    v.sirenOn = true;
+    v.aiControlled = true;
+    game.audio?.startSiren(v.id, () => ({ x: v.pos.x, z: v.pos.z }));
+    const cr = { vehicle: v, state: 'pursue', unloaded: false, stuckT: 0, commandeered: true, crew };
+    this.cruisers.push(cr);
+    return cr;
+  }
+
+  // once a second while wanted: if the player is escaping by car and the
+  // cruiser response is thin, the best-placed foot cop grabs a nearby
+  // vehicle instead of chasing hopelessly on foot
+  considerCommandeer(dt) {
+    const game = this.game;
+    const player = game.player;
+    this.commandeerT -= dt;
+    if (this.commandeerT > 0) return;
+    this.commandeerT = 1;
+    if (!player.vehicle || Math.abs(player.vehicle.speed) < 8) return;
+    if (this._commandeers >= 2) return;
+    const resp = RESPONSE[this.state.stars];
+    const aliveCars = this.cruisers.filter((c) => !c.vehicle.dead).length;
+    let nearCruiser = Infinity;
+    for (const cr of this.cruisers) {
+      if (cr.vehicle.dead) continue;
+      nearCruiser = Math.min(nearCruiser,
+        dist2d(cr.vehicle.pos.x, cr.vehicle.pos.z, player.pos.x, player.pos.z));
+    }
+    // response is fine: enough cars and at least one actually in the fight
+    if (aliveCars >= resp.cars && nearCruiser < 150) return;
+
+    // best-placed stranded officer
+    let cop = null, bd = Infinity;
+    for (const c of this.footCops) {
+      if (c.dead || c.commandeer || c.boarded || c.arrestT > 0) continue;
+      const d = dist2d(c.pos.x, c.pos.z, player.pos.x, player.pos.z);
+      if (d < 25 || d > 130) continue;
+      if (d < bd) { bd = d; cop = c; }
+    }
+    if (!cop) return;
+
+    // nearest usable car: parked beats yanking a driver, buses are useless
+    let best = null, bestScore = -Infinity;
+    for (const v of game.vehicles.vehicles) {
+      if (v.dead || v.health <= 40 || v.type === 'bus') continue;
+      if (v === player.vehicle || v.driver === 'player') continue;
+      if (v._commandeerBy || v.emergency) continue;
+      if (this.cruisers.some((cr) => cr.vehicle === v)) continue;
+      const d = dist2d(v.pos.x, v.pos.z, cop.pos.x, cop.pos.z);
+      if (d > 45) continue;
+      const pref = v.parked ? 2 : (v.aiControlled ? 1 : 1.5);
+      const score = pref - d / 45;
+      if (score > bestScore) { bestScore = score; best = v; }
+    }
+    if (!best) return;
+    best._commandeerBy = cop;
+    cop.commandeer = { vehicle: best, phase: 'approach', t: 0 };
+    this._commandeers++;
   }
 
   // ---------------- helicopter (5★+) ----------------
@@ -545,10 +736,6 @@ export class WantedSystem {
     const rotor = new game.THREE.Mesh(new game.THREE.BoxGeometry(9, 0.08, 0.4), new game.THREE.MeshBasicMaterial({ color: 0x333333 }));
     rotor.position.y = 1; g.add(rotor);
     this.chopperRotor = rotor;
-    const spot = new game.THREE.SpotLight(0xffffff, 0, 120, 0.35, 0.4, 1.5);
-    spot.position.set(0, 0, 0);
-    g.add(spot); g.add(spot.target);
-    this.chopperSpot = spot;
     game.scene.add(g);
     this.chopper = g;
     this.chopperAngle = 0;
@@ -565,10 +752,13 @@ export class WantedSystem {
     this.chopper.position.set(cx, 45, cz);
     this.chopper.lookAt(p.x, 45, p.z);
     this.chopperRotor.rotation.y += dt * 40;
-    // searchlight tracks the player
-    this.chopperSpot.intensity = game.dayNight?.nightIntensity > 0.3 ? 8 : 2;
-    this.chopperSpot.target.position.set(p.x, 0, p.z);
-    this.chopperSpot.target.updateMatrixWorld();
+    // searchlight tracks the player (scene-level light, follows the chopper)
+    if (this.chopperSpot) {
+      this.chopperSpot.position.set(cx, 45, cz);
+      this.chopperSpot.intensity = game.dayNight?.nightIntensity > 0.3 ? 8 : 2;
+      this.chopperSpot.target.position.set(p.x, 0, p.z);
+      this.chopperSpot.target.updateMatrixWorld();
+    }
   }
 
   despawnChopper() {
@@ -576,12 +766,14 @@ export class WantedSystem {
     this.game.audio?.stopSiren?.('chopper');
     this.chopper.removeFromParent();
     this.chopper = null;
+    if (this.chopperSpot) this.chopperSpot.intensity = 0;   // light stays in scene
   }
 
   despawnAll(instant = false) {
     this.despawnChopper();
     for (const c of this.footCops) c.dispose();
     this.footCops.length = 0;
+    this._commandeers = 0;
     for (const cr of [...this.cruisers]) {
       // never delete the car out from under the player (e.g. respray in a stolen cruiser)
       if (this.game.player.vehicle === cr.vehicle) {

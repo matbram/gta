@@ -9,6 +9,22 @@ import { RNG } from '../core/rng.js';
 
 const $ = (id) => document.getElementById(id);
 
+// shared map icon set, keyed by city.pois key — one source of truth for
+// both the big map markers and its legend so "where can I do things" reads
+// at a glance
+const POI_ICONS = {
+  safehouse:     { glyph: '🏠', color: '#5fae52', label: 'Safehouse (save)' },
+  gunShop:       { glyph: '🔫', color: '#b03a2e', label: 'Gun shop' },
+  respray:       { glyph: '🎨', color: '#4a7fb5', label: 'Respray' },
+  foodShop:      { glyph: '🍔', color: '#d87a3a', label: 'Food (heal)' },
+  hospital:      { glyph: '➕', color: '#e05a5a', label: 'Hospital' },
+  taxiDepot:     { glyph: '🚕', color: '#e8c84a', label: 'Taxi depot' },
+  policeHQ:      { glyph: '🛡️', color: '#3a6a9a', label: 'Police HQ' },
+  nightclub:     { glyph: '🎵', color: '#a05ac0', label: 'Nightclub' },
+  docksWarehouse:{ glyph: '📦', color: '#8a7a5a', label: 'Warehouse' },
+  mansion:       { glyph: '🏛️', color: '#c8b070', label: 'Mansion' },
+};
+
 export class WorldLife {
   constructor(game) {
     this.game = game;
@@ -77,10 +93,14 @@ export class WorldLife {
   }
 
   provideBlips(blips) {
-    // POmarkers as coloured squares
-    const colors = { safehouse: '#5fae52', gunshop: '#b03a2e', respray: '#4a7fb5', food: '#d87a3a' };
+    // service markers: distinct colour + icon glyph so each is legible
+    const meta = {
+      safehouse: { color: '#5fae52', glyph: '🏠' }, gunshop: { color: '#b03a2e', glyph: '🔫' },
+      respray: { color: '#4a7fb5', glyph: '🎨' }, food: { color: '#d87a3a', glyph: '🍔' },
+    };
     for (const m of this.markers) {
-      blips.push({ x: m.x, z: m.z, color: colors[m.kind] || '#ccc', shape: 'square' });
+      const mi = meta[m.kind] || { color: '#ccc' };
+      blips.push({ x: m.x, z: m.z, color: mi.color, shape: 'square', letter: mi.glyph });
     }
     // taxi gig target
     if (this.taxiGig) blips.push({ x: this.taxiGig.x, z: this.taxiGig.z, color: '#e8c84a' });
@@ -106,6 +126,26 @@ export class WorldLife {
     mesh.position.set(x, y + 0.25, z);
     game.scene.add(mesh);
     this.pickups.push({ mesh, kind: 'cash', amount, x, z, t: 0, ttl: 30 });
+  }
+
+  // a dropped firearm (dead cops leave their sidearm behind)
+  dropWeapon(x, z, weaponId, ammo) {
+    const game = this.game;
+    if (!this._gunGeoA) {
+      this._gunGeoA = new THREE.BoxGeometry(0.09, 0.09, 0.42);   // slide/barrel
+      this._gunGeoB = new THREE.BoxGeometry(0.09, 0.2, 0.11);    // grip
+      this._gunMat = new THREE.MeshLambertMaterial({ color: 0x2a2c30, emissive: 0x8899aa, emissiveIntensity: 0.18 });
+    }
+    const mesh = new THREE.Group();
+    const a = new THREE.Mesh(this._gunGeoA, this._gunMat);
+    const b = new THREE.Mesh(this._gunGeoB, this._gunMat);
+    b.position.set(0, -0.12, -0.13);
+    mesh.add(a, b);
+    const y = game.city.groundHeight(x, z);
+    mesh.position.set(x, y + 0.16, z);
+    mesh.rotation.z = 0.3;
+    game.scene.add(mesh);
+    this.pickups.push({ mesh, kind: 'weapon', weapon: weaponId, amount: ammo, x, z, t: 0, ttl: 45 });
   }
 
   spawnCoins() {
@@ -162,6 +202,7 @@ export class WorldLife {
         if (!game.spendMoney(price)) { game.hud.showToast('Not enough cash.', 2); return; }
         cb();
         game.audio?.cash();
+        game.voice?.say?.('purchase', 0.4);
         this.closeShop();
       };
       panel.appendChild(div);
@@ -169,13 +210,15 @@ export class WorldLife {
 
     if (kind === 'gunshop') {
       $('shop-title').textContent = 'BULLSEYE ROUNDS';
-      for (const id of ['bat', 'pistol', 'smg', 'shotgun', 'rifle']) {
+      for (const id of ['bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'grenade', 'molotov']) {
         const w = WEAPONS[id];
         const owned = game.combat.inventory[id];
+        const packSize = w.thrown ? 5 : (w.mag ?? 0) * 2;
         if (owned && !w.melee) {
-          addItem(w.icon, `${w.name} ammo`, Math.round(w.price * 0.25), () => game.combat.give(id, w.mag * 2), `+${w.mag * 2} rounds`);
+          addItem(w.icon, `${w.name} ${w.thrown ? '×5' : 'ammo'}`, Math.round(w.price * 0.25),
+            () => game.combat.give(id, packSize), w.thrown ? '+5' : `+${packSize} rounds`);
         } else if (!owned) {
-          addItem(w.icon, w.name, w.price, () => game.combat.give(id, w.melee ? 0 : w.mag * 2));
+          addItem(w.icon, w.name, w.price, () => game.combat.give(id, w.melee ? 0 : packSize));
         }
       }
       addItem('🦺', 'BODY ARMOR', 350, () => { game.player.armor = 100; });
@@ -328,36 +371,36 @@ export class WorldLife {
       ctx.stroke();
     }
 
-    const drawIcon = (x, z, color, letter) => {
+    const drawIcon = (x, z, color, glyph, r = 9) => {
       ctx.fillStyle = color;
       ctx.strokeStyle = '#111';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(px(x), px(z), 8, 0, Math.PI * 2);
+      ctx.arc(px(x), px(z), r, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
-      if (letter) {
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px Arial';
+      if (glyph) {
+        ctx.font = `${r + 2}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(letter, px(x), px(z) + 0.5);
+        ctx.fillText(glyph, px(x), px(z) + 0.5);
       }
     };
 
-    // POIs
+    // shared POI icon set — every place you can DO something, always shown
     const p = game.city.pois;
-    drawIcon(p.safehouse.x, p.safehouse.z, '#5fae52', 'S');
-    drawIcon(p.gunShop.x, p.gunShop.z, '#b03a2e', 'A');
-    drawIcon(p.respray.x, p.respray.z, '#4a7fb5', 'P');
-    drawIcon(p.hospital.x, p.hospital.z, '#e8e4dc', 'H');
-    drawIcon(p.foodShop.x, p.foodShop.z, '#d87a3a', 'F');
-    // mission contacts
+    for (const [key, meta] of Object.entries(POI_ICONS)) {
+      if (p[key]) drawIcon(p[key].x, p[key].z, meta.color, meta.glyph);
+    }
+    // mission contacts (kept as their lettered blips)
     const blips = [];
     game.missions?.provideBlips?.(blips);
     for (const b of blips) if (b.letter) drawIcon(b.x, b.z, b.color, b.letter);
 
     // waypoint
-    if (game.state.waypoint) drawIcon(game.state.waypoint.x, game.state.waypoint.z, '#8a4a8a', 'W');
+    if (game.state.waypoint) drawIcon(game.state.waypoint.x, game.state.waypoint.z, '#8a4a8a', '📍');
+
+    // legend panel
+    this.drawMapLegend(ctx, S);
 
     // player
     const pp = game.player.pos;
@@ -370,6 +413,42 @@ export class WorldLife {
     ctx.moveTo(0, -10); ctx.lineTo(6, 8); ctx.lineTo(0, 4); ctx.lineTo(-6, 8);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  drawMapLegend(ctx, S) {
+    const p = this.game.city.pois;
+    const rows = Object.entries(POI_ICONS).filter(([k]) => p[k]);
+    const pad = 10, lh = 20, boxW = 168, boxH = pad * 2 + rows.length * lh + 20;
+    const x0 = 12, y0 = S - boxH - 12;
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,12,14,0.82)';
+    ctx.strokeStyle = 'rgba(120,110,90,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(x0, y0, boxW, boxH);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#d8ccb8';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('MAP KEY', x0 + pad, y0 + pad + 6);
+    let yy = y0 + pad + 24;
+    for (const [, meta] of rows) {
+      ctx.font = '15px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = meta.color;
+      ctx.beginPath();
+      ctx.arc(x0 + pad + 7, yy, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillText(meta.glyph, x0 + pad + 7, yy + 0.5);
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#cbbfa8';
+      ctx.fillText(meta.label, x0 + pad + 22, yy + 0.5);
+      yy += lh;
+    }
     ctx.restore();
   }
 
@@ -499,6 +578,9 @@ export class WorldLife {
         if (pk.kind === 'cash') {
           game.addMoney(pk.amount);
           game.audio?.cash();
+        } else if (pk.kind === 'weapon') {
+          game.combat?.give(pk.weapon, pk.amount);
+          game.audio?.pickup?.();
         } else if (pk.kind === 'coin') {
           this.coinsTaken.add(pk.id);
           game.state.stats.coins = this.coinsTaken.size;

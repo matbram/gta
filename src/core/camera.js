@@ -19,6 +19,8 @@ export class CameraRig {
     this.fovKick = 0;
     this.shakeAmp = 0;
     this.recoilPitch = 0;        // FP branch reads this before the damp/reset runs
+    this.driveByFP = false;      // temporary first-person during a drive-by
+    this._driveByFPT = 0;
     this.pos = new THREE.Vector3();
     this.look = new THREE.Vector3();
     this.smoothTarget = new THREE.Vector3();
@@ -31,6 +33,10 @@ export class CameraRig {
     else if (this.distIndex === DISTANCES.length - 1) { this.firstPerson = true; }
     else this.distIndex++;
     this.dist = DISTANCES[this.distIndex];
+    // each mode has its own pitch range — re-clamp on switch
+    this.pitch = this.firstPerson
+      ? clamp(this.pitch, -1.2, 1.2)
+      : clamp(this.pitch, -0.55, 1.15);
   }
 
   snapBehind(heading, pitch = 0.22) {
@@ -44,7 +50,11 @@ export class CameraRig {
 
   applyMouse(dx, dy, sensitivity = 0.0026) {
     this.yaw -= dx * sensitivity;
-    this.pitch = clamp(this.pitch + dy * sensitivity, -0.55, 1.15);
+    // first person can look nearly straight up/down; the orbit camera keeps
+    // its ground/overhead limits
+    const lo = this.firstPerson ? -1.2 : -0.55;
+    const hi = this.firstPerson ? 1.2 : 1.15;
+    this.pitch = clamp(this.pitch + dy * sensitivity, lo, hi);
   }
 
   // target: Vector3 (feet), targetHeight: metres above feet to look at
@@ -52,9 +62,13 @@ export class CameraRig {
     const { driving = false, speed = 0, aimMode = false, ceilY = null } = opts;
     this.aim = aimMode;
 
-    // ---- first-person ----
-    if (this.firstPerson && !driving) {
-      const eyeH = 1.62;
+    // drive-by first-person is a brief forced view; it expires after the
+    // last shot and restores whatever camera the player was using
+    if (this._driveByFPT > 0) { this._driveByFPT -= dt; if (this._driveByFPT <= 0) this.driveByFP = false; }
+
+    // ---- first-person: on foot, or forced during a drive-by ----
+    if ((this.firstPerson && !driving) || (this.driveByFP && driving)) {
+      const eyeH = driving ? 1.15 : 1.62;
       const ex = target.x, ey = target.y + eyeH, ez = target.z;
       // look direction from yaw/pitch
       const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
@@ -68,8 +82,12 @@ export class CameraRig {
         this.shakeAmp = Math.max(0, this.shakeAmp - dt * 2.4);
       }
       this.camera.position.set(px, py, pz);
-      this.camera.lookAt(px + dx, py + sp + this.recoilPitch, pz + dz);
-      const fov = this.baseFov + (aimMode ? -14 : 0);
+      // NEGATED pitch: the orbit camera treats pitch-up as camera-up/look-down,
+      // so first person must look DOWN as pitch grows or the controls invert
+      this.camera.lookAt(px + dx, py - sp + this.recoilPitch, pz + dz);
+      // ADS zoom is driven smoothly by the combat system (scoped rifles
+      // zoom hard); bare aiming without a gun keeps a slight tighten
+      const fov = this.baseFov - (this.adsZoom || (aimMode ? 6 : 0));
       if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
       this.recoilPitch = damp(this.recoilPitch || 0, 0, 8, dt);
       return;
@@ -117,8 +135,11 @@ export class CameraRig {
       let hit = false;
       for (const b of cols) {
         if (sx > b.minX - 0.3 && sx < b.maxX + 0.3 && sz > b.minZ - 0.3 && sz < b.maxZ + 0.3) {
-          const groundY = this.city.groundHeight(sx, sz);
-          if (sy < groundY + b.h) { hit = true; break; }
+          // upper-floor walls occupy an absolute-Y band; ground boxes rise
+          // from the terrain
+          const top = b.baseY != null ? b.baseY + b.h : this.city.groundHeight(sx, sz) + b.h;
+          const bottom = b.baseY ?? -Infinity;
+          if (sy < top && sy > bottom - 0.3) { hit = true; break; }
         }
       }
       if (hit) { bestT = Math.max(0.12, (s - 1) / steps); break; }
@@ -146,7 +167,7 @@ export class CameraRig {
     this.camera.lookAt(lookAt);
 
     // FOV kick with vehicle speed
-    const targetKick = driving ? clamp(speed / 40, 0, 1) * 14 : 0;
+    const targetKick = driving ? clamp(speed / 55, 0, 1) * 14 : 0;
     this.fovKick = damp(this.fovKick, targetKick, 3, dt);
     const fov = this.baseFov + this.fovKick + (aimMode ? -12 : 0);
     if (Math.abs(this.camera.fov - fov) > 0.05) {

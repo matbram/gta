@@ -3,6 +3,27 @@
 
 import { clamp, lerp } from './mathutil.js';
 
+// Voice of each gun. Tuned so the family is instantly separable by ear:
+// pistol = snappy mid crack; smg = tight fast tick; shotgun = deep wide boom;
+// rifle = sharp supersonic snap with a long tail; revolver = heavy magnum boom.
+const GUN_REPORTS = {
+  pistol:   { snap: 0.22, crackFrom: 3000, crackTo: 380, crackDur: 0.12, crackGain: 0.5,
+              boomFreq: 175, boomTo: 62, boomDur: 0.1,  boomGain: 0.3,  boomType: 'square',
+              tailDur: 0.16, tailGain: 0.12 },
+  smg:      { snap: 0.18, crackFrom: 3800, crackTo: 620, crackDur: 0.07, crackGain: 0.38,
+              boomFreq: 215, boomTo: 95,  boomDur: 0.05, boomGain: 0.2,  boomType: 'square',
+              tailDur: 0.06, tailGain: 0.06 },
+  shotgun:  { snap: 0.12, crackFrom: 1600, crackTo: 95,  crackDur: 0.34, crackGain: 0.82,
+              boomFreq: 82,  boomTo: 34,  boomDur: 0.3,  boomGain: 0.46, boomType: 'sawtooth',
+              tailDur: 0.42, tailGain: 0.2, tailDelay: 0.05 },
+  rifle:    { snap: 0.3,  hiSnap: 0.28, crackFrom: 3600, crackTo: 430, crackDur: 0.15, crackGain: 0.6,
+              boomFreq: 150, boomTo: 55,  boomDur: 0.13, boomGain: 0.32, boomType: 'square',
+              tailDur: 0.3,  tailGain: 0.16, tailDelay: 0.04 },
+  revolver: { snap: 0.2,  crackFrom: 2400, crackTo: 130, crackDur: 0.26, crackGain: 0.78,
+              boomFreq: 120, boomTo: 44,  boomDur: 0.2,  boomGain: 0.46, boomType: 'sawtooth',
+              tailDur: 0.36, tailGain: 0.18, tailDelay: 0.05 },
+};
+
 export class AudioEngine {
   constructor(game) {
     this.game = game;
@@ -113,9 +134,9 @@ export class AudioEngine {
     return buf;
   }
 
-  burst({ dur = 0.2, gain = 0.6, filterFrom = 3000, filterTo = 400, type = 'lowpass', q = 1 }) {
+  burst({ dur = 0.2, gain = 0.6, filterFrom = 3000, filterTo = 400, type = 'lowpass', q = 1, delay = 0 }) {
     if (!(gain > 0.001)) return;          // inaudible / zero gain would throw on ramps
-    const t = this.now();
+    const t = this.now() + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuffer(1);
     const f = this.ctx.createBiquadFilter();
@@ -145,33 +166,33 @@ export class AudioEngine {
   }
 
   // ---------------- named SFX ----------------
+  // Per-gun gunshot. Each report is synthesized live from four layers so every
+  // weapon has its own signature and no external clip is required:
+  //   snap  — the mechanical firing-pin/action transient (very short, bright)
+  //   crack — the muzzle blast: a filtered noise burst swept high→low
+  //   boom  — the low-frequency pressure thump (a pitch-dropping tone)
+  //   tail  — the report cracking back off the street a beat later
+  // Set preferGunClips=true to use recorded gun_<kind> clips instead when they
+  // exist; the live synth is the default so the guns always sound distinct.
   gunshot(kind = 'pistol', x, z) {
     if (!this.ctx) return;
-    // prefer the generated clip
-    if (this.buffers?.has('gun_' + kind)) {
+    if (this.preferGunClips && this.buffers?.has('gun_' + kind)) {
       this.playVar('gun_' + kind, x !== undefined ? { x, z, gain: 0.9, range: 170 } : { gain: 0.9 });
       return;
     }
-    const g = x !== undefined ? this.spatialGain(x, z, 1, 160) : 1;
+    const g = x !== undefined ? this.spatialGain(x, z, 1, 170) : 1;
     if (g <= 0.01) return;
-    switch (kind) {
-      case 'pistol':
-        this.burst({ dur: 0.14, gain: 0.55 * g, filterFrom: 2600, filterTo: 300 });
-        this.tone({ freq: 160, freqTo: 60, dur: 0.1, gain: 0.3 * g, type: 'square' });
-        break;
-      case 'smg':
-        this.burst({ dur: 0.09, gain: 0.4 * g, filterFrom: 3400, filterTo: 500 });
-        this.tone({ freq: 200, freqTo: 90, dur: 0.06, gain: 0.22 * g, type: 'square' });
-        break;
-      case 'shotgun':
-        this.burst({ dur: 0.32, gain: 0.75 * g, filterFrom: 1800, filterTo: 120 });
-        this.tone({ freq: 90, freqTo: 40, dur: 0.25, gain: 0.4 * g, type: 'sawtooth' });
-        break;
-      case 'rifle':
-        this.burst({ dur: 0.18, gain: 0.6 * g, filterFrom: 3800, filterTo: 400 });
-        this.tone({ freq: 140, freqTo: 55, dur: 0.14, gain: 0.32 * g, type: 'square' });
-        break;
-    }
+    const R = GUN_REPORTS[kind] || GUN_REPORTS.pistol;
+    // snap: the crisp mechanical transient of the action
+    if (R.snap) this.burst({ dur: 0.02, gain: R.snap * g, filterFrom: 9000, filterTo: 3800, type: 'highpass', q: 0.6 });
+    // crack: the main muzzle blast
+    this.burst({ dur: R.crackDur, gain: R.crackGain * g, filterFrom: R.crackFrom, filterTo: R.crackTo });
+    // boom: low-end pressure
+    this.tone({ freq: R.boomFreq, freqTo: R.boomTo, dur: R.boomDur, gain: R.boomGain * g, type: R.boomType || 'sine' });
+    // a shotgun/rifle also throws a supersonic high snap on top of the crack
+    if (R.hiSnap) this.burst({ dur: 0.03, gain: R.hiSnap * g, filterFrom: 6000, filterTo: 1400, type: 'bandpass', q: 0.8 });
+    // tail: the crack slapping back off buildings
+    if (R.tailDur) this.burst({ dur: R.tailDur, gain: R.tailGain * g, filterFrom: 900, filterTo: 110, q: 0.6, delay: R.tailDelay || 0.03 });
   }
 
   ricochet(x, z) {

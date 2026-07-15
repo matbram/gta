@@ -69,7 +69,7 @@ dismantling **Ray Corvo**'s grip on the city, one mission at a time.
   wheel arches, windshields, clearcoat paint, license plates, mirrors, and
   working lightbars/sirens/liveries for the services. They drive like
   vehicles: torque curves with audible gear shifts, brake and reverse
-  lights, a km/h speedometer, per-type seating (you straddle the bike, sit
+  lights, an mph speedometer, per-type seating (you straddle the bike, sit
   the driver's side in cars), locked cars with alarms, and sirens that
   part traffic — including the one you stole.
 - **Combat 2.0** — first-person and third-person, six weapons with recoil,

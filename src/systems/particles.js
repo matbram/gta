@@ -75,9 +75,11 @@ class Cloud {
   }
 
   update(dt) {
+    let any = false;
     for (let i = 0; i < MAX; i++) {
       const P = this.p[i];
       if (!P.live) continue;
+      any = true;
       P.life += dt;
       if (P.life >= P.maxLife) {
         P.live = false;
@@ -95,10 +97,15 @@ class Cloud {
       this.size[i] = P.s0 + (P.s1 - P.s0) * t;
       this.alpha[i] = P.a0 * (1 - t);
     }
-    this.geo.attributes.position.needsUpdate = true;
-    this.geo.attributes.pcolor.needsUpdate = true;
-    this.geo.attributes.size.needsUpdate = true;
-    this.geo.attributes.alpha.needsUpdate = true;
+    // skip the GPU re-upload when the pool is idle (one extra frame after
+    // the last particle dies so its cleared slot still reaches the GPU)
+    if (any || this._wasLive) {
+      this.geo.attributes.position.needsUpdate = true;
+      this.geo.attributes.pcolor.needsUpdate = true;
+      this.geo.attributes.size.needsUpdate = true;
+      this.geo.attributes.alpha.needsUpdate = true;
+    }
+    this._wasLive = any;
   }
 }
 
@@ -107,6 +114,21 @@ export class ParticleSystem {
     this.game = game;
     this.smoke = new Cloud(game.scene, THREE.NormalBlending);
     this.glow = new Cloud(game.scene, THREE.AdditiveBlending);
+    // created up front, never removed: adding a light later would change the
+    // scene's light count and force a full shader recompile mid-firefight
+    this._mLight = new THREE.PointLight(0xffddaa, 0, 22, 2);
+    this._mLightT = 0;
+    game.scene.add(this._mLight);
+    // explosion flash lights — same constant-count rule as the muzzle light
+    const q = game.gfx?.quality ?? 'high';
+    this._booms = [];
+    for (let i = 0; i < (q === 'low' ? 1 : 2); i++) {
+      const L = new THREE.PointLight(0xffa64d, 0, 34, 2);
+      L._t = 0;
+      game.scene.add(L);
+      this._booms.push(L);
+    }
+    this._columns = [];   // lingering smoke-column emitters
   }
 
   update(dt) {
@@ -120,6 +142,70 @@ export class ParticleSystem {
       if (this._mLightT <= 0) this._mLight.intensity = 0;
     }
 
+    // explosion flash decay: quadratic falloff, orange cooling to deep red
+    for (const L of this._booms) {
+      if (L._t <= 0) continue;
+      L._t -= dt;
+      const k = Math.max(0, L._t / 0.4);
+      L.intensity = 60 * k * k;
+      L.color.setRGB(1, 0.35 + 0.3 * k, 0.12 * k);
+      if (L._t <= 0) L.intensity = 0;
+    }
+
+    // lingering smoke columns keep pumping for a while after the bang
+    for (let i = this._columns.length - 1; i >= 0; i--) {
+      const c = this._columns[i];
+      c.t -= dt;
+      c.acc = (c.acc ?? 0) + dt;
+      while (c.acc >= 0.12) {
+        c.acc -= 0.12;
+        for (let n = 0; n < 2; n++) {
+          this.smoke.emit({
+            x: c.x + (Math.random() - 0.5) * 1.4, y: c.y + Math.random() * 1.2, z: c.z + (Math.random() - 0.5) * 1.4,
+            vx: (Math.random() - 0.5) * 1.2, vy: 3.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 1.2,
+            life: 2.6 + Math.random() * 1.6, s0: 2.0, s1: 9, a: 0.5,
+            r: 0.14, g: 0.13, b: 0.12, drag: 0.99,
+          });
+        }
+      }
+      if (c.t <= 0) this._columns.splice(i, 1);
+    }
+
+    // debris chunk physics (instanced, like shells but heavier)
+    if (this._debris) {
+      const d = this._debrisDummy;
+      let any = false;
+      for (let i = 0; i < this._debris.length; i++) {
+        const s = this._debris[i];
+        if (!s.live) continue;
+        any = true;
+        s.t += dt;
+        s.vy -= 18 * dt;
+        s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+        const gy = this.game.city.groundHeight(s.x, s.z) + 0.05;
+        if (s.y <= gy) { s.y = gy; s.vy *= -0.35; s.vx *= 0.55; s.vz *= 0.55; }
+        s.rot += dt * s.spin;
+        const shrink = s.t > 1.8 ? Math.max(0, 1 - (s.t - 1.8) / 0.4) : 1;
+        if (s.t > 2.2) { s.live = false; d.scale.setScalar(0); }
+        else { d.scale.setScalar(shrink); }
+        d.position.set(s.x, s.y, s.z);
+        d.rotation.set(s.rot, s.rot * 0.6, s.rot * 0.3);
+        d.updateMatrix();
+        this._debrisMesh.setMatrixAt(i, d.matrix);
+      }
+      if (any || this._debrisWasLive) this._debrisMesh.instanceMatrix.needsUpdate = true;
+      this._debrisWasLive = any;
+    }
+
+    // shockwave ring: fast expand + fade, then hide
+    if (this._ring && this._ringT > 0) {
+      this._ringT -= dt;
+      const k = 1 - Math.max(0, this._ringT / 0.45);
+      this._ring.scale.setScalar(1 + k * 13);
+      this._ring.material.opacity = 0.7 * (1 - k);
+      if (this._ringT <= 0) this._ring.visible = false;
+    }
+
     // tracers fade fast then return to the pool
     if (this._tracers) {
       for (const tr of this._tracers) {
@@ -128,6 +214,26 @@ export class ParticleSystem {
         if (tr.t > 0.07) { tr.line.visible = false; this._tracerPool.push(tr.line); tr._done = true; }
       }
       if (this._tracers.some((t) => t._done)) this._tracers = this._tracers.filter((t) => !t._done);
+    }
+
+    // traveling bullet streaks: advance a short bright segment along the path
+    if (this._bullets && this._bullets.length) {
+      const TRAIL = 3.5;   // metres of visible streak behind the round
+      for (const b of this._bullets) {
+        b.travelled += b.speed * dt;
+        const head = Math.min(b.travelled, b.dist);
+        const tail = Math.max(0, b.travelled - TRAIL);
+        const pos = b.line.geometry.attributes.position.array;
+        pos[0] = b.x0 + b.dx * tail; pos[1] = b.y0 + b.dy * tail; pos[2] = b.z0 + b.dz * tail;
+        pos[3] = b.x0 + b.dx * head; pos[4] = b.y0 + b.dy * head; pos[5] = b.z0 + b.dz * head;
+        b.line.geometry.attributes.position.needsUpdate = true;
+        if (tail >= b.dist) {
+          b.line.visible = false;
+          this._bulletPool.push(b.line);
+          b._done = true;
+        }
+      }
+      if (this._bullets.some((b) => b._done)) this._bullets = this._bullets.filter((b) => !b._done);
     }
 
     // shell physics
@@ -210,11 +316,6 @@ export class ParticleSystem {
 
   // brief point-light flash at the muzzle (pooled, one shared light)
   muzzleLight(x, y, z) {
-    if (!this._mLight) {
-      this._mLight = new THREE.PointLight(0xffddaa, 0, 22, 2);
-      this.game.scene.add(this._mLight);
-      this._mLightT = 0;
-    }
     this._mLight.position.set(x, y, z);
     this._mLight.intensity = 6;
     this._mLightT = 0.06;
@@ -245,6 +346,34 @@ export class ParticleSystem {
     line.material.opacity = 0.85;
     line.visible = true;
     this._tracers.push({ line, t: 0 });
+  }
+
+  // a visible traveling round: a short bright streak that crosses from the
+  // muzzle to the impact over a few frames. Cosmetic only — the hit is
+  // already registered by the hitscan; this just makes bullets readable.
+  bullet(x0, y0, z0, x1, y1, z1) {
+    if (!this._bullets) {
+      this._bulletPool = [];
+      this._bullets = [];
+      const mat = new THREE.LineBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+      for (let i = 0; i < 20; i++) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const line = new THREE.Line(geo, mat.clone());
+        line.frustumCulled = false;
+        line.visible = false;
+        this.game.scene.add(line);
+        this._bulletPool.push(line);
+      }
+    }
+    const line = this._bulletPool.pop();
+    if (!line) return;
+    let dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    const dist = Math.hypot(dx, dy, dz) || 1;
+    dx /= dist; dy /= dist; dz /= dist;
+    line.visible = true;
+    line.material.opacity = 1;
+    this._bullets.push({ line, x0, y0, z0, dx, dy, dz, dist, travelled: 0, speed: 800 });
   }
 
   // ejected brass shell (pooled instanced)
@@ -279,16 +408,105 @@ export class ParticleSystem {
     }
   }
 
+  // pooled explosion flash: grab the boom light closest to done
+  explosionLight(x, y, z) {
+    let L = this._booms[0];
+    for (const b of this._booms) if (b._t < L._t) L = b;
+    if (!L) return;
+    L.position.set(x, y + 1.2, z);
+    L._t = 0.4;
+    L.intensity = 60;
+    L.color.setRGB(1, 0.65, 0.12);
+  }
+
+  // dark chunks blown out of the blast, tumbling with gravity + bounce
+  debrisBurst(x, y, z, n = 12) {
+    if (!this._debris) {
+      const geo = new THREE.BoxGeometry(0.16, 0.1, 0.2);
+      const mat = new THREE.MeshLambertMaterial({ color: 0x1c1a18 });
+      this._debrisMesh = new THREE.InstancedMesh(geo, mat, 24);
+      this._debrisMesh.frustumCulled = false;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < 24; i++) this._debrisMesh.setMatrixAt(i, zero);
+      this.game.scene.add(this._debrisMesh);
+      this._debris = [];
+      for (let i = 0; i < 24; i++) this._debris.push({ live: false, x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, rot: 0, spin: 0, t: 0 });
+      this._debrisCursor = 0;
+      this._debrisDummy = new THREE.Object3D();
+    }
+    for (let i = 0; i < n; i++) {
+      const s = this._debris[this._debrisCursor];
+      this._debrisCursor = (this._debrisCursor + 1) % 24;
+      const a = Math.random() * Math.PI * 2;
+      const sp = 6 + Math.random() * 8;
+      s.x = x; s.y = y + 0.6; s.z = z;
+      s.vx = Math.cos(a) * sp; s.vz = Math.sin(a) * sp;
+      s.vy = 5 + Math.random() * 6;
+      s.rot = Math.random() * 6;
+      s.spin = 6 + Math.random() * 10;
+      s.t = 0;
+      s.live = true;
+    }
+  }
+
+  // persistent black scorch circle under a blast (ring buffer, like skids)
+  scorch(x, z) {
+    if (!this._scorchPool) {
+      const geo = new THREE.CircleGeometry(2.2, 12);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x060606, transparent: true, opacity: 0.55, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2,
+      });
+      this._scorchPool = new THREE.InstancedMesh(geo, mat, 12);
+      this._scorchPool.frustumCulled = false;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < 12; i++) this._scorchPool.setMatrixAt(i, zero);
+      this._scorchIdx = 0;
+      this._scorchDummy = new THREE.Object3D();
+      this.game.scene.add(this._scorchPool);
+    }
+    const d = this._scorchDummy;
+    d.position.set(x, this.game.city.groundHeight(x, z) + 0.02, z);
+    d.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    d.scale.setScalar(0.8 + Math.random() * 0.4);
+    d.updateMatrix();
+    this._scorchPool.setMatrixAt(this._scorchIdx % 12, d.matrix);
+    this._scorchIdx++;
+    this._scorchPool.instanceMatrix.needsUpdate = true;
+  }
+
+  // one reusable expanding shockwave ring (concurrent booms re-grab it)
+  shockwave(x, y, z) {
+    if (!this._ring) {
+      const geo = new THREE.RingGeometry(0.9, 1.0, 24);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      });
+      this._ring = new THREE.Mesh(geo, mat);
+      this._ring.frustumCulled = false;
+      this.game.scene.add(this._ring);
+    }
+    this._ring.position.set(x, y + 0.15, z);
+    this._ring.scale.setScalar(1);
+    this._ring.material.opacity = 0.7;
+    this._ring.visible = true;
+    this._ringT = 0.45;
+  }
+
   explosion(x, y, z) {
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 34; i++) {
       this.glow.emit({
         x, y: y + 0.5, z,
         vx: (Math.random() - 0.5) * 16, vy: Math.random() * 11, vz: (Math.random() - 0.5) * 16,
-        life: 0.5 + Math.random() * 0.5, s0: 2.2, s1: 0.4, a: 1,
+        life: 0.5 + Math.random() * 0.6, s0: 2.6, s1: 0.4, a: 1,
         r: 1, g: 0.5 + Math.random() * 0.4, b: 0.15, grav: -6, drag: 0.96,
       });
     }
-    for (let i = 0; i < 18; i++) {
+    // immediate burst, then a tall column that keeps rising for a while
+    for (let i = 0; i < 10; i++) {
       this.smoke.emit({
         x, y: y + 1, z,
         vx: (Math.random() - 0.5) * 6, vy: 2 + Math.random() * 5, vz: (Math.random() - 0.5) * 6,
@@ -296,7 +514,12 @@ export class ParticleSystem {
         r: 0.16, g: 0.15, b: 0.14, drag: 0.985,
       });
     }
-    this.sparks(x, y + 0.5, z, 16);
+    this._columns.push({ x, y: y + 0.5, z, t: 1.6, acc: 0 });
+    this.sparks(x, y + 0.5, z, 22);
+    this.explosionLight(x, y, z);
+    this.debrisBurst(x, y, z, 12);
+    this.scorch(x, z);
+    this.shockwave(x, y, z);
   }
 
   // firefighter hose arc

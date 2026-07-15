@@ -100,6 +100,6 @@ const route = await page.evaluate(() => {
 });
 console.log('A* route nodes:', route, route > 3 ? 'ROUTE OK' : 'ROUTE FAIL');
 
-await page.screenshot({ path: 'screenshots/08-missions.png' });
+if (process.env.SHOTS === '1') await page.screenshot({ path: 'screenshots/08-missions.png' });
 console.log(errors.length ? 'CONSOLE ERRORS:\n' + errors.slice(0, 10).join('\n') : 'NO CONSOLE ERRORS');
 await browser.close();

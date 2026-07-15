@@ -20,6 +20,7 @@ export class Player {
       hairStyle: 'short', beard: 'stubble', topStyle: 'tee', bottomStyle: 'jeans',
       sleeves: 'short', heightScale: 1.01,
     });
+    this.rig.lodExempt = true;   // the hero animates at full rate, always
     scene.add(this.rig.group);
 
     this.pos = new THREE.Vector3(0, 0, 0);
@@ -156,21 +157,29 @@ export class Player {
       this.dodgeT = 0.35;
       this.iframeT = 0.35;
     } else if (this.grounded && input.wasPressed('Space')) {
-      // gravity + jump
-      this.vel.y = 5.6;
+      // gravity + jump: apex ~1.78m + the 0.45m mantle reach clears car
+      // roofs (sedan 1.42, police/sports/pickup) with real margin; lands
+      // at ~8 m/s, under the -13 fall-damage threshold
+      this.vel.y = 8.0;
       this.grounded = false;
     }
     if (this.dodgeT > 0) this.dodgeT -= dt;
     if (this.iframeT > 0) this.iframeT -= dt;
+    if (this.rollT > 0) this.rollT -= dt;
     this.vel.y -= 18 * dt;
 
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     this.pos.y += this.vel.y * dt;
 
-    const g2 = this.interiorY ?? this.city.groundHeight(this.pos.x, this.pos.z);
+    const g2 = this.supportHeight();
     if (this.pos.y <= g2) {
       if (this.vel.y < -13) this.damage((-this.vel.y - 13) * 6, 'fall');
+      // landing dip sells the impact (deeper for harder falls)
+      if (!this.grounded && this.vel.y < -5 && this.rollT <= 0) {
+        this.rig.landGesture?.(clamp(-this.vel.y / 14, 0.4, 1));
+        if (this.vel.y < -10) this._voice?.say?.('hardland', 0.5);
+      }
       this.pos.y = g2;
       this.vel.y = 0;
       this.grounded = true;
@@ -223,14 +232,43 @@ export class Player {
     }
   }
 
+  // highest standable surface under the feet: terrain, static box tops
+  // within step-up reach, and vehicle roofs (jumping on cars is a real move)
+  supportHeight() {
+    const gx = this.pos.x, gz = this.pos.z;
+    let s = this.interiorY ?? this.city.groundHeight(gx, gz);
+    for (const b of this.city.queryColliders(gx, gz, RADIUS + 0.3)) {
+      if (b.gone) continue;
+      if (gx < b.minX - 0.1 || gx > b.maxX + 0.1 || gz < b.minZ - 0.1 || gz > b.maxZ + 0.1) continue;
+      const top = (b.baseY ?? this.city.groundHeight(gx, gz)) + b.h;
+      if (top > s && top <= this.pos.y + 0.45) s = top;
+    }
+    const vehicles = this._vehicles?.vehicles;
+    if (vehicles) {
+      for (const v of vehicles) {
+        const dx = gx - v.pos.x, dz = gz - v.pos.z;
+        if (dx * dx + dz * dz > v.boundR * v.boundR) continue;
+        const sH = Math.sin(v.heading), cH = Math.cos(v.heading);
+        if (Math.abs(dx * sH + dz * cH) > v.hl || Math.abs(dx * cH - dz * sH) > v.hw) continue;
+        const top = v.pos.y + v.spec.h;
+        if (top > s && top <= this.pos.y + 0.45) s = top;
+      }
+    }
+    return s;
+  }
+
   collide() {
     const cols = this.city.queryColliders(this.pos.x, this.pos.z, RADIUS + 1);
     for (const b of cols) {
-      // ignore boxes we are standing on top of (none currently walkable)
+      // boxes on other floors (absolute-Y band) don't exist for us
+      if (b.baseY != null && (this.pos.y > b.baseY + b.h - 0.2 || this.pos.y + 1.7 < b.baseY)) continue;
       const hit = circleVsAabb(this.pos.x, this.pos.z, RADIUS, b.minX, b.minZ, b.maxX, b.maxZ);
       if (hit) {
         const groundY = this.city.groundHeight(this.pos.x, this.pos.z);
-        if (this.pos.y < groundY + b.h - 0.2) {
+        const top = groundY + b.h;
+        // above the box, or within step-up reach of its top: walkable —
+        // supportHeight() lifts us instead of the wall pushing us out
+        if (this.pos.y < top - 0.2 && top - this.pos.y > 0.45) {
           this.pos.x = hit.x;
           this.pos.z = hit.z;
           // kill velocity into the wall
@@ -247,9 +285,26 @@ export class Player {
     }
   }
 
+  // bail-out tumble: tuck gesture folds the body, this spins the whole rig
+  // through a forward roll around the facing axis with a faked hip pivot
+  startRoll(dur = 0.55) {
+    this.rollT = this.rollDur = dur;
+    this.iframeT = Math.max(this.iframeT ?? 0, dur + 0.1);
+    this.rig.rollGesture?.(dur);
+  }
+
   syncRig() {
     this.rig.group.position.copy(this.pos);
+    this.rig.group.rotation.order = 'YXZ';   // yaw first so the tumble follows facing
     this.rig.group.rotation.y = this.heading;
+    if (this.rollT > 0 && this.rollDur) {
+      const k = 1 - this.rollT / this.rollDur;
+      this.rig.group.rotation.x = k * Math.PI * 2;
+      // group origin is at the feet — lift so the spin pivots near the hips
+      this.rig.group.position.y = this.pos.y + Math.sin(k * Math.PI) * 0.35;
+    } else if (this.rig.group.rotation.x !== 0) {
+      this.rig.group.rotation.x = 0;
+    }
   }
 
   setVisible(v) { this.rig.group.visible = v; }

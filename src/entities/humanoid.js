@@ -287,6 +287,23 @@ export function randomLook(rng) {
   }, rng);
 }
 
+// A fixed palette of 96 fully-frozen civilian looks. At crowd scale, fully
+// random looks thrash the character-texture cache (every spawn repaints and
+// re-uploads a canvas atlas); drawing plain civilians from this palette makes
+// texture lookups ~always hit. Uniformed/bespoke characters stay unique.
+let BUDGET_LOOKS = null;
+export function budgetLook(i = -1) {
+  if (!BUDGET_LOOKS) {
+    // tiny deterministic LCG so the palette is identical every session
+    let s = 1337;
+    const rng = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    BUDGET_LOOKS = Array.from({ length: 96 }, () => randomLook(rng));
+  }
+  const idx = i >= 0 ? i % BUDGET_LOOKS.length
+    : Math.floor(Math.random() * BUDGET_LOOKS.length);
+  return { ...BUDGET_LOOKS[idx] };
+}
+
 // Fill any missing "rich" look fields (face, age, hair style, outfit cut)
 // so legacy {skin, shirt, pants, hair} colour looks keep working while the
 // character factory gets everything it needs. Idempotent.
@@ -332,6 +349,24 @@ export function setHumanoidAssets(a) { humanoidAssets = a; }
 
 const WALK_REF = 1.7;   // m/s the walk clip was authored at (tuned by eye)
 const RUN_REF = 5.0;
+
+// ---- animation LOD ----
+// Skinning ~100 characters at full rate every frame (main + shadow pass)
+// is the game's single biggest steady frame cost. One camera snapshot per
+// frame drives distance-tiered mixer rates, a shadow cutoff, and a
+// freeze-and-hide for far off-screen rigs. Movement/AI is unaffected —
+// only skeletal animation and drawing are throttled.
+const _lodFrustum = new THREE.Frustum();
+const _lodMat = new THREE.Matrix4();
+const _lodSphere = new THREE.Sphere();
+const _lodCamPos = new THREE.Vector3();
+let _lodOn = false;
+export function updateAnimLod(camera) {
+  _lodOn = true;
+  _lodCamPos.copy(camera.position);
+  _lodMat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  _lodFrustum.setFromProjectionMatrix(_lodMat);
+}
 
 export class SkinnedHumanoid {
   constructor(look = {}, modelKey = 'Soldier') {
@@ -405,6 +440,51 @@ export class SkinnedHumanoid {
     this.punchAlt = false;
     this.swimTilt = 0;
     this.animator.play('idle');
+
+    // animation LOD state (see updateAnimLod / _lodStep)
+    this.lodExempt = false;      // the player rig sets this
+    this._lodAcc = 0;
+    this._lodCast = true;
+    this._lodMeshes = [];
+    this.modelRoot.traverse((o) => {
+      if (o.isMesh || o.isSkinnedMesh) this._lodMeshes.push(o);
+    });
+  }
+
+  // Returns the dt this rig should animate with this frame: accumulated
+  // time when an update is due, 0 to skip. Far off-screen rigs also hide.
+  _lodStep(dt) {
+    this._lodAcc += dt;
+    if (!_lodOn || this.lodExempt) { const a = this._lodAcc; this._lodAcc = 0; return a; }
+    const p = this.group.position;
+    const dx = p.x - _lodCamPos.x, dz = p.z - _lodCamPos.z;
+    const d2 = dx * dx + dz * dz;
+    // far + off-screen: freeze the skeleton and skip the draw entirely
+    _lodSphere.center.set(p.x, p.y + 0.9, p.z);
+    _lodSphere.radius = 1.4;
+    const visible = d2 < 30 * 30 || _lodFrustum.intersectsSphere(_lodSphere);
+    if ((this._lodVis ?? true) !== visible) {
+      this._lodVis = visible;
+      this.group.visible = visible;
+      // frozen rigs also stop composing their ~60 bone matrices every frame
+      // (the scene graph walks invisible objects too — this is real CPU)
+      this.group.traverse((o) => { o.matrixAutoUpdate = visible; });
+      if (visible) this.group.updateMatrixWorld(true);
+    }
+    if (!visible) return 0;
+    // distant characters don't cast shadows (halves their draw cost)
+    const cast = d2 < 40 * 40;
+    if (cast !== this._lodCast) {
+      this._lodCast = cast;
+      for (const m of this._lodMeshes) m.castShadow = cast;
+    }
+    // gestures (punches, reloads, hit reactions) always play at full rate
+    const period = (this.animator.gesture || d2 < 25 * 25) ? 0
+      : d2 < 50 * 50 ? 1 / 30 : d2 < 90 * 90 ? 1 / 15 : 1 / 8;
+    if (this._lodAcc < period) return 0;
+    const a = this._lodAcc;
+    this._lodAcc = 0;
+    return a;
   }
 
   setAnim(name) {
@@ -416,9 +496,10 @@ export class SkinnedHumanoid {
     const carryO = this.weaponCarry ?? 'none';
     switch (name) {
       case 'idle': A.play('idle'); A.setOverlay(carryO); break;
-      case 'walk': A.play('walk'); A.setOverlay(carryO); break;
-      case 'run': A.play('run'); A.setOverlay(carryO); break;
-      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay(carryO); break;
+      // a leg-shot survivor hobbles: the limp overlay wins over weapon carry
+      case 'walk': A.play('walk'); A.setOverlay(this.limp ? 'limp' : carryO); break;
+      case 'run': A.play('run'); A.setOverlay(this.limp ? 'limp' : carryO); break;
+      case 'sprint': A.play('run', { timeScale: 1.15 }); A.setOverlay(this.limp ? 'limp' : carryO); break;
       case 'jump': A.play('idle', { timeScale: 0.2 }); A.setOverlay('jump'); break;
       case 'swim': A.play('idle', { timeScale: 0.6 }); A.setOverlay('swim'); break;
       case 'drive': A.play('idle', { timeScale: 0.12 }); A.setOverlay('drive'); break;
@@ -430,6 +511,7 @@ export class SkinnedHumanoid {
       case 'phone': A.play('idle', { timeScale: 0.5 }); A.setOverlay('phone'); break;
       case 'handsup': A.play('idle', { timeScale: 0.3 }); A.setOverlay('handsUp'); break;
       case 'kneel': A.play('idle', { timeScale: 0.1 }); A.setOverlay('kneel'); break;
+      case 'crawl': A.play('walk', { timeScale: 0.55 }); A.setOverlay('crawl'); break;
       case 'hose': A.play('idle', { timeScale: 0.4 }); A.setOverlay('hose'); break;
       default: A.play('idle'); A.setOverlay('none');
     }
@@ -443,12 +525,28 @@ export class SkinnedHumanoid {
     this.animator.startGesture(0.38, (t, bones, q, e) => g(bones, q, e, t));
   }
 
-  flinch() {
-    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t));
+  flinch(side = 1) {
+    this.animator.startGesture(0.3, (t, bones, q, e) => GESTURES.flinch(bones, q, e, t, side));
+  }
+
+  kickGesture() {
+    this.animator.startGesture(0.5, (t, bones, q, e) => GESTURES.kick(bones, q, e, t));
   }
 
   reachGesture(dur = 0.4) {
     this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.reach(bones, q, e, t));
+  }
+
+  rollGesture(dur = 0.55) {
+    this.animator.startGesture(dur, (t, bones, q, e) => GESTURES.roll(bones, q, e, t));
+  }
+
+  landGesture(strength = 1) {
+    this.animator.startGesture(0.32, (t, bones, q, e) => GESTURES.landDip(bones, q, e, t, strength));
+  }
+
+  throwGesture() {
+    this.animator.startGesture(0.45, (t, bones, q, e) => GESTURES.throwItem(bones, q, e, t));
   }
 
   // ---- weapon animation API (combat.js drives these) ----
@@ -496,6 +594,8 @@ export class SkinnedHumanoid {
   }
 
   update(dt, speed = 0) {
+    dt = this._lodStep(dt);
+    if (dt === 0) return;
     if (this.dead) {
       this.deadT += dt;
       // simple fall (verlet ragdoll replaces this in the combat phase)

@@ -24,6 +24,7 @@ export class Hud {
       radioToast: document.querySelector('#radiotoast span'),
       timerBox: $('timerbox'), timerText: document.querySelector('#timerbox span'),
       crosshair: $('crosshair'), vignette: $('vignette'), fader: $('fader'),
+      boomflash: $('boomflash'),
       dmgdir: $('dmgdir'),
       speedo: $('speedo'),
       speedoKmh: document.querySelector('#speedo .kmh'),
@@ -32,6 +33,7 @@ export class Hud {
     };
     this.shownMoney = 0;
     this.damageFlashT = 0;
+    this.boomFlashV = 0;
     this.zoneTimer = 0;
     this.vehTimer = 0;
     this.toastTimer = 0;
@@ -43,6 +45,10 @@ export class Hud {
 
   show() { this.el.hud.classList.remove('hidden'); this._tickBase = null; }
   hide() { this.el.hud.classList.add('hidden'); }
+
+  boomFlash(strength) {
+    this.boomFlashV = Math.max(this.boomFlashV, strength);
+  }
 
   update(dt, game) {
     const p = game.player;
@@ -100,14 +106,22 @@ export class Hud {
     }
     this.el.vignette.style.opacity = vig;
 
+    // explosion screen flash: instant on, fast decay
+    if (this.boomFlashV > 0.005) {
+      this.boomFlashV = Math.max(0, this.boomFlashV - dt * 4);
+      this.el.boomflash.style.opacity = this.boomFlashV;
+    } else if (this.el.boomflash.style.opacity !== '0') {
+      this.el.boomflash.style.opacity = 0;
+    }
+
     // speedometer while driving
     const veh = p.vehicle;
     if (veh) {
       this.el.speedo.classList.remove('hidden');
-      const kmh = Math.round(Math.abs(veh.speed) * 3.6);
-      if (kmh !== this._kmh) {
-        this._kmh = kmh;
-        this.el.speedoKmh.textContent = kmh;
+      const mph = Math.round(Math.abs(veh.speed) * 2.237);   // m/s → mph
+      if (mph !== this._kmh) {
+        this._kmh = mph;
+        this.el.speedoKmh.textContent = mph;
         this.el.speedoBar.style.width =
           `${clamp(Math.abs(veh.speed) / veh.spec.maxSpeed, 0, 1) * 100}%`;
       }
@@ -219,11 +233,43 @@ export class Hud {
     this._dmgT = worldAngle != null ? 0.75 : 0;
   }
 
-  setCrosshair(visible, hit = false, bloom = 0) {
+  setCrosshair(visible, hit = false, bloom = 0, { kill = false, ads = 0 } = {}) {
+    if (kill && !this._killCss) {
+      this._killCss = true;
+      const st = document.createElement('style');
+      st.textContent = '#crosshair.killmark span,#crosshair.killmark::before,#crosshair.killmark::after{background:#e33 !important;}' +
+        '#crosshair.killmark{filter:drop-shadow(0 0 3px rgba(230,40,40,.8));}';
+      document.head.appendChild(st);
+    }
     this.el.crosshair.style.display = visible ? 'block' : 'none';
-    this.el.crosshair.classList.toggle('hitmark', hit);
-    // bloom spreads the crosshair arms outward
-    if (visible) this.el.crosshair.style.transform = `translate(-50%,-50%) scale(${1 + bloom * 0.9})`;
+    this.el.crosshair.classList.toggle('hitmark', hit && !kill);
+    this.el.crosshair.classList.toggle('killmark', kill);
+    // bloom spreads the arms outward; aiming down sights tightens them
+    if (visible) {
+      const s = (1 + bloom * 0.9) * (1 - 0.45 * (ads || 0));
+      this.el.crosshair.style.transform = `translate(-50%,-50%) scale(${s})`;
+    }
+  }
+
+  // sniper-style scope vignette while a scoped weapon is fully aimed
+  setScope(on) {
+    if (!this._scope) {
+      if (!on) return;
+      const d = document.createElement('div');
+      d.id = 'scope';
+      d.style.cssText = 'position:fixed;inset:0;pointer-events:none;display:none;z-index:40;' +
+        'background:radial-gradient(circle at 50% 50%, transparent 26%, rgba(0,0,0,.97) 34%);';
+      const line = document.createElement('div');
+      line.style.cssText = 'position:absolute;left:50%;top:50%;width:56vmin;height:1px;' +
+        'background:rgba(0,0,0,.75);transform:translate(-50%,-50%);';
+      const lineV = document.createElement('div');
+      lineV.style.cssText = 'position:absolute;left:50%;top:50%;width:1px;height:56vmin;' +
+        'background:rgba(0,0,0,.75);transform:translate(-50%,-50%);';
+      d.append(line, lineV);
+      document.body.appendChild(d);
+      this._scope = d;
+    }
+    this._scope.style.display = on ? 'block' : 'none';
   }
 
   fade(toBlack, instant = false) {

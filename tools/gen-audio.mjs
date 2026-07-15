@@ -48,6 +48,26 @@ function post(pathname, body) {
   });
 }
 
+function get(pathname) {
+  return new Promise((resolve, reject) => {
+    const req = https.request('https://api.elevenlabs.io' + pathname, {
+      method: 'GET',
+      headers: { 'xi-api-key': KEY },
+      timeout: 60000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, body: buf.toString() });
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.end();
+  });
+}
+
 const manifest = { sfx: {}, voice: {}, music: {} };
 function manifestPath(kind, name) {
   return `assets/audio/${kind}/${name}.mp3`;
@@ -98,11 +118,20 @@ async function genMusic(name, prompt, lengthMs) {
 
 // ------------------------------------------------------------------ SFX list
 const SFX = [
-  // weapons
-  ['gun_pistol', 'single dry pistol gunshot, close, punchy, no reverb', 0.9],
-  ['gun_smg', 'submachine gun short burst, three rounds, rapid, mechanical', 1.0],
-  ['gun_shotgun', 'pump shotgun blast, deep boom with shell rack', 1.2],
-  ['gun_rifle', 'assault rifle single shot, sharp crack', 0.9],
+  // weapons — one distinct sound per gun, with a second take each so
+  // rapid fire rotates via playVar instead of sounding identical
+  // realistic, source-specific single shots — dry close-mic so each gun's own
+  // character reads (action snap, muzzle crack, low pressure, report tail)
+  ['gun_pistol', 'realistic 9mm handgun single gunshot, dry close mic, sharp slide snap and mid crack, tight report', 0.9, { influence: 0.6 }],
+  ['gun_pistol_2', 'realistic 9mm pistol shot, punchy crack with brass ejection ping, dry indoor', 0.9, { influence: 0.6 }],
+  ['gun_smg', 'realistic 9mm submachine gun three-round burst, fast tinny mechanical rattle, dry', 1.0, { influence: 0.6 }],
+  ['gun_smg_2', 'realistic compact smg rapid burst, tight metallic cyclic rounds, dry', 1.0, { influence: 0.6 }],
+  ['gun_shotgun', 'realistic 12 gauge pump shotgun blast, deep wide boom then pump-action shell rack', 1.2, { influence: 0.6 }],
+  ['gun_shotgun_2', 'realistic heavy 12 gauge shotgun single blast, thick low boom, big report', 1.1, { influence: 0.6 }],
+  ['gun_rifle', 'realistic 5.56 assault rifle single shot, sharp supersonic crack and snap, slap-back tail', 0.9, { influence: 0.6 }],
+  ['gun_rifle_2', 'realistic high-velocity rifle shot, cracking supersonic whip and metallic action', 0.9, { influence: 0.6 }],
+  ['gun_revolver', 'realistic 44 magnum revolver single gunshot, thunderous deep boom, huge report', 1.0, { influence: 0.6 }],
+  ['gun_revolver_2', 'realistic big-bore magnum revolver single shot, cannon-like low boom and echo', 1.0, { influence: 0.6 }],
   ['reload', 'gun magazine reload, clip out clip in, metallic click', 1.4],
   // melee / body
   ['punch', 'fist punch impact on body, dull thud', 0.5],
@@ -138,6 +167,7 @@ const SFX = [
 // Using two default ElevenLabs voices for variety.
 const VOICE_A = '21m00Tcm4TlvDq8ikWAM';   // female
 const VOICE_B = 'pNInz6obpgDQGcFmaJgB';   // male
+const VOICE_M = 'iglCbBShWrdr0JEW8MLx';   // Marco ("Marcus" voice)
 const BARKS = [
   // civilians — all clean
   ['bark_hey', 'Hey! Watch where you\'re going!', VOICE_B],
@@ -160,22 +190,83 @@ const BARKS = [
   // scanner
   ['scanner1', 'Dispatch, we have a ten thirty one in progress downtown.', VOICE_B],
   ['scanner2', 'All units, suspect is armed and dangerous, use caution.', VOICE_A],
+  // second takes so the same reaction doesn't always sound identical
+  // (audio.playVar rotates name / name_2 / name_3 automatically)
+  ['bark_hey_2', 'Watch it, pal!', VOICE_A],
+  ['bark_help_2', 'Call nine one one! Hurry!', VOICE_B],
+  ['bark_run_2', 'Gun! GUN! Get down!', VOICE_B],
+  ['bark_crazy_2', 'What is wrong with you?!', VOICE_A],
+  ['bark_mycar_2', 'Hey! Somebody stop him!', VOICE_A],
+  ['bark_photo_2', 'This is going online, buddy!', VOICE_B],
+  ['bark_moveit_2', 'Any day now, come on!', VOICE_A],
+  ['bark_nice_day_2', 'Some weather today, huh?', VOICE_B],
+  ['bark_lost_2', 'Is the marina this way? I always get turned around.', VOICE_B],
+  ['bark_backoff_2', 'I mean it, stay back!', VOICE_A],
+  ['cop_freeze_2', 'Police! Don\'t move!', VOICE_B],
+  ['shop_welcome_2', 'Looking for anything special today?', VOICE_A],
+  // new situations
+  ['bark_fight', 'You want to go? Let\'s go!', VOICE_B],
+  ['bark_fight_2', 'Get him!', VOICE_A],
+  ['bark_cops_coming', 'Cops! The cops are coming!', VOICE_A],
+  ['cop_backup', 'Shots fired, requesting backup now!', VOICE_B],
+  ['scream_f', 'Aaaah! No no no!', VOICE_A],
+  ['scream_m', 'Hey— aagh! Look out!', VOICE_B],
 ];
+
+// ------------------------------------------------------------------ Marco
+// One take per subtitle line, named marco_<trigger>, marco_<trigger>_2, …
+// (index-aligned with LINES so the audio says what the subtitle shows).
+async function genMarco() {
+  const { LINES } = await import('../src/core/voice.js');
+  console.log('\n[MARCO]');
+  for (const [trigger, lines] of Object.entries(LINES)) {
+    for (let i = 0; i < lines.length; i++) {
+      const name = i === 0 ? `marco_${trigger}` : `marco_${trigger}_${i + 1}`;
+      // strip typographic quotes/dashes the TTS reads awkwardly
+      const text = lines[i].replace(/…/g, '...').replace(/[’‘]/g, "'").replace(/—/g, ', ');
+      await genVoice(name, text, VOICE_M);
+    }
+  }
+}
 
 // ------------------------------------------------------------------ music
 const MUSIC = [
   ['radio_neon', 'upbeat retro synthwave instrumental, driving arpeggios, 80s, no vocals', 30000],
   ['radio_costa', 'sunny latin pop instrumental, congas and guitar, upbeat, no vocals', 30000],
   ['radio_slow', 'chill lofi hip hop instrumental, mellow keys and vinyl, no vocals', 30000],
+  ['radio_trap', 'hard trap instrumental, booming 808 bass, fast rolling hi-hats, half-time claps, dark rnb minor keys, no vocals, no profanity', 30000],
   ['menu_theme', 'moody cinematic crime drama theme, tense strings and bass, no vocals', 20000],
 ];
 
 // ------------------------------------------------------------------ run
 async function run() {
+  // sanity check the configured Marco voice without spending any quota
+  if (args.includes('--marco-check')) {
+    for (const id of [VOICE_M, VOICE_M.replace(/^ID/, '')]) {
+      const r = await get(`/v1/voices/${id}`);
+      let name = '';
+      try { name = JSON.parse(r.body).name ?? ''; } catch {}
+      console.log(`voice ${id}: HTTP ${r.status}${name ? ` (${name})` : ''}${r.status !== 200 ? ' ' + r.body.slice(0, 160) : ''}`);
+    }
+    const sub = await get('/v1/user/subscription');
+    try {
+      const s = JSON.parse(sub.body);
+      console.log(`quota: ${s.character_count}/${s.character_limit} chars used (${s.tier})`);
+    } catch { console.log('subscription check:', sub.status); }
+    return;
+  }
+  if (args.includes('--marco-only')) { await genMarco(); return finishManifest(); }
   if (want('--sfx')) { console.log('\n[SFX]'); for (const [n, t, d, o] of SFX) await genSound(n, t, d, o || {}); }
-  if (want('--voice')) { console.log('\n[VOICE]'); for (const [n, t, v] of BARKS) await genVoice(n, t, v); }
+  if (want('--voice')) {
+    console.log('\n[VOICE]');
+    for (const [n, t, v] of BARKS) await genVoice(n, t, v);
+    await genMarco();
+  }
   if (want('--music')) { console.log('\n[MUSIC]'); for (const [n, p, l] of MUSIC) await genMusic(n, p, l); }
+  finishManifest();
+}
 
+function finishManifest() {
   // merge into existing manifest if present
   const mfPath = path.join(OUT, 'manifest.json');
   let existing = {};
