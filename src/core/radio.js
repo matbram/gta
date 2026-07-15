@@ -67,6 +67,13 @@ export class Radio {
     return ['radio_neon', 'radio_costa', 'radio_slow', 'radio_trap'][i];
   }
 
+  // the ordered list of generated tracks for a station. Most stations have a
+  // single looping track; the trap station is a rotating playlist of songs.
+  tracksFor(i) {
+    if (STATIONS[i]?.id === 'trap') return ['radio_trap', 'radio_trap_2', 'radio_trap_3'];
+    return [this.trackFor(i)];
+  }
+
   cycle() {
     if (!this.audio.ctx) this.audio.init();
     if (!this.audio.ctx) return null;
@@ -76,22 +83,47 @@ export class Radio {
       this.stop();
       return 'RADIO OFF';
     }
-    // prefer the generated track for this station
-    const track = this.trackFor(this.station);
-    if (this.audio.buffers?.has(track)) {
+    // prefer the generated tracks for this station (needs the first decoded)
+    const list = this.tracksFor(this.station);
+    if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
-      this.startTrack(track);
+      this._beginPlaylist(list);
       return STATIONS[this.station].name;
     }
     this.start();
     return STATIONS[this.station].name;
   }
 
-  startTrack(track) {
+  // play a list of generated tracks. One track loops; multiple tracks rotate,
+  // each advancing to the next when it finishes (a real radio playlist).
+  _beginPlaylist(list) {
+    this._playlist = (list || []).filter((n) => this.audio.buffers?.has(n));
+    if (!this._playlist.length) { this.start(); return; }
+    this._playIdx = 0;
+    this._playNext();
+  }
+
+  _playNext() {
+    // bump the generation token FIRST so the outgoing node's onended (which
+    // fires when we stop it) can't advance the playlist a second time
+    const gen = this._trackGen = (this._trackGen || 0) + 1;
     if (this._trackNode) { try { this._trackNode.src.stop(); } catch {} this._trackNode = null; }
-    const node = this.audio.playBuffer(track, { gain: 0.0001, loop: true });
-    if (node) { node.gain.gain.setTargetAtTime(0.3, this.audio.now(), 0.4); this._trackNode = node; this.usingTrack = true; }
+    const list = this._playlist;
+    const single = list.length === 1;
+    const name = list[this._playIdx % list.length];
+    const node = this.audio.playBuffer(name, { gain: 0.0001, loop: single });
+    if (!node) { this.usingTrack = false; return; }
+    node.gain.gain.setTargetAtTime(0.3, this.audio.now(), 0.4);
+    this._trackNode = node;
+    this.usingTrack = true;
+    if (!single) {
+      node.src.onended = () => {
+        if (gen !== this._trackGen || !this.playing) return;   // stale / stopped
+        this._playIdx = (this._playIdx + 1) % list.length;
+        this._playNext();
+      };
+    }
   }
 
   stopSynth() {
@@ -99,21 +131,23 @@ export class Radio {
   }
 
   // resume the current station after re-entering a vehicle — prefers the
-  // generated track, else the synth sequencer
+  // generated tracks, else the synth sequencer
   resume() {
     if (this.station < 0) return;
-    const track = this.trackFor(this.station);
-    if (this.audio.buffers?.has(track)) {
+    const list = this.tracksFor(this.station);
+    if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
-      this.startTrack(track);
+      this._beginPlaylist(list);
     } else this.start();
   }
 
   start() {
     this.playing = true;
     this.usingTrack = false;
-    // starting the synth sequencer means any generated track must stop first
+    // starting the synth sequencer means any generated track must stop first;
+    // bump the token so a pending playlist onended can't restart a track
+    this._trackGen = (this._trackGen || 0) + 1;
     if (this._trackNode) { const n = this._trackNode; try { n.src.stop(); } catch {} this._trackNode = null; }
     this.nextStep = 0;
     this.stepTime = this.audio.ctx.currentTime + 0.1;
@@ -123,6 +157,7 @@ export class Radio {
 
   stop() {
     this.playing = false;
+    this._trackGen = (this._trackGen || 0) + 1;   // cancel any pending playlist advance
     if (this.bus && this.audio.ctx) {
       this.bus.gain.setTargetAtTime(0, this.audio.ctx.currentTime, 0.15);
     }

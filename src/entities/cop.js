@@ -9,7 +9,11 @@ const COP_LOOK = { uniform: 'cop', hat: 'cap', bottomStyle: 'slacks' };
 
 export class Cop extends Ped {
   constructor(city, scene, tough = false) {
-    super(city, scene, tough ? { ...COP_LOOK, body: 'heavy', female: false } : { ...COP_LOOK }, { health: tough ? 110 : 60 });
+    // decide gender up front so voice barks can be matched to it (tough riot
+    // units are male); a regular officer is female ~35% of the time
+    const female = tough ? false : Math.random() < 0.35;
+    super(city, scene, tough ? { ...COP_LOOK, body: 'heavy', female: false } : { ...COP_LOOK, female }, { health: tough ? 110 : 60 });
+    this.female = female;
     this.isCop = true;
     this.faction = 'cop';
     this.tough = tough;
@@ -24,6 +28,18 @@ export class Cop extends Ped {
   // cops don't scatter from gunfire — they engage
   panic(fromX, fromZ) {
     this.provoked = true;
+  }
+
+  // shout a police line in this officer's own (gendered) voice. audio.bark is
+  // globally throttled, so a crowd of cops won't talk over each other. Female
+  // officers fall back to the base take if their `_f` clip isn't loaded yet,
+  // so they're never silent before the gendered voices have been generated.
+  say(line) {
+    const audio = this.game?.audio;
+    if (!audio?.bark) return;
+    const gendered = line + (this.female ? '_f' : '');
+    const name = (this.female && !audio.buffers?.has(gendered)) ? line : gendered;
+    audio.bark(name, this.pos.x, this.pos.z);
   }
 
   update(dt, game) {
@@ -49,6 +65,8 @@ export class Cop extends Ped {
     // no heat: police NPC criminals, walk the beat, investigate reports
     if (game.wanted.state.stars === 0 && !this.provoked) {
       this.arrestT = 0;
+      // engagement is over — re-arm the one-shot voice lines
+      this._barkedArrest = this._barkedSpot = this._barkedBackup = false;
       if (this.npcTarget && this.pursueNpc(dt, game)) return;
       if (this.investigate) {
         const inv = this.investigate;
@@ -93,11 +111,13 @@ export class Cop extends Ped {
       this.speed = 0;
       this.heading = angleDamp(this.heading, Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z), 12, dt);
       this.rig.setAnim('aim');
+      if (!this._barkedArrest) { this._barkedArrest = true; this.say(Math.random() < 0.5 ? 'cop_freeze' : 'cop_stop'); }
       this.arrestT += dt;
       if (this.arrestT > 1.15) game.onBusted?.();
     } else if (canShoot && los && d < (this.tough ? 30 : 22) && d > 3.5) {
       // stop and shoot
       this.arrestT = 0;
+      this._barkedArrest = false;
       this.speed = 0;
       this.heading = angleDamp(this.heading, Math.atan2(player.pos.x - this.pos.x, player.pos.z - this.pos.z), 10, dt);
       this.rig.setAnim('aim');
@@ -107,10 +127,13 @@ export class Cop extends Ped {
       }
     } else {
       this.arrestT = 0;
+      this._barkedArrest = false;
       // chase what they KNOW: the player when someone can see them, the
       // last known position otherwise — then search the area on foot
       const known = game.wanted.playerSeen || (los && d < 45) || !game.wanted.lastKnown;
       if (known) {
+        // call the suspect out once when we actually have eyes on them
+        if (los && d < 45 && !this._barkedSpot) { this._barkedSpot = true; this.say('cop_suspect'); }
         this.moveToward(player.pos.x, player.pos.z, this.runSpeed, dt);
         this.rig.setAnim('run');
       } else {
@@ -278,6 +301,8 @@ export class Cop extends Ped {
       }
       return;
     }
+    // opening fire on the player: radio it in once per engagement
+    if (!this._barkedBackup) { this._barkedBackup = true; if (Math.random() < 0.6) this.say('cop_backup'); }
     // hit chance falls with distance and player speed
     const speedDodge = clamp((player.vehicle ? Math.abs(player.vehicle.speed) : player.speed2d) / 14, 0, 0.55);
     const chance = this.accuracy * clamp(1 - d / 34, 0.15, 1) * (1 - speedDodge);
