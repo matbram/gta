@@ -157,8 +157,10 @@ export class Player {
       this.dodgeT = 0.35;
       this.iframeT = 0.35;
     } else if (this.grounded && input.wasPressed('Space')) {
-      // gravity + jump (high enough to mantle a car roof)
-      this.vel.y = 6.2;
+      // gravity + jump: apex ~1.78m + the 0.45m mantle reach clears car
+      // roofs (sedan 1.42, police/sports/pickup) with real margin; lands
+      // at ~8 m/s, under the -13 fall-damage threshold
+      this.vel.y = 8.0;
       this.grounded = false;
     }
     if (this.dodgeT > 0) this.dodgeT -= dt;
