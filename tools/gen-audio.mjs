@@ -168,6 +168,8 @@ const SFX = [
 const VOICE_A = '21m00Tcm4TlvDq8ikWAM';   // female
 const VOICE_B = 'pNInz6obpgDQGcFmaJgB';   // male
 const VOICE_M = 'iglCbBShWrdr0JEW8MLx';   // Marco ("Marcus" voice)
+const VOICE_COP_M = 'ih8UQGlxBt2AX1LugTEs';   // male police officer
+const VOICE_COP_F = 'TkvtUYWkJCjRTiHTc41O';   // female police officer
 const BARKS = [
   // civilians — all clean
   ['bark_hey', 'Hey! Watch where you\'re going!', VOICE_B],
@@ -180,16 +182,20 @@ const BARKS = [
   ['bark_nice_day', 'Beautiful day out here in Bayvale.', VOICE_A],
   ['bark_lost', 'Excuse me, do you know the way downtown?', VOICE_A],
   ['bark_backoff', 'Back off, I\'m warning you!', VOICE_B],
-  // cop
-  ['cop_freeze', 'Freeze! Hands where I can see them!', VOICE_B],
-  ['cop_stop', 'Stop right there! You\'re under arrest!', VOICE_B],
-  ['cop_suspect', 'Suspect on foot, all units respond.', VOICE_B],
+  // cop — male officer voice, plus a female twin (name + _f) so each officer
+  // speaks in a voice matching their gender (cop.js picks the _f suffix)
+  ['cop_freeze', 'Freeze! Hands where I can see them!', VOICE_COP_M],
+  ['cop_stop', 'Stop right there! You\'re under arrest!', VOICE_COP_M],
+  ['cop_suspect', 'Suspect on foot, all units respond.', VOICE_COP_M],
+  ['cop_freeze_f', 'Freeze! Hands where I can see them!', VOICE_COP_F],
+  ['cop_stop_f', 'Stop right there! You\'re under arrest!', VOICE_COP_F],
+  ['cop_suspect_f', 'Suspect on foot, all units respond.', VOICE_COP_F],
   // shopkeeper
   ['shop_welcome', 'Welcome in, take a look around.', VOICE_A],
   ['shop_rob', 'Okay, okay, take the money, just don\'t hurt me!', VOICE_A],
-  // scanner
-  ['scanner1', 'Dispatch, we have a ten thirty one in progress downtown.', VOICE_B],
-  ['scanner2', 'All units, suspect is armed and dangerous, use caution.', VOICE_A],
+  // scanner / dispatch — male and female dispatchers
+  ['scanner1', 'Dispatch, we have a ten thirty one in progress downtown.', VOICE_COP_M],
+  ['scanner2', 'All units, suspect is armed and dangerous, use caution.', VOICE_COP_F],
   // second takes so the same reaction doesn't always sound identical
   // (audio.playVar rotates name / name_2 / name_3 automatically)
   ['bark_hey_2', 'Watch it, pal!', VOICE_A],
@@ -202,13 +208,15 @@ const BARKS = [
   ['bark_nice_day_2', 'Some weather today, huh?', VOICE_B],
   ['bark_lost_2', 'Is the marina this way? I always get turned around.', VOICE_B],
   ['bark_backoff_2', 'I mean it, stay back!', VOICE_A],
-  ['cop_freeze_2', 'Police! Don\'t move!', VOICE_B],
+  ['cop_freeze_2', 'Police! Don\'t move!', VOICE_COP_M],
+  ['cop_freeze_f_2', 'Police! Don\'t move!', VOICE_COP_F],
   ['shop_welcome_2', 'Looking for anything special today?', VOICE_A],
   // new situations
   ['bark_fight', 'You want to go? Let\'s go!', VOICE_B],
   ['bark_fight_2', 'Get him!', VOICE_A],
   ['bark_cops_coming', 'Cops! The cops are coming!', VOICE_A],
-  ['cop_backup', 'Shots fired, requesting backup now!', VOICE_B],
+  ['cop_backup', 'Shots fired, requesting backup now!', VOICE_COP_M],
+  ['cop_backup_f', 'Shots fired, requesting backup now!', VOICE_COP_F],
   ['scream_f', 'Aaaah! No no no!', VOICE_A],
   ['scream_m', 'Hey— aagh! Look out!', VOICE_B],
 ];
@@ -234,7 +242,12 @@ const MUSIC = [
   ['radio_neon', 'upbeat retro synthwave instrumental, driving arpeggios, 80s, no vocals', 30000],
   ['radio_costa', 'sunny latin pop instrumental, congas and guitar, upbeat, no vocals', 30000],
   ['radio_slow', 'chill lofi hip hop instrumental, mellow keys and vinyl, no vocals', 30000],
-  ['radio_trap', 'hard trap instrumental, booming 808 bass, fast rolling hi-hats, half-time claps, dark rnb minor keys, no vocals, no profanity', 30000],
+  // BLOCK HEAT 101.1 — a rotating playlist of hardcore trap-rap songs WITH
+  // vocals. Prompts demand clean, radio-edit lyrics; the tracks still need a
+  // human profanity spot-check before shipping (AI vocals are unpredictable).
+  ['radio_trap', 'hardcore trap rap song, confident aggressive male rapper flowing hard, booming 808 bass, fast rolling hi-hats, half-time claps, dark minor keys, clean lyrics, absolutely no profanity, radio edit', 90000],
+  ['radio_trap_2', 'menacing drill-influenced trap rap song, gritty male rap vocals, sliding 808 bass, sharp snares, ominous piano, clean lyrics, absolutely no profanity, radio edit', 90000],
+  ['radio_trap_3', 'melodic trap rnb rap song, autotuned male hook and rapped verses, lush booming 808s, dreamy synths, clean lyrics, absolutely no profanity, radio edit', 90000],
   ['menu_theme', 'moody cinematic crime drama theme, tense strings and bass, no vocals', 20000],
 ];
 
