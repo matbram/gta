@@ -430,6 +430,10 @@ export class CombatSystem {
       if (inv.inMag <= 0) { this.startReload(); return; }
       this.cooldown = spec.rate * 1.3;
       inv.inMag--;
+      // snap to first person for the drive-by; it restores after the last
+      // shot (the timer refreshes on every round)
+      game.cameraRig.driveByFP = true;
+      game.cameraRig._driveByFPT = 1.4;
       this.fireHitscan(spec, true);
       this.updateHud();
       return;

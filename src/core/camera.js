@@ -19,6 +19,8 @@ export class CameraRig {
     this.fovKick = 0;
     this.shakeAmp = 0;
     this.recoilPitch = 0;        // FP branch reads this before the damp/reset runs
+    this.driveByFP = false;      // temporary first-person during a drive-by
+    this._driveByFPT = 0;
     this.pos = new THREE.Vector3();
     this.look = new THREE.Vector3();
     this.smoothTarget = new THREE.Vector3();
@@ -60,9 +62,13 @@ export class CameraRig {
     const { driving = false, speed = 0, aimMode = false, ceilY = null } = opts;
     this.aim = aimMode;
 
-    // ---- first-person ----
-    if (this.firstPerson && !driving) {
-      const eyeH = 1.62;
+    // drive-by first-person is a brief forced view; it expires after the
+    // last shot and restores whatever camera the player was using
+    if (this._driveByFPT > 0) { this._driveByFPT -= dt; if (this._driveByFPT <= 0) this.driveByFP = false; }
+
+    // ---- first-person: on foot, or forced during a drive-by ----
+    if ((this.firstPerson && !driving) || (this.driveByFP && driving)) {
+      const eyeH = driving ? 1.15 : 1.62;
       const ex = target.x, ey = target.y + eyeH, ez = target.z;
       // look direction from yaw/pitch
       const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
