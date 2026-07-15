@@ -334,14 +334,17 @@ export class CombatSystem {
       this._swayX = (this._swayX ?? 0) + ((-mdx * 0.0009) - (this._swayX ?? 0)) * Math.min(1, dt * 10);
       this._swayY = (this._swayY ?? 0) + ((-mdy * 0.0009) - (this._swayY ?? 0)) * Math.min(1, dt * 10);
       this.vmGroup.rotation.set(this._swayY * (1 - this.adsK * 0.8), this._swayX * (1 - this.adsK * 0.8), 0);
+      // melee swing timer ticks in FP regardless of weapon; the forward
+      // sweep is `melee` below (0→1→0 over the swing)
+      if (fpFoot && this.vmMeleeT > 0) this.vmMeleeT -= dt;
+      const melee = this.vmMeleeT > 0 ? Math.sin(clamp(1 - this.vmMeleeT / 0.3, 0, 1) * Math.PI) : 0;
+      this._vmMelee = melee;
       // bare fists: the holder isn't a weapon so it doesn't get the weapon
       // block below — bob/melee-sweep it here so the fists still animate
       if (this.current === 'fists' && fpFoot && this._fistsHolder) {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
-        if (this.vmMeleeT > 0) this.vmMeleeT -= dt;
         const fbob = Math.sin(this.vmBob) * (player.speed2d > 0.4 ? 0.012 : 0.003);
-        const melee = this.vmMeleeT > 0 ? Math.sin(clamp(1 - this.vmMeleeT / 0.3, 0, 1) * Math.PI) : 0;
-        this._fistsHolder.position.set(0.05 + melee * 0.04, -0.30 + fbob, -0.62 - melee * 0.28);
+        this._fistsHolder.position.set(0.05 + melee * 0.05, -0.30 + fbob - melee * 0.05, -0.62 - melee * 0.30);
       }
       if (fpFoot && this.vmActive) {
         this.vmBob = (this.vmBob || 0) + dt * (player.speed2d > 0.4 ? 8 : 2);
@@ -370,11 +373,13 @@ export class CombatSystem {
           this.vmPumpT -= dt;
           dz = 0.1 * Math.sin(clamp(this.vmPumpT / 0.32, 0, 1) * Math.PI);
         }
+        // bat/weapon melee: lunge the viewmodel forward and swing it down
+        const mel = this._vmMelee || 0;
         this.vmActive.position.set(
-          bx + Math.cos(this.vmBob) * 0.004 * (1 - k),
-          by + bob - kick * 0.5 + dy + drawDip,
-          bz + kick * (0.8 - k * 0.4) + dz);
-        this.vmActive.rotation.set(rx - kick * k * 1.5, Math.PI, 0);
+          bx + Math.cos(this.vmBob) * 0.004 * (1 - k) - mel * 0.05,
+          by + bob - kick * 0.5 + dy + drawDip - mel * 0.06,
+          bz + kick * (0.8 - k * 0.4) + dz - mel * 0.34);
+        this.vmActive.rotation.set(rx - kick * k * 1.5 - mel * 1.1, Math.PI, mel * 0.5);
       }
     }
     if (this.reloading > 0) {
@@ -460,6 +465,8 @@ export class CombatSystem {
       else if (this.comboStep === 2 && this.current === 'fists' &&
                Math.random() < 0.5 && player.rig.kickGesture) player.rig.kickGesture();
       else player.rig.startPunch();
+      // first-person swing: the arms/weapon lunge forward on screen
+      this.vmMeleeT = 0.3;
 
       // small lunge toward the aim/lock direction
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
