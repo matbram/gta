@@ -28,7 +28,13 @@
     "amb_city_night": "assets/audio/sfx/amb_city_night.mp3",
     "amb_beach": "assets/audio/sfx/amb_beach.mp3",
     "amb_park": "assets/audio/sfx/amb_park.mp3",
-    "amb_club": "assets/audio/sfx/amb_club.mp3"
+    "amb_club": "assets/audio/sfx/amb_club.mp3",
+    "gun_pistol_2": "assets/audio/sfx/gun_pistol_2.mp3",
+    "gun_smg_2": "assets/audio/sfx/gun_smg_2.mp3",
+    "gun_shotgun_2": "assets/audio/sfx/gun_shotgun_2.mp3",
+    "gun_rifle_2": "assets/audio/sfx/gun_rifle_2.mp3",
+    "gun_revolver": "assets/audio/sfx/gun_revolver.mp3",
+    "gun_revolver_2": "assets/audio/sfx/gun_revolver_2.mp3"
   },
   "voice": {
     "bark_hey": "assets/audio/voice/bark_hey.mp3",

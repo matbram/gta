@@ -76,7 +76,7 @@ export class AudioEngine {
   }
 
   // play a decoded buffer with spatial gain + stereo pan from world position
-  playBuffer(name, { x, z, gain = 1, range = 90, rate = 1, loop = false } = {}) {
+  playBuffer(name, { x, z, gain = 1, range = 90, rate = 1, loop = false, offset = 0 } = {}) {
     if (!this.ctx) return null;
     const buf = this.buffers?.get(name);
     if (!buf) return null;
@@ -100,7 +100,7 @@ export class AudioEngine {
     } else { g.connect(this.master); }
     g.gain.value = spatial;
     src.connect(g);
-    src.start();
+    src.start(0, offset);
     return { src, gain: g };
   }
 
@@ -172,11 +172,11 @@ export class AudioEngine {
   //   crack — the muzzle blast: a filtered noise burst swept high→low
   //   boom  — the low-frequency pressure thump (a pitch-dropping tone)
   //   tail  — the report cracking back off the street a beat later
-  // Set preferGunClips=true to use recorded gun_<kind> clips instead when they
-  // exist; the live synth is the default so the guns always sound distinct.
+  // Prefer the recorded gun_<kind> clip when it's loaded (matching every other
+  // SFX); the live synth below is the fallback when no clip exists.
   gunshot(kind = 'pistol', x, z) {
     if (!this.ctx) return;
-    if (this.preferGunClips && this.buffers?.has('gun_' + kind)) {
+    if (this.buffers?.has('gun_' + kind)) {
       this.playVar('gun_' + kind, x !== undefined ? { x, z, gain: 0.9, range: 170 } : { gain: 0.9 });
       return;
     }

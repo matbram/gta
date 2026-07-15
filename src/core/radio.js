@@ -47,6 +47,8 @@ export class Radio {
     this.stepTime = 0;
     this.playing = false;
     this.bus = null;
+    this._epoch = {};            // per-station wall-clock start (s) — the "broadcast"
+    this._seekOffset = 0;        // one-shot mid-track offset consumed by _playNext
   }
 
   ensureBus() {
@@ -74,6 +76,26 @@ export class Radio {
     return [this.trackFor(i)];
   }
 
+  // wall-clock seconds — the station keeps "broadcasting" even while the audio
+  // context is suspended (menus), so use performance.now(), not the audio clock
+  _wallNow() {
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+  }
+
+  // where the current station's looping playlist would be *now*, measured from
+  // its epoch — returns the index into `list` and the in-track offset (seconds)
+  _seekInfo(list) {
+    const epoch = this._epoch[this.station];
+    const tracks = (list || []).filter((n) => this.audio.buffers?.has(n));
+    const durs = tracks.map((n) => this.audio.buffers.get(n).duration || 0);
+    const total = durs.reduce((a, b) => a + b, 0);
+    if (epoch === undefined || total <= 0) return { idx: 0, offset: 0 };
+    let pos = (((this._wallNow() - epoch) % total) + total) % total;
+    let idx = 0;
+    while (idx < durs.length - 1 && pos >= durs[idx]) { pos -= durs[idx]; idx++; }
+    return { idx, offset: pos };
+  }
+
   cycle() {
     if (!this.audio.ctx) this.audio.init();
     if (!this.audio.ctx) return null;
@@ -88,6 +110,7 @@ export class Radio {
     if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
+      this._epoch[this.station] = this._wallNow();   // fresh tune: broadcast starts now
       this._beginPlaylist(list);
       return STATIONS[this.station].name;
     }
@@ -97,10 +120,11 @@ export class Radio {
 
   // play a list of generated tracks. One track loops; multiple tracks rotate,
   // each advancing to the next when it finishes (a real radio playlist).
-  _beginPlaylist(list) {
+  _beginPlaylist(list, seek = null) {
     this._playlist = (list || []).filter((n) => this.audio.buffers?.has(n));
     if (!this._playlist.length) { this.start(); return; }
-    this._playIdx = 0;
+    this._playIdx = seek?.idx ?? 0;
+    this._seekOffset = seek?.offset ?? 0;   // consumed once by the first _playNext
     this._playNext();
   }
 
@@ -112,7 +136,9 @@ export class Radio {
     const list = this._playlist;
     const single = list.length === 1;
     const name = list[this._playIdx % list.length];
-    const node = this.audio.playBuffer(name, { gain: 0.0001, loop: single });
+    const offset = this._seekOffset || 0;   // resume mid-track (first track only)
+    this._seekOffset = 0;
+    const node = this.audio.playBuffer(name, { gain: 0.0001, loop: single, offset });
     if (!node) { this.usingTrack = false; return; }
     node.gain.gain.setTargetAtTime(0.3, this.audio.now(), 0.4);
     this._trackNode = node;
@@ -138,7 +164,10 @@ export class Radio {
     if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
-      this._beginPlaylist(list);
+      // the station kept broadcasting while we were out of the car — rejoin it
+      // wherever its wall-clock playhead is now, don't restart the track
+      if (this._epoch[this.station] === undefined) this._epoch[this.station] = this._wallNow();
+      this._beginPlaylist(list, this._seekInfo(list));
     } else this.start();
   }
 
