@@ -216,6 +216,26 @@ export class ParticleSystem {
       if (this._tracers.some((t) => t._done)) this._tracers = this._tracers.filter((t) => !t._done);
     }
 
+    // traveling bullet streaks: advance a short bright segment along the path
+    if (this._bullets && this._bullets.length) {
+      const TRAIL = 3.5;   // metres of visible streak behind the round
+      for (const b of this._bullets) {
+        b.travelled += b.speed * dt;
+        const head = Math.min(b.travelled, b.dist);
+        const tail = Math.max(0, b.travelled - TRAIL);
+        const pos = b.line.geometry.attributes.position.array;
+        pos[0] = b.x0 + b.dx * tail; pos[1] = b.y0 + b.dy * tail; pos[2] = b.z0 + b.dz * tail;
+        pos[3] = b.x0 + b.dx * head; pos[4] = b.y0 + b.dy * head; pos[5] = b.z0 + b.dz * head;
+        b.line.geometry.attributes.position.needsUpdate = true;
+        if (tail >= b.dist) {
+          b.line.visible = false;
+          this._bulletPool.push(b.line);
+          b._done = true;
+        }
+      }
+      if (this._bullets.some((b) => b._done)) this._bullets = this._bullets.filter((b) => !b._done);
+    }
+
     // shell physics
     if (this._shells) {
       const d = this._shellDummy;
@@ -326,6 +346,34 @@ export class ParticleSystem {
     line.material.opacity = 0.85;
     line.visible = true;
     this._tracers.push({ line, t: 0 });
+  }
+
+  // a visible traveling round: a short bright streak that crosses from the
+  // muzzle to the impact over a few frames. Cosmetic only — the hit is
+  // already registered by the hitscan; this just makes bullets readable.
+  bullet(x0, y0, z0, x1, y1, z1) {
+    if (!this._bullets) {
+      this._bulletPool = [];
+      this._bullets = [];
+      const mat = new THREE.LineBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+      for (let i = 0; i < 20; i++) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const line = new THREE.Line(geo, mat.clone());
+        line.frustumCulled = false;
+        line.visible = false;
+        this.game.scene.add(line);
+        this._bulletPool.push(line);
+      }
+    }
+    const line = this._bulletPool.pop();
+    if (!line) return;
+    let dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    const dist = Math.hypot(dx, dy, dz) || 1;
+    dx /= dist; dy /= dist; dz /= dist;
+    line.visible = true;
+    line.material.opacity = 1;
+    this._bullets.push({ line, x0, y0, z0, dx, dy, dz, dist, travelled: 0, speed: 800 });
   }
 
   // ejected brass shell (pooled instanced)

@@ -607,7 +607,8 @@ export class CombatSystem {
       const hit = this.raycastWorld(origin, d, spec.range);
       // tracer line from muzzle to impact (or max range)
       const end = hit ? hit.point : new THREE.Vector3(origin.x + d.x * spec.range, origin.y + d.y * spec.range, origin.z + d.z * spec.range);
-      game.particles?.tracer?.(mx, my, mz, end.x, end.y, end.z);
+      // a visible round travels muzzle→impact (hit already registered above)
+      game.particles?.bullet?.(mx, my, mz, end.x, end.y, end.z);
       if (!hit) continue;
       if (hit.type === 'static') {
         game.particles?.sparks(hit.point.x, hit.point.y, hit.point.z, 3);
