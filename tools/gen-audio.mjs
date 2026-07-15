@@ -120,16 +120,18 @@ async function genMusic(name, prompt, lengthMs) {
 const SFX = [
   // weapons — one distinct sound per gun, with a second take each so
   // rapid fire rotates via playVar instead of sounding identical
-  ['gun_pistol', 'single dry pistol gunshot, close, punchy, no reverb', 0.9],
-  ['gun_pistol_2', 'sharp 9mm pistol shot, tight crack, dry indoor', 0.9],
-  ['gun_smg', 'submachine gun short burst, three rounds, rapid, mechanical', 1.0],
-  ['gun_smg_2', 'compact smg rattling burst, fast tinny rounds', 1.0],
-  ['gun_shotgun', 'pump shotgun blast, deep boom with shell rack', 1.2],
-  ['gun_shotgun_2', 'heavy 12 gauge shotgun blast, thick low boom', 1.1],
-  ['gun_rifle', 'assault rifle single shot, sharp crack', 0.9],
-  ['gun_rifle_2', 'high-velocity rifle shot, cracking supersonic snap', 0.9],
-  ['gun_revolver', 'heavy revolver magnum gunshot, loud deep boom, single', 1.0],
-  ['gun_revolver_2', 'big bore magnum revolver, thunderous single shot', 1.0],
+  // realistic, source-specific single shots — dry close-mic so each gun's own
+  // character reads (action snap, muzzle crack, low pressure, report tail)
+  ['gun_pistol', 'realistic 9mm handgun single gunshot, dry close mic, sharp slide snap and mid crack, tight report', 0.9, { influence: 0.6 }],
+  ['gun_pistol_2', 'realistic 9mm pistol shot, punchy crack with brass ejection ping, dry indoor', 0.9, { influence: 0.6 }],
+  ['gun_smg', 'realistic 9mm submachine gun three-round burst, fast tinny mechanical rattle, dry', 1.0, { influence: 0.6 }],
+  ['gun_smg_2', 'realistic compact smg rapid burst, tight metallic cyclic rounds, dry', 1.0, { influence: 0.6 }],
+  ['gun_shotgun', 'realistic 12 gauge pump shotgun blast, deep wide boom then pump-action shell rack', 1.2, { influence: 0.6 }],
+  ['gun_shotgun_2', 'realistic heavy 12 gauge shotgun single blast, thick low boom, big report', 1.1, { influence: 0.6 }],
+  ['gun_rifle', 'realistic 5.56 assault rifle single shot, sharp supersonic crack and snap, slap-back tail', 0.9, { influence: 0.6 }],
+  ['gun_rifle_2', 'realistic high-velocity rifle shot, cracking supersonic whip and metallic action', 0.9, { influence: 0.6 }],
+  ['gun_revolver', 'realistic 44 magnum revolver single gunshot, thunderous deep boom, huge report', 1.0, { influence: 0.6 }],
+  ['gun_revolver_2', 'realistic big-bore magnum revolver single shot, cannon-like low boom and echo', 1.0, { influence: 0.6 }],
   ['reload', 'gun magazine reload, clip out clip in, metallic click', 1.4],
   // melee / body
   ['punch', 'fist punch impact on body, dull thud', 0.5],
@@ -232,6 +234,7 @@ const MUSIC = [
   ['radio_neon', 'upbeat retro synthwave instrumental, driving arpeggios, 80s, no vocals', 30000],
   ['radio_costa', 'sunny latin pop instrumental, congas and guitar, upbeat, no vocals', 30000],
   ['radio_slow', 'chill lofi hip hop instrumental, mellow keys and vinyl, no vocals', 30000],
+  ['radio_trap', 'hard trap instrumental, booming 808 bass, fast rolling hi-hats, half-time claps, dark rnb minor keys, no vocals, no profanity', 30000],
   ['menu_theme', 'moody cinematic crime drama theme, tense strings and bass, no vocals', 20000],
 ];
 

@@ -25,6 +25,16 @@ const STATIONS = [
     root: 41,
     style: 'lofi',
   },
+  {
+    // hard trap / R&B: booming 808s, half-time claps, rolling hats, dark keys.
+    // 140 bpm read as half-time. Instrumental, so it stays profanity-free.
+    id: 'trap', name: 'BLOCK HEAT 101.1', bpm: 140, swing: 0,
+    // dark minor 7th voicings for the R&B lushness: i - VI - VII - i
+    chords: [[57, 60, 64, 67], [53, 56, 60, 63], [55, 58, 62, 65], [57, 60, 64, 67]],
+    scale: [0, 3, 5, 6, 7, 10],   // minor pentatonic + the b5 "blue" note
+    root: 33,                     // low A for the sub-bass 808
+    style: 'trap',
+  },
 ];
 
 const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -54,7 +64,7 @@ export class Radio {
 
   // named track per station when generated music is available
   trackFor(i) {
-    return ['radio_neon', 'radio_costa', 'radio_slow'][i];
+    return ['radio_neon', 'radio_costa', 'radio_slow', 'radio_trap'][i];
   }
 
   cycle() {
@@ -178,6 +188,27 @@ export class Radio {
   shaker(when) {
     this.noise(when, 0.05, 0.07, 'highpass', 9000);
   }
+  // trap 808: a sub-bass sine with a fast pitch drop on the attack (the
+  // signature 808 "pluck") and a long booming decay — doubles as kick + bass
+  sub808(when, freq, dur) {
+    const ctx = this.audio.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(freq * 1.8, when);
+    o.frequency.exponentialRampToValueAtTime(freq, when + 0.035);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.72, when + 0.008);
+    g.gain.setTargetAtTime(0.0001, when + dur * 0.45, dur * 0.3);
+    o.connect(g); g.connect(this.bus);
+    o.start(when); o.stop(when + dur + 0.3);
+  }
+  // layered hand-clap: a few tight noise bursts stacked, then a short room tail
+  clap(when) {
+    const offs = [0, 0.011, 0.023];
+    for (const o of offs) this.noise(when + o, 0.028, 0.14, 'bandpass', 1700, 0.7);
+    this.noise(when + 0.03, 0.16, 0.12, 'bandpass', 1500, 0.5);
+  }
 
   // ---------------- sequencing ----------------
   update() {
@@ -235,6 +266,37 @@ export class Radio {
         if (Math.random() < 0.22 && step16 % 2 === 1) {
           const deg = st.scale[Math.floor(Math.random() * st.scale.length)];
           this.osc('triangle', midiHz(st.root + 12 + deg), t, stepDur * 1.5, 0.07);
+        }
+      } else if (st.style === 'trap') {
+        const stepDur2 = 60 / st.bpm / 4;
+        // 808 sub-bass on a syncopated half-time pattern, gliding to the root
+        if ([0, 3, 6, 8, 11, 14].includes(step16)) {
+          let n = chord[0] - 24;                 // two octaves down = sub
+          if (step16 === 6) n += 7;              // slide to the 5th
+          else if (step16 === 11) n += 3;        // minor 3rd
+          this.sub808(t, midiHz(n), stepDur2 * (step16 === 8 ? 3.4 : 2.6));
+        }
+        // punchy kick reinforcing the 808 downbeats
+        if (step16 % 8 === 0) this.kick(t);
+        // half-time clap on beat 3
+        if (step16 === 8) this.clap(t);
+        // rolling hats: steady 16ths, open on the & of 2, plus 1/32 + triplet rolls
+        this.hat(t, step16 === 6);
+        if (step16 % 4 === 2 && Math.random() < 0.55) {
+          this.hat(t + stepDur2 / 2, false);
+        }
+        if ((step16 === 7 || step16 === 15) && Math.random() < 0.5) {
+          const n = 3 + ((Math.random() * 3) | 0);   // 3–5 hat roll
+          for (let k = 1; k < n; k++) this.hat(t + (stepDur2 * k) / n, false);
+        }
+        // lush R&B pad holds the chord across the bar
+        if (step16 === 0) {
+          for (const nn of chord) this.osc('triangle', midiHz(nn), t, stepDur2 * 16, 0.04, { attack: 0.5, sustain: 0.9, lp: 2000 });
+        }
+        // dark bell/pluck lead picks minor-pentatonic notes, sparse
+        if (step16 % 2 === 0 && Math.random() < 0.28) {
+          const deg = st.scale[Math.floor(Math.random() * st.scale.length)];
+          this.osc('square', midiHz(st.root + 24 + deg), t, stepDur2 * 3, 0.05, { lp: 2600 });
         }
       } else {
         // lofi
