@@ -24,9 +24,9 @@ inputs are listed below.
 - Character voice lines, radio music and most sound effects were **generated**
   for this project with the ElevenLabs API (`tools/gen-audio.mjs`) and are
   original to Bayvale.
-- The **pistol gunshots** (`assets/audio/sfx/gun_pistol.mp3` and
-  `gun_pistol_2.mp3`) are third-party **royalty-free** clips; their license
-  requires no attribution.
+- The **pistol gunshots** (`assets/audio/sfx/gun_pistol.mp3`, `gun_pistol_2.mp3`)
+  and the **car-start sound** (`engine_start.mp3`) are third-party **royalty-free**
+  clips; their license requires no attribution.
 
 ## Libraries
 

@@ -400,6 +400,17 @@ export class AudioEngine {
   // ---------------- engine loop (player vehicle) ----------------
   startEngine() {
     if (!this.ctx) return;
+    // one-shot ignition on a fresh start — a short crank/rev that hands off to
+    // the idle loop; faded so only the "shortened" head of the clip is heard
+    if (this.buffers?.has('engine_start') && !this.engineSample) {
+      const s = this.playBuffer('engine_start', { gain: 0.5 });
+      if (s) {
+        const t = this.now();
+        s.gain.gain.setValueAtTime(0.5, t);
+        s.gain.gain.setTargetAtTime(0.0001, t + 1.6, 0.22);
+        try { s.src.stop(t + 2.4); } catch {}
+      }
+    }
     // sample-based engine: loop the idle clip and pitch-bend it by RPM
     if (this.buffers?.has('engine_idle') && !this.engineSample) {
       const node = this.playBuffer('engine_idle', { gain: 0.0001, loop: true });

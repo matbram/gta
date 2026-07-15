@@ -47,7 +47,6 @@ export class Radio {
     this.stepTime = 0;
     this.playing = false;
     this.bus = null;
-    this._epoch = {};            // per-station wall-clock start (s) — the "broadcast"
     this._seekOffset = 0;        // one-shot mid-track offset consumed by _playNext
   }
 
@@ -82,15 +81,15 @@ export class Radio {
     return (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   }
 
-  // where the current station's looping playlist would be *now*, measured from
-  // its epoch — returns the index into `list` and the in-track offset (seconds)
+  // where the station's continuous broadcast is *now* — a shared wall clock
+  // (page-load origin) mod the playlist length, so every station is always
+  // "playing" regardless of when we tune in. Returns index + in-track offset.
   _seekInfo(list) {
-    const epoch = this._epoch[this.station];
     const tracks = (list || []).filter((n) => this.audio.buffers?.has(n));
     const durs = tracks.map((n) => this.audio.buffers.get(n).duration || 0);
     const total = durs.reduce((a, b) => a + b, 0);
-    if (epoch === undefined || total <= 0) return { idx: 0, offset: 0 };
-    let pos = (((this._wallNow() - epoch) % total) + total) % total;
+    if (total <= 0) return { idx: 0, offset: 0 };
+    let pos = this._wallNow() % total;
     let idx = 0;
     while (idx < durs.length - 1 && pos >= durs[idx]) { pos -= durs[idx]; idx++; }
     return { idx, offset: pos };
@@ -110,8 +109,8 @@ export class Radio {
     if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
-      this._epoch[this.station] = this._wallNow();   // fresh tune: broadcast starts now
-      this._beginPlaylist(list);
+      // join the station's continuous broadcast at its current position
+      this._beginPlaylist(list, this._seekInfo(list));
       return STATIONS[this.station].name;
     }
     this.start();
@@ -164,9 +163,7 @@ export class Radio {
     if (this.audio.buffers?.has(list[0])) {
       this.playing = true;
       this.stopSynth();
-      // the station kept broadcasting while we were out of the car — rejoin it
-      // wherever its wall-clock playhead is now, don't restart the track
-      if (this._epoch[this.station] === undefined) this._epoch[this.station] = this._wallNow();
+      // rejoin the station's continuous broadcast at its current position
       this._beginPlaylist(list, this._seekInfo(list));
     } else this.start();
   }

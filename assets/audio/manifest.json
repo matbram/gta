@@ -14,6 +14,7 @@
     "skid": "assets/audio/sfx/skid.mp3",
     "engine_idle": "assets/audio/sfx/engine_idle.mp3",
     "engine_rev": "assets/audio/sfx/engine_rev.mp3",
+    "engine_start": "assets/audio/sfx/engine_start.mp3",
     "explosion": "assets/audio/sfx/explosion.mp3",
     "siren": "assets/audio/sfx/siren.mp3",
     "splash": "assets/audio/sfx/splash.mp3",
