@@ -171,6 +171,10 @@ export class AudioEngine {
         this.burst({ dur: 0.18, gain: 0.6 * g, filterFrom: 3800, filterTo: 400 });
         this.tone({ freq: 140, freqTo: 55, dur: 0.14, gain: 0.32 * g, type: 'square' });
         break;
+      case 'revolver':
+        this.burst({ dur: 0.22, gain: 0.72 * g, filterFrom: 2200, filterTo: 150 });
+        this.tone({ freq: 110, freqTo: 45, dur: 0.18, gain: 0.42 * g, type: 'sawtooth' });
+        break;
     }
   }
 

@@ -25,7 +25,7 @@ export const WEAPONS = {
   rifle:   { name: 'LONGHORN', icon: '🔫', dmg: 32, rate: 0.11, range: 90, spread: 0.02, mag: 30, auto: true,  sfx: 'rifle', price: 2500,
     animSet: { aim: 'aimRifle', carry: 'carryLong', kick: 0.9, reload: 'mag', reloadTime: 1.7,
       vm: [0.24, -0.23, -0.5], ads: [0, -0.165, -0.38], scope: true } },
-  revolver: { name: 'JUDGE',   icon: '🔫', dmg: 60, rate: 0.75, range: 70, spread: 0.006, mag: 6, auto: false, sfx: 'pistol', price: 1600,
+  revolver: { name: 'JUDGE',   icon: '🔫', dmg: 60, rate: 0.75, range: 70, spread: 0.006, mag: 6, auto: false, sfx: 'revolver', price: 1600,
     animSet: { aim: 'aimPistol', carry: 'carryPistol', kick: 1.3, reload: 'pistol', reloadTime: 2.0,
       vm: [0.28, -0.26, -0.55], ads: [0, -0.175, -0.42] } },
   grenade: { name: 'PINEAPPLE', icon: '💣', thrown: true, rate: 0.9, price: 900,
@@ -586,9 +586,9 @@ export class CombatSystem {
     game.audio?.gunshot(spec.sfx);
     game.wanted?.crime('gunfire', player.pos.x, player.pos.z);
     game.peds?.senseEvent?.(player.pos.x, player.pos.z, 'gunshot');
-    game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : 0.12);
+    game.cameraRig.addShake(spec.sfx === 'shotgun' ? 0.35 : spec.sfx === 'revolver' ? 0.2 : 0.12);
     // recoil kick (stronger for big guns) + crosshair bloom
-    const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'rifle' ? 0.05 : 0.035;
+    const kick = spec.sfx === 'shotgun' ? 0.09 : spec.sfx === 'revolver' ? 0.07 : spec.sfx === 'rifle' ? 0.05 : 0.035;
     game.cameraRig.addRecoil(kick);
     this.bloom = Math.min(1, (this.bloom || 0) + (spec.spread * 8 + 0.2));
     // ejected shell casing

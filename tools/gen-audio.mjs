@@ -118,11 +118,18 @@ async function genMusic(name, prompt, lengthMs) {
 
 // ------------------------------------------------------------------ SFX list
 const SFX = [
-  // weapons
+  // weapons — one distinct sound per gun, with a second take each so
+  // rapid fire rotates via playVar instead of sounding identical
   ['gun_pistol', 'single dry pistol gunshot, close, punchy, no reverb', 0.9],
+  ['gun_pistol_2', 'sharp 9mm pistol shot, tight crack, dry indoor', 0.9],
   ['gun_smg', 'submachine gun short burst, three rounds, rapid, mechanical', 1.0],
+  ['gun_smg_2', 'compact smg rattling burst, fast tinny rounds', 1.0],
   ['gun_shotgun', 'pump shotgun blast, deep boom with shell rack', 1.2],
+  ['gun_shotgun_2', 'heavy 12 gauge shotgun blast, thick low boom', 1.1],
   ['gun_rifle', 'assault rifle single shot, sharp crack', 0.9],
+  ['gun_rifle_2', 'high-velocity rifle shot, cracking supersonic snap', 0.9],
+  ['gun_revolver', 'heavy revolver magnum gunshot, loud deep boom, single', 1.0],
+  ['gun_revolver_2', 'big bore magnum revolver, thunderous single shot', 1.0],
   ['reload', 'gun magazine reload, clip out clip in, metallic click', 1.4],
   // melee / body
   ['punch', 'fist punch impact on body, dull thud', 0.5],
