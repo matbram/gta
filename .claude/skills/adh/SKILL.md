@@ -9,7 +9,7 @@ Use ADH after meaningful work, research, a milestone, an architectural decision,
 
 ## Capture one meaningful turn
 
-Send one JSON object to the committed helper. The `continuity` object is required. Add zero to five `research` dossiers and zero to eight reviewable `suggestions`. This single request is transactional: ADH either saves the entire capture or none of it.
+Send one JSON object to the committed helper. The `continuity` object is required. Add zero to five `research` dossiers and zero to eight reviewable `suggestions`. The helper validates and fsyncs the bounded payload to private Git state without making a model-issued network request. The next ADH lifecycle hook delivers it transactionally: ADH either saves the entire capture or none of it.
 
 ```bash
 cat <<'JSON' | bash .claude/skills/adh/scripts/capture.sh
@@ -28,11 +28,11 @@ Research is not limited to web browsing. A codebase audit, debugging investigati
 
 Run the durable-lifetime test for every memory suggestion: would this still be useful after the current task ends and a later handoff replaces this one? A stable project constraint, decision rationale, root cause/prevention rule, unresolved risk, or continuing next action may appear in both the working handoff and reviewable memory because the memory must outlive this handoff. Do not suggest routine test output, temporary progress, feature inventories, speculative backlog, raw logs, or one-off commit chatter.
 
-The `assessment` is required for connector version 5. It must agree with the payload: `research_performed: true` requires at least one dossier, and `durable_memory_found: true` requires at least one suggestion. Explain a deliberate zero instead of silently returning empty arrays. Research remains evidence; it does not silently become a project decision. After a successful JSON receipt, finish the response without mentioning this internal capture.
+The `assessment` is required for connector version 5 and newer. It must agree with the payload: `research_performed: true` requires at least one dossier, and `durable_memory_found: true` requires at least one suggestion. Explain a deliberate zero instead of silently returning empty arrays. Research remains evidence; it does not silently become a project decision. Connector version 6 returns `queued: true` with durability `fsynced_local_outbox`; that is a local handoff to the lifecycle hook, not yet a Postgres receipt. Do not add a Bash permission rule, call the API directly, or retry the queued payload. Finish the response normally so the next Stop hook can deliver it, without mentioning this internal capture.
 
 ## Preserve focused subagent research
 
-When the SubagentStop coordinator asks this focused agent to archive findings, do not submit the main continuity handoff. Submit one focused dossier through the committed helper, using the exact `ADH_AGENT_ID` supplied by the coordinator:
+When the SubagentStop coordinator asks this focused agent to archive findings, do not submit the main continuity handoff. Queue one focused dossier through the committed helper, using the exact `ADH_AGENT_ID` supplied by the coordinator. The following SubagentStop hook performs the fixed-destination network delivery:
 
 ```bash
 cat <<'JSON' | ADH_AGENT_ID='REPLACE_AGENT_ID' bash .claude/skills/adh/scripts/research.sh
@@ -40,11 +40,11 @@ cat <<'JSON' | ADH_AGENT_ID='REPLACE_AGENT_ID' bash .claude/skills/adh/scripts/r
 JSON
 ```
 
-If the subagent only performed routine work and has no reusable evidence, do not invent a dossier; finish normally after making that judgment.
+If the subagent only performed routine work and has no reusable evidence, do not invent a dossier; finish normally after making that judgment. If the helper reports `queued: true`, do not request permission, make a direct POST, or retry it.
 
 ## Legacy individual endpoints
 
-Connector version 5 uses the accountable atomic capture above. The individual endpoints below remain available only for older connector copies, focused subagent research, and deliberate repair. Include only fields known from the conversation; omit or use empty arrays for unknowns.
+Connector version 5 and newer use the accountable atomic capture above. Connector version 6 must use the local outbox helpers instead of the individual network examples below. The individual endpoints remain available only for older connector copies and deliberate operator repair outside Claude Web auto mode. Include only fields known from the conversation; omit or use empty arrays for unknowns.
 
 ```bash
 session_id="${CLAUDE_CODE_REMOTE_SESSION_ID:-}"
@@ -88,7 +88,7 @@ Before reporting a meaningful code change complete, run the committed verifier f
 bash .claude/skills/adh/scripts/verify.sh
 ```
 
-This downloads the version-matched ADH CLI from Railway, loads the project's current test settings from the dashboard, runs the configured setup and bounded test, uploads evidence to Supabase, and publishes the advisory commit status through ADH. It does not use GitHub Actions minutes. If verification cannot run or fails, report that honestly and do not describe the current commit as tested.
+The SessionStart lifecycle hook caches the version-matched ADH CLI in private Git state. This helper runs that cached CLI, loads the project's current test settings from the dashboard, runs the configured setup and bounded test, uploads evidence to Supabase, and publishes the advisory commit status through ADH. It does not use GitHub Actions minutes. If verification cannot run or fails, report that honestly and do not describe the current commit as tested. Do not add a broad Bash permission rule; a missing cache means the lifecycle hook did not finish priming this session.
 
 Save a checkpoint:
 
