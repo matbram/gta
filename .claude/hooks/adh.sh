@@ -15,6 +15,13 @@ fi
 
 root="${CLAUDE_PROJECT_DIR:-$PWD}"
 config_path="$root/.adh/config.json"
+outbox_helper="$root/.claude/hooks/adh_outbox.py"
+if [ -f "$outbox_helper" ]; then
+  if [ "$event" = "session-start" ]; then
+    python3 "$outbox_helper" prime-cli >/dev/null 2>&1 || true
+  fi
+  python3 "$outbox_helper" drain "$event" >/dev/null 2>&1 || true
+fi
 repository="$(python3 - "$config_path" <<'PY' 2>/dev/null || true
 import json, sys
 try:
