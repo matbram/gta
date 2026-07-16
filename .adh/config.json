@@ -1,7 +1,7 @@
 {
   "capture_assistant_messages": true,
   "capture_prompts": false,
-  "connector_version": 5,
+  "connector_version": 6,
   "max_brief_chars": 8000,
   "max_event_bytes": 65536,
   "mode": "cloud_advisory",
