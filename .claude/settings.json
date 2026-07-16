@@ -9,7 +9,7 @@
               "post-compact"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ],
@@ -25,7 +25,7 @@
               "pre-compact"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ],
@@ -41,7 +41,7 @@
               "session-end"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ]
@@ -56,7 +56,7 @@
               "session-start"
             ],
             "command": "bash",
-            "timeout": 5,
+            "timeout": 15,
             "type": "command"
           }
         ],
@@ -72,7 +72,7 @@
               "stop"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ]
@@ -87,7 +87,7 @@
               "stop-failure"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ]
@@ -102,7 +102,7 @@
               "subagent-stop"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ]
@@ -117,7 +117,7 @@
               "user-prompt-submit"
             ],
             "command": "bash",
-            "timeout": 4,
+            "timeout": 8,
             "type": "command"
           }
         ]
